@@ -708,6 +708,7 @@
         [%request %block %by-height height]~
       ::
       ++  do-mine
+        ~>  bout.[0 %mine]
         ^-  [(list effect:dk) kernel-state:dk]
         ?>  ?=([%mine *] command)
         ?:  =(*(z-set lock:t) pubkeys.m.k)
@@ -790,6 +791,7 @@
         `k
       ::
       ++  do-timer
+        ~&  =<(%do-mine do-mine)
         ::TODO post-dumbnet: only rerequest transactions a max of once/twice (maybe an admin param)
         ^-  [(list effect:dk) kernel-state:dk]
         ?>  ?=([%timer *] command)
