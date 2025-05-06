@@ -2,7 +2,7 @@
 export RUST_BACKTRACE := full
 export RUST_LOG := info,nockchain=debug,nockchain_libp2p_io=info,libp2p=info,libp2p_quic=info
 export MINIMAL_LOG_FORMAT := true
-export MINING_PUBKEY := EHmKL2U3vXfS5GYAY5aVnGdukfDWwvkQPCZXnjvZVShsSQi3UAuA4tQQpVwGJMzc9FfpTY8pLDkqhBGfWutiF4prrCktUH9oAWJxkXQBzAavKDc95NR3DjmYwnnw8GuugnK
+export MINING_PUBKEY := Wgyz1DUPugDZ4KuDjLVTHvLvXV7HkMqZW6KbH8DXcR5brq4kE5QJCQkyTk8RaJCxovspEU9313Ph23ocpqn8qiD
 
 
 .PHONY: build
@@ -72,8 +72,16 @@ nuke-hoonc-data:
 nuke-assets:
 	rm -f assets/*.jam
 
-.PHONY: build-hoon-all
-build-hoon-all: nuke-assets update-hoonc ensure-dirs build-trivial $(HOON_TARGETS)
+.PHONY: nuke-testnet
+nuke-testnet:
+	rm -rf test-*
+
+.PHONY: build-hoon-fresh
+build-hoon-fresh: nuke-assets nuke-choo-data install-choo ensure-dirs build-trivial $(HOON_TARGETS)
+	$(call show_env_vars)
+
+.PHONY: build-hoon-new
+build-hoon-all: ensure-dirs update-choo build-trivial $(HOON_TARGETS)
 	$(call show_env_vars)
 
 .PHONY: build-hoon
