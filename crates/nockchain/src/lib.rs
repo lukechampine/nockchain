@@ -588,13 +588,14 @@ pub async fn init_with_kernel(
         .await;
 
     // set up miner
+    println!("adding MINER");
     let mut miner_slab = NounSlab::new();
     let miner_noun = T(
         &mut miner_slab,
         &[
             D(tas!(b"command")),
             D(tas!(b"mine")),
-            D(1),
+            D(2),
             D(2),
             D(3),
             D(4),
