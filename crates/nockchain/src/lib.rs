@@ -587,6 +587,26 @@ pub async fn init_with_kernel(
         .add_io_driver(nockapp::timer_driver(CHAIN_INTERVAL_SECS, timer_slab))
         .await;
 
+    // set up miner
+    let mut miner_slab = NounSlab::new();
+    let miner_noun = T(
+        &mut miner_slab,
+        &[
+            D(tas!(b"command")),
+            D(tas!(b"mine")),
+            D(1),
+            D(2),
+            D(3),
+            D(4),
+            D(5),
+        ],
+    );
+    miner_slab.set_root(miner_noun);
+
+    nockapp
+        .add_io_driver(nockapp::timer_driver(20, miner_slab))
+        .await;
+
     Ok(nockapp)
 }
 
