@@ -10,7 +10,10 @@ use nockvm::jets::nock::util::mook;
 use nockvm::mem::NockStack;
 use nockvm::mug::met3_usize;
 use nockvm::noun::{Atom, Cell, DirectAtom, IndirectAtom, Noun, Slots, D, T};
-use nockvm::trace::{path_to_cord, write_serf_trace_safe, TraceInfo};
+use nockvm::trace::{
+    path_to_cord, write_serf_trace_safe, FileBackend, IntervalFilter, KeywordFilter, TraceBackend,
+    TraceFilter, TraceInfo, TracingBackend,
+};
 use nockvm_macros::tas;
 use std::any::Any;
 use std::fs::File;
@@ -20,6 +23,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, error, info, warn};
 
+use crate::kernel::boot::{TraceMode, TraceOpts};
 use crate::kernel::checkpoint::{Checkpoint, ExportedState, JamPaths, JammedCheckpoint};
 use crate::nockapp::wire::{wire_to_noun, WireRepr};
 use crate::noun::slam;
@@ -96,7 +100,7 @@ impl SerfThread {
         jam_paths: Arc<JamPaths>,
         kernel_bytes: Vec<u8>,
         constant_hot_state: Vec<HotEntry>,
-        trace: bool,
+        trace_info: Option<TraceInfo>,
     ) -> Result<Self> {
         let jam_paths_cloned = jam_paths.clone();
         let (action_sender, action_receiver) = mpsc::channel(1);
@@ -138,7 +142,9 @@ impl SerfThread {
                 buffer_toggle_sender
                     .send(buffer_toggle.clone())
                     .expect("Could not send buffer toggle out of serf thread");
-                let serf = Serf::new(stack, checkpoint, &kernel_bytes, &constant_hot_state, trace);
+                let serf = Serf::new(
+                    stack, checkpoint, &kernel_bytes, &constant_hot_state, trace_info,
+                );
                 event_number_sender
                     .send(serf.event_num.clone())
                     .expect("Could not send event number out of serf thread");
@@ -523,14 +529,71 @@ impl Kernel {
         jam_paths: JamPaths,
         kernel: &[u8],
         hot_state: &[HotEntry],
-        trace: bool,
+        trace_opts: TraceOpts,
+    ) -> Result<Self> {
+        Self::load_with_hot_state_trace_info(pma_dir, jam_paths, kernel, hot_state, {
+            let keyword_filter = trace_opts
+                .keyword_filter
+                .map(|v| v.split(",").map(String::from).collect::<Vec<String>>())
+                .map(|keywords| KeywordFilter { keywords });
+            let interval_filter = trace_opts
+                .interval_filter
+                .map(|interval| IntervalFilter { interval, cnt: 0 });
+
+            let filter = match (keyword_filter, interval_filter) {
+                (Some(a), Some(b)) => Some(a.or(b).boxed()),
+                (Some(a), _) => Some(a.boxed()),
+                (_, Some(b)) => Some(b.boxed()),
+                (None, None) => None,
+            };
+
+            trace_opts
+                .mode
+                .map(|mode| match mode {
+                    TraceMode::File => {
+                        let file = File::create("trace.json")
+                            .expect("Cannot create trace file trace.json");
+                        let pid = std::process::id();
+                        let process_start = std::time::Instant::now();
+
+                        Box::new(FileBackend {
+                            file,
+                            pid,
+                            process_start,
+                        }) as Box<dyn TraceBackend>
+                    }
+                    TraceMode::Tracing => Box::new(TracingBackend::new()),
+                })
+                .map(|backend| TraceInfo { backend, filter })
+        })
+        .await
+    }
+
+    /// Loads a kernel with a custom hot state.
+    ///
+    /// # Arguments
+    ///
+    /// * `snap_dir` - Directory for storing snapshots.
+    /// * `kernel` - Byte slice containing the kernel as a jammed noun.
+    /// * `hot_state` - Custom hot state entries.
+    /// * `trace_info` - Optional tracing implementation.
+    ///
+    /// # Returns
+    ///
+    /// A new `Kernel` instance.
+    pub async fn load_with_hot_state_trace_info(
+        pma_dir: PathBuf,
+        jam_paths: JamPaths,
+        kernel: &[u8],
+        hot_state: &[HotEntry],
+        trace_info: Option<TraceInfo>,
     ) -> Result<Self> {
         let jam_paths_arc = Arc::new(jam_paths);
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
         let pma_dir_arc = Arc::new(pma_dir);
         let serf = SerfThread::new(
-            NOCK_STACK_SIZE, jam_paths_arc, kernel_vec, hot_state_vec, trace,
+            NOCK_STACK_SIZE, jam_paths_arc, kernel_vec, hot_state_vec, trace_info,
         )
         .await?;
         let terminator = Arc::new(AtomicBool::new(false));
@@ -556,31 +619,21 @@ impl Kernel {
         pma_dir: PathBuf,
         jam_paths: JamPaths,
         kernel: &[u8],
-        trace: bool,
+        trace_opts: TraceOpts,
     ) -> Result<Self> {
-        Self::load_with_hot_state(pma_dir, jam_paths, kernel, &Vec::new(), trace).await
+        Self::load_with_hot_state(pma_dir, jam_paths, kernel, &Vec::new(), trace_opts).await
     }
 
-    /// Loads a kernel with state from jammed bytes
-    pub async fn load_with_kernel_state(
-        pma_dir: PathBuf,
-        jam_paths: JamPaths,
-        kernel_jam: &[u8],
-        state_bytes: &[u8],
-        hot_state: &[HotEntry],
-        trace: bool,
-    ) -> Result<Self> {
-        let kernel =
-            Self::load_with_hot_state(pma_dir, jam_paths, kernel_jam, hot_state, trace).await?;
-
-        match kernel
+    /// Loads a kernel state from jammed bytes
+    pub async fn load_state(self, state_bytes: &[u8]) -> Result<Self> {
+        match self
             .serf
             .load_state_from_bytes(Vec::from(state_bytes))
             .await
         {
             Ok(_) => {
                 debug!("Successfully loaded state from bytes");
-                Ok(kernel)
+                Ok(self)
             }
             Err(e) => {
                 error!("Failed to load state from state bytes: {}", e);
@@ -642,7 +695,7 @@ impl Serf {
     /// * `checkpoint` - Optional checkpoint to restore from.
     /// * `kernel_bytes` - Byte slice containing the kernel code.
     /// * `constant_hot_state` - Custom hot state entries.
-    /// * `trace` - Bool indicating whether to enable nockvm tracing.
+    /// * `trace_info` - Optional nockvm tracing implementation.
     ///
     /// # Returns
     ///
@@ -652,7 +705,7 @@ impl Serf {
         checkpoint: Option<Checkpoint>,
         kernel_bytes: &[u8],
         constant_hot_state: &[HotEntry],
-        trace: bool,
+        trace_info: Option<TraceInfo>,
     ) -> Self {
         let hot_state = [URBIT_HOT_STATE, constant_hot_state].concat();
 
@@ -662,19 +715,6 @@ impl Serf {
         );
 
         let event_num = Arc::new(AtomicU64::new(event_num_raw));
-
-        let trace_info = if trace {
-            let file = File::create("trace.json").expect("Cannot create trace file trace.json");
-            let pid = std::process::id();
-            let process_start = std::time::Instant::now();
-            Some(TraceInfo {
-                file,
-                pid,
-                process_start,
-            })
-        } else {
-            None
-        };
 
         let mut context = create_context(stack, &hot_state, cold, trace_info);
 

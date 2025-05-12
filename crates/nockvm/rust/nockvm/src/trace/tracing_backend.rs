@@ -1,0 +1,223 @@
+use super::*;
+use either::Either;
+use std::{
+    cmp::{Eq, PartialEq},
+    collections::HashSet,
+    hash::{Hash, Hasher},
+    sync::Mutex,
+};
+use tracing::{
+    callsite::DefaultCallsite,
+    dispatcher::{self, Dispatch},
+    span::Attributes,
+    Id, Level, Metadata,
+};
+use tracing_core::{field::FieldSet, identify_callsite, metadata::Kind};
+
+#[derive(Clone, Copy)]
+struct TraceStack {
+    pub span_id: u64,
+    pub next: *const TraceStack,
+}
+
+static NOCK_METADATA: Metadata<'static> = Metadata::new(
+    "nockroot",
+    module_path!(),
+    Level::DEBUG,
+    Some(file!()),
+    Some(line!()),
+    Some(module_path!()),
+    FieldSet::new(&[], identify_callsite!(&NOCK_CALLSITE)),
+    Kind::SPAN,
+);
+
+static NOCK_CALLSITE: DefaultCallsite = DefaultCallsite::new(&NOCK_METADATA);
+
+struct TraceEntry {
+    id: Id,
+    metadata: &'static Metadata<'static>,
+    path: &'static str,
+    chum: &'static str,
+}
+
+impl TraceEntry {
+    fn new(
+        chum: impl Into<Box<str>>,
+        path: impl Into<Box<str>>,
+        dispatch: &Dispatch,
+        level: Level,
+    ) -> Self {
+        let path: &'static str = Box::leak(path.into());
+        let chum: &'static str = Box::leak(chum.into());
+
+        // TODO: figure out why passing path as `file` metadata field messes up function names in
+        // tracy. For now, let's extract gate/core, and pass it as name.
+        let name = path.trim_start_matches('/');
+        let mut cnt = 0;
+        let name = name
+            .split_once(|v| {
+                if v == '/' {
+                    cnt += 1;
+                    cnt > 1
+                } else {
+                    false
+                }
+            })
+            .map(|(v, _)| v)
+            .unwrap_or(name);
+
+        let metadata = Box::leak(Box::new(Metadata::new(
+            name,
+            "nockcode",
+            level,
+            None,
+            None,
+            Some(path),
+            FieldSet::new(&[], identify_callsite!(&NOCK_CALLSITE)),
+            Kind::SPAN,
+        )));
+
+        let values = metadata.fields().value_set(&[]);
+
+        let attrs = Attributes::new(metadata, &values);
+        let id = dispatch.new_span(&attrs);
+        Self {
+            id,
+            metadata,
+            path,
+            chum,
+        }
+    }
+}
+
+impl Hash for TraceEntry {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.chum.hash(state)
+    }
+}
+
+impl Eq for TraceEntry {}
+
+impl PartialEq for TraceEntry {
+    fn eq(&self, other: &TraceEntry) -> bool {
+        (*self.chum).eq(&*other.chum)
+    }
+}
+
+impl std::borrow::Borrow<str> for TraceEntry {
+    fn borrow(&self) -> &str {
+        &self.chum
+    }
+}
+
+// In case we reinitialize Serf (we probably won't), cache old entries.
+static GLOBAL_ENTRIES: Mutex<Option<HashSet<TraceEntry>>> = Mutex::new(None);
+
+pub struct TracingBackend {
+    entries: HashSet<TraceEntry>,
+    subscriber: Option<Dispatch>,
+}
+
+impl TracingBackend {
+    pub fn new() -> Self {
+        Self {
+            entries: GLOBAL_ENTRIES
+                .lock()
+                .ok()
+                .and_then(|mut v| v.take())
+                .unwrap_or_default(),
+            subscriber: None,
+        }
+    }
+}
+
+impl Drop for TracingBackend {
+    fn drop(&mut self) {
+        let mut entries = GLOBAL_ENTRIES.lock().unwrap();
+        if entries.as_ref().map(|v| v.len()).unwrap_or(0) <= self.entries.len() {
+            *entries = Some(core::mem::take(&mut self.entries));
+        }
+    }
+}
+
+impl TraceBackend for TracingBackend {
+    fn append_trace(&mut self, stack: &mut NockStack, path: Noun) {
+        assert_no_alloc::permit_alloc(|| {
+            let mut tmp = path;
+
+            let chum = loop {
+                match tmp.as_either_atom_cell() {
+                    Either::Left(atom) => break atom,
+                    Either::Right(cell) => tmp = cell.head(),
+                }
+            };
+
+            let Ok(chum) = std::str::from_utf8(chum.as_ne_bytes()) else {
+                return;
+            };
+
+            let chum = chum.trim_end_matches('\0');
+
+            let path = path_to_cord(stack, path);
+            let path = std::str::from_utf8(path.as_ne_bytes()).unwrap_or("");
+
+            if self.subscriber.is_none() {
+                self.subscriber = Some(dispatcher::get_default(Clone::clone));
+            }
+
+            let subscriber = self.subscriber.as_ref().unwrap();
+
+            let id = if let Some(entry) = self.entries.get(chum) {
+                entry.id.clone()
+            } else {
+                let entry = TraceEntry::new(chum, path, &subscriber, Level::DEBUG);
+                let id = entry.id.clone();
+                self.entries.insert(entry);
+                id
+            };
+
+            subscriber.enter(&id);
+
+            unsafe {
+                let trace_stack = *(stack.local_noun_pointer(1) as *const *const TraceStack);
+                let new_trace_entry = stack.struct_alloc(1);
+                *new_trace_entry = TraceStack {
+                    span_id: id.into_u64(),
+                    next: trace_stack,
+                };
+                *(stack.local_noun_pointer(1) as *mut *const TraceStack) = new_trace_entry;
+            }
+        })
+    }
+
+    unsafe fn write_nock_trace(
+        &mut self,
+        _: &mut NockStack,
+        trace_stack: *const Noun,
+    ) -> Result<(), Error> {
+        let mut trace_stack = trace_stack as *const TraceStack;
+
+        if trace_stack.is_null() {
+            return Ok(());
+        }
+
+        let subscriber = self
+            .subscriber
+            .as_ref()
+            .expect("No subscriber with a trace stack");
+
+        loop {
+            let id = Id::from_u64((*trace_stack).span_id);
+
+            assert_no_alloc::permit_alloc(|| {
+                subscriber.exit(&id);
+            });
+
+            trace_stack = (*trace_stack).next;
+
+            if trace_stack.is_null() {
+                break Ok(());
+            }
+        }
+    }
+}

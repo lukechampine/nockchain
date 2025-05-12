@@ -780,6 +780,135 @@ impl fmt::Debug for Cell {
     }
 }
 
+#[derive(Copy, Clone)]
+pub struct PrettyPrintNoun<'a> {
+    pub noun: &'a Noun,
+    pub depth: usize,
+    pub lbracket: &'a str,
+    pub rbracket: &'a str,
+    pub space: &'a str,
+    pub sen: &'a str,
+    pub num_separator: &'a str,
+}
+
+impl<'a> PrettyPrintNoun<'a> {
+    pub const fn new(noun: &'a Noun, depth: usize) -> Self {
+        Self {
+            noun,
+            depth,
+            lbracket: "[",
+            rbracket: "]",
+            space: " ",
+            sen: "%",
+            num_separator: ".",
+        }
+    }
+}
+
+impl fmt::Debug for PrettyPrintNoun<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.noun.as_either_atom_cell() {
+            Either::Left(a) => {
+                let b = a.as_ne_bytes();
+                if let Ok(s) = std::str::from_utf8(b) {
+                    write!(f, "{}{s}", self.sen)?;
+                } else {
+                    write!(f, "0x")?;
+                    let mut iter = b.rchunks(2).peekable();
+                    let mut in_padding = true;
+                    while let Some(n) = iter.next() {
+                        for b in n.iter().rev() {
+                            if in_padding && *b == 0 {
+                                continue;
+                            }
+                            in_padding = false;
+                            write!(f, "{b:02x}")?;
+                        }
+                        if !in_padding && iter.peek().is_some() {
+                            write!(f, "{}", self.num_separator)?;
+                        }
+                    }
+                    if in_padding {
+                        write!(f, "0")?;
+                    }
+                }
+            }
+            Either::Right(mut c) => {
+                if self.depth == 0 {
+                    return write!(f, "{c:?}");
+                }
+
+                write!(f, "{}", self.lbracket)?;
+                loop {
+                    let head = c.head();
+                    //write!(f, "{:?}", PrettyPrintNoun(&head, self.1 - 1))?;
+                    write!(
+                        f,
+                        "{:?}",
+                        PrettyPrintNoun {
+                            noun: &head,
+                            depth: self.depth - 1,
+                            ..*self
+                        }
+                    )?;
+                    match c.tail().as_cell() {
+                        Ok(nc) => {
+                            write!(f, "{}", self.space)?;
+                            c = nc;
+                        }
+                        Err(_) => {
+                            write!(
+                                f,
+                                "{:?}{}",
+                                PrettyPrintNoun {
+                                    noun: &head,
+                                    depth: self.depth - 1,
+                                    ..*self
+                                },
+                                self.rbracket
+                            )?;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+pub struct FullDebugCellDepth<'a>(pub &'a Cell, pub usize);
+
+impl fmt::Debug for FullDebugCellDepth<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "[")?;
+        let mut cell = *self.0;
+        loop {
+            let head = cell.head();
+            if self.1 > 0 {
+                if let Ok(cell) = head.as_cell() {
+                    write!(f, "{:?}", FullDebugCellDepth(&cell, self.1 - 1))?;
+                } else {
+                    write!(f, "{:?}", head)?;
+                }
+            } else {
+                write!(f, "{:?}", head)?;
+            }
+            match cell.tail().as_cell() {
+                Ok(next_cell) => {
+                    write!(f, " ")?;
+                    cell = next_cell;
+                }
+                Err(_) => {
+                    write!(f, " {:?}]", cell.tail())?;
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 pub struct FullDebugCell<'a>(pub &'a Cell);
 
 impl fmt::Debug for FullDebugCell<'_> {

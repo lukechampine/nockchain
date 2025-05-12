@@ -2,7 +2,7 @@ use crate::kernel::checkpoint::JamPaths;
 use crate::kernel::form::Kernel;
 use crate::{default_data_dir, NockApp};
 use chrono;
-use clap::{arg, command, ColorChoice, Parser};
+use clap::{arg, command, Args, ColorChoice, Parser, ValueEnum};
 use nockvm::jets::hot::HotEntry;
 use std::fs;
 use std::path::PathBuf;
@@ -14,6 +14,24 @@ use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, EnvFilter};
 
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum TraceMode {
+    File,
+    Tracing,
+}
+
+#[derive(Args, Clone, Debug, Default)]
+pub struct TraceOpts {
+    #[arg(long = "trace", help = "Make a Sword trace", default_value = "none")]
+    pub mode: Option<TraceMode>,
+
+    #[arg(long, requires = "trace")]
+    pub keyword_filter: Option<String>,
+
+    #[arg(long, requires = "trace")]
+    pub interval_filter: Option<usize>,
+}
+
 #[derive(Parser, Debug, Clone)]
 #[command(about = "boot a nockapp", author, version, color = ColorChoice::Auto)]
 pub struct Cli {
@@ -24,8 +42,8 @@ pub struct Cli {
     )]
     pub new: bool,
 
-    #[arg(long, help = "Make an Sword trace", default_value = "false")]
-    pub trace: bool,
+    #[command(flatten)]
+    pub trace_opts: TraceOpts,
 
     #[arg(
         long,
@@ -62,7 +80,7 @@ pub fn default_boot_cli(new: bool) -> Cli {
     Cli {
         save_interval: 1000,
         new,
-        trace: false,
+        trace_opts: Default::default(),
         color: ColorChoice::Auto,
         state_jam: None,
         export_state_jam: None,
@@ -267,14 +285,19 @@ pub async fn setup_(
         jam_paths.0, jam_paths.1
     );
 
-    let mut kernel = if let Some(state_path) = cli.state_jam {
-        let state_bytes = fs::read(&state_path)?;
-        debug!("kernel: loading state from jam file: {:?}", state_path);
-        Kernel::load_with_kernel_state(pma_dir, jam_paths, jam, &state_bytes, hot_state, cli.trace)
-            .await?
-    } else {
-        Kernel::load_with_hot_state(pma_dir, jam_paths, jam, hot_state, cli.trace).await?
-    };
+    let state_bytes = cli
+        .state_jam
+        .as_ref()
+        .inspect(|v| debug!("kernel: loading state from jam file: {v:?}"))
+        .map(fs::read)
+        .transpose()?;
+
+    let mut kernel =
+        Kernel::load_with_hot_state(pma_dir, jam_paths, jam, hot_state, cli.trace_opts).await?;
+
+    if let Some(state_bytes) = state_bytes {
+        kernel = kernel.load_state(&state_bytes).await?
+    }
 
     if let Some(export_path) = cli.export_state_jam.clone() {
         export_kernel_state(&mut kernel, &export_path).await?;

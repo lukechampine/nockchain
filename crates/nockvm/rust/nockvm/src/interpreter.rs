@@ -6,7 +6,7 @@ use crate::jets::warm::Warm;
 use crate::jets::{cold, JetErr};
 use crate::mem::{NockStack, Preserve};
 use crate::noun::{Atom, Cell, IndirectAtom, Noun, Slots, D, T};
-use crate::trace::{write_nock_trace, TraceInfo, TraceStack};
+use crate::trace::{write_nock_trace, TraceInfo};
 use crate::unifying_equality::unifying_equality;
 use crate::{assert_acyclic, assert_no_forwarding_pointers, assert_no_junior_pointers, flog, noun};
 use assert_no_alloc::{assert_no_alloc, ensure_alloc_counters};
@@ -409,7 +409,7 @@ pub fn interpret(context: &mut Context, mut subject: Noun, formula: Noun) -> Res
         // Bottom of mean stack
         *(context.stack.local_noun_pointer(0)) = D(0);
         // Bottom of trace stack
-        *(context.stack.local_noun_pointer(1) as *mut *const TraceStack) = std::ptr::null();
+        *(context.stack.local_noun_pointer(1) as *mut *const Noun) = std::ptr::null();
 
         *(context.stack.push()) = NockWork::Done;
     };
@@ -695,18 +695,22 @@ pub fn interpret(context: &mut Context, mut subject: Noun, formula: Noun) -> Res
                                         };
 
                                         let stack = &mut context.stack;
+
                                         if kale.tail {
                                             stack.pop::<NockWork>();
 
                                             // We could trace on 2 as well, but 2 only comes from Hoon via
                                             // '.*', so we can assume it's never directly used to invoke
                                             // jetted code.
-                                            if context.trace_info.is_some() {
-                                                if let Some(path) =
-                                                    context.cold.matches(stack, &mut res)
-                                                {
-                                                    append_trace(stack, path);
-                                                };
+                                            if let Some((path, trace_info)) =
+                                                context.trace_info.as_mut().and_then(|v| {
+                                                    context
+                                                        .cold
+                                                        .matches(stack, &mut res)
+                                                        .zip(Some(v))
+                                                })
+                                            {
+                                                trace_info.append_trace(stack, path);
                                             };
 
                                             subject = res;
@@ -728,12 +732,15 @@ pub fn interpret(context: &mut Context, mut subject: Noun, formula: Noun) -> Res
                                             // We could trace on 2 as well, but 2 only comes from Hoon via
                                             // '.*', so we can assume it's never directly used to invoke
                                             // jetted code.
-                                            if context.trace_info.is_some() {
-                                                if let Some(path) =
-                                                    context.cold.matches(stack, &mut res)
-                                                {
-                                                    append_trace(stack, path);
-                                                };
+                                            if let Some((path, trace_info)) =
+                                                context.trace_info.as_mut().and_then(|v| {
+                                                    context
+                                                        .cold
+                                                        .matches(stack, &mut res)
+                                                        .zip(Some(v))
+                                                })
+                                            {
+                                                trace_info.append_trace(stack, path);
                                             };
                                         }
                                     } else {
@@ -1084,7 +1091,8 @@ fn push_formula(stack: &mut NockStack, formula: Noun, tail: bool) -> Result {
                             9 => {
                                 if let Ok(arg_cell) = formula_cell.tail().as_cell() {
                                     if let Ok(axis_atom) = arg_cell.head().as_atom() {
-                                        *stack.push() = NockWork::Work9(Nock9 {
+                                        let p = stack.push();
+                                        *p = NockWork::Work9(Nock9 {
                                             todo: Todo9::ComputeCore,
                                             axis: axis_atom,
                                             core: arg_cell.tail(),
@@ -1234,7 +1242,7 @@ fn mean_frame_push(stack: &mut NockStack, slots: usize) {
         let trace = *(stack.local_noun_pointer(0));
         stack.frame_push(slots + 2);
         *(stack.local_noun_pointer(0)) = trace;
-        *(stack.local_noun_pointer(1) as *mut *const TraceStack) = std::ptr::null();
+        *(stack.local_noun_pointer(1) as *mut *const Noun) = std::ptr::null();
     }
 }
 
@@ -1329,24 +1337,10 @@ pub fn inc(stack: &mut NockStack, atom: Atom) -> Atom {
     }
 }
 
-/// Push onto the tracing stack
-fn append_trace(stack: &mut NockStack, path: Noun) {
-    unsafe {
-        let trace_stack = *(stack.local_noun_pointer(1) as *const *const TraceStack);
-        let new_trace_entry = stack.struct_alloc(1);
-        *new_trace_entry = TraceStack {
-            path,
-            start: Instant::now(),
-            next: trace_stack,
-        };
-        *(stack.local_noun_pointer(1) as *mut *const TraceStack) = new_trace_entry;
-    }
-}
-
 /// Write fast-hinted traces to trace file
 unsafe fn write_trace(context: &mut Context) {
     if let Some(ref mut info) = &mut context.trace_info {
-        let trace_stack = *(context.stack.local_noun_pointer(1) as *mut *const TraceStack);
+        let trace_stack = *(context.stack.local_noun_pointer(1) as *mut *const Noun);
         // Abort writing to trace file if we encountered an error. This should
         // result in a well-formed partial trace file.
         if let Err(_e) = write_nock_trace(&mut context.stack, info, trace_stack) {
@@ -1636,7 +1630,7 @@ mod hint {
                                     context, "serf: cold: register: bad clue formula: {:?}", clue
                                 );
                             }
-                            _ => {}
+                            _ => {},
                         }
                     } else {
                         flog!(context, "serf: cold: register: no clue for %fast");
