@@ -15,9 +15,8 @@ use tracing::{
 use tracing_core::{field::FieldSet, identify_callsite, metadata::Kind};
 
 #[derive(Clone, Copy)]
-struct TraceStack {
+struct TraceData {
     pub span_id: u64,
-    pub next: *const TraceStack,
 }
 
 static NOCK_METADATA: Metadata<'static> = Metadata::new(
@@ -141,7 +140,7 @@ impl Drop for TracingBackend {
 }
 
 impl TraceBackend for TracingBackend {
-    fn append_trace(&mut self, stack: &mut NockStack, path: Noun) {
+    fn append_trace(&mut self, stack: &mut NockStack, path: Noun) -> Option<NonNull<TraceStack>> {
         assert_no_alloc::permit_alloc(|| {
             let mut tmp = path;
 
@@ -152,9 +151,7 @@ impl TraceBackend for TracingBackend {
                 }
             };
 
-            let Ok(chum) = std::str::from_utf8(chum.as_ne_bytes()) else {
-                return;
-            };
+            let chum = std::str::from_utf8(chum.as_ne_bytes()).ok()?;
 
             let chum = chum.trim_end_matches('\0');
 
@@ -179,13 +176,11 @@ impl TraceBackend for TracingBackend {
             subscriber.enter(&id);
 
             unsafe {
-                let trace_stack = *(stack.local_noun_pointer(1) as *const *const TraceStack);
                 let new_trace_entry = stack.struct_alloc(1);
-                *new_trace_entry = TraceStack {
+                *new_trace_entry = TraceStack::new(TraceData {
                     span_id: id.into_u64(),
-                    next: trace_stack,
-                };
-                *(stack.local_noun_pointer(1) as *mut *const TraceStack) = new_trace_entry;
+                });
+                Some(NonNull::new_unchecked(new_trace_entry as *mut TraceStack))
             }
         })
     }
@@ -193,9 +188,9 @@ impl TraceBackend for TracingBackend {
     unsafe fn write_nock_trace(
         &mut self,
         _: &mut NockStack,
-        trace_stack: *const Noun,
+        trace_stack: *const TraceStack<()>,
     ) -> Result<(), Error> {
-        let mut trace_stack = trace_stack as *const TraceStack;
+        let mut trace_stack = trace_stack as *const TraceStack<TraceData>;
 
         if trace_stack.is_null() {
             return Ok(());

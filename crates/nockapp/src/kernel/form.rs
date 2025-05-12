@@ -547,6 +547,8 @@ impl Kernel {
                 (None, None) => None,
             };
 
+            let trace_jets = trace_opts.trace_jets;
+
             trace_opts
                 .mode
                 .map(|mode| match mode {
@@ -564,7 +566,7 @@ impl Kernel {
                     }
                     TraceMode::Tracing => Box::new(TracingBackend::new()),
                 })
-                .map(|backend| TraceInfo { backend, filter })
+                .map(|backend| TraceInfo { backend, filter, trace_jets })
         })
         .await
     }

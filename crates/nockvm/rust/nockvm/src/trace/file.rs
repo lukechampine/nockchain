@@ -9,10 +9,9 @@ use std::time::Instant;
 use super::*;
 
 #[derive(Clone, Copy)]
-struct TraceStack {
+struct TraceData {
     pub start: Instant,
     pub path: Noun,
-    pub next: *const TraceStack,
 }
 
 pub struct FileBackend {
@@ -22,25 +21,23 @@ pub struct FileBackend {
 }
 
 impl TraceBackend for FileBackend {
-    fn append_trace(&mut self, stack: &mut NockStack, path: Noun) {
+    fn append_trace(&mut self, stack: &mut NockStack, path: Noun) -> Option<NonNull<TraceStack>> {
         unsafe {
-            let trace_stack = *(stack.local_noun_pointer(1) as *const *const TraceStack);
             let new_trace_entry = stack.struct_alloc(1);
-            *new_trace_entry = TraceStack {
+            *new_trace_entry = TraceStack::new(TraceData {
                 path,
                 start: Instant::now(),
-                next: trace_stack,
-            };
-            *(stack.local_noun_pointer(1) as *mut *const TraceStack) = new_trace_entry;
+            });
+            Some(NonNull::new_unchecked(new_trace_entry as *mut TraceStack))
         }
     }
 
     unsafe fn write_nock_trace(
         &mut self,
         stack: &mut NockStack,
-        trace_stack: *const Noun,
+        trace_stack: *const TraceStack,
     ) -> Result<(), Error> {
-        let mut trace_stack = trace_stack as *const TraceStack;
+        let mut trace_stack = trace_stack as *const TraceStack<TraceData>;
         let now = Instant::now();
 
         while !trace_stack.is_null() {
@@ -183,5 +180,6 @@ pub fn create_trace_file(pier_path: PathBuf) -> Result<TraceInfo, Error> {
     Ok(TraceInfo {
         backend,
         filter: None,
+        trace_jets: false,
     })
 }

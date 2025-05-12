@@ -5,6 +5,7 @@ use crate::jets::form::util::scow;
 use crate::mem::NockStack;
 use crate::mug::met3_usize;
 use crate::noun::{Atom, DirectAtom, IndirectAtom, Noun};
+use core::ptr::NonNull;
 use either::Either::*;
 use std::io::Error;
 use nockvm_macros::tas;
@@ -24,12 +25,12 @@ pub use filter::*;
 crate::gdb!();
 
 pub trait TraceBackend: Send {
-    fn append_trace(&mut self, stack: &mut NockStack, path: Noun);
+    fn append_trace(&mut self, stack: &mut NockStack, path: Noun) -> Option<NonNull<TraceStack>>;
 
     unsafe fn write_nock_trace(
         &mut self,
         stack: &mut NockStack,
-        trace_stack: *const Noun,
+        trace_stack: *const TraceStack,
     ) -> Result<(), Error>;
 
     fn write_serf_trace(&mut self, _name: &str, _start: Instant) -> Result<(), Error> {
@@ -41,20 +42,66 @@ pub trait TraceBackend: Send {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct TraceStack<T = ()> {
+    pub next: *const TraceStack<T>,
+    pub data: T,
+}
+
+impl<T> TraceStack<T> {
+    pub fn new(data: T) -> Self {
+        Self {
+            next: core::ptr::null(),
+            data,
+        }
+    }
+}
+
+impl<T> core::ops::Deref for TraceStack<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
+impl<T> core::ops::DerefMut for TraceStack<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.data
+    }
+}
+
 pub struct TraceInfo {
     pub backend: Box<dyn TraceBackend>,
     pub filter: Option<Box<dyn TraceFilter>>,
+    pub trace_jets: bool,
 }
 
 impl TraceInfo {
-    pub fn append_trace(&mut self, stack: &mut NockStack, path: Noun) {
+    pub fn append_trace(
+        &mut self,
+        stack: &mut NockStack,
+        path: Noun,
+        force_unlinked: bool,
+    ) -> Option<NonNull<TraceStack>> {
         if let Some(filter) = self.filter.as_mut() {
             if !filter.should_trace(path) {
-                return;
+                return None;
             }
         }
 
-        self.backend.append_trace(stack, path);
+        let mut new_trace_entry = self.backend.append_trace(stack, path)?;
+
+        if !force_unlinked {
+            unsafe {
+                let cur_trace_stack = *(stack.local_noun_pointer(1) as *const *const TraceStack);
+                new_trace_entry.as_mut().next = cur_trace_stack;
+                *(stack.local_noun_pointer(1) as *mut *const TraceStack) = new_trace_entry.as_ptr();
+            }
+        }
+
+        Some(new_trace_entry)
     }
 }
 
@@ -92,7 +139,7 @@ pub fn write_serf_trace(info: &mut TraceInfo, name: &str, start: Instant) -> Res
 pub unsafe fn write_nock_trace(
     stack: &mut NockStack,
     info: &mut TraceInfo,
-    trace_stack: *const Noun,
+    trace_stack: *const TraceStack<()>,
 ) -> Result<(), Error> {
     info.backend.write_nock_trace(stack, trace_stack)
 }

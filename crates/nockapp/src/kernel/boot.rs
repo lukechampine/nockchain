@@ -30,6 +30,9 @@ pub struct TraceOpts {
 
     #[arg(long, requires = "trace")]
     pub interval_filter: Option<usize>,
+
+    #[arg(long, default_value = "false")]
+    pub trace_jets: bool,
 }
 
 #[derive(Parser, Debug, Clone)]

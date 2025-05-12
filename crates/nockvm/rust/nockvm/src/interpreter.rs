@@ -6,7 +6,7 @@ use crate::jets::warm::Warm;
 use crate::jets::{cold, JetErr};
 use crate::mem::{NockStack, Preserve};
 use crate::noun::{Atom, Cell, IndirectAtom, Noun, Slots, D, T};
-use crate::trace::{write_nock_trace, TraceInfo};
+use crate::trace::{write_nock_trace, TraceInfo, TraceStack};
 use crate::unifying_equality::unifying_equality;
 use crate::{assert_acyclic, assert_no_forwarding_pointers, assert_no_junior_pointers, flog, noun};
 use assert_no_alloc::{assert_no_alloc, ensure_alloc_counters};
@@ -675,15 +675,42 @@ pub fn interpret(context: &mut Context, mut subject: Noun, formula: Noun) -> Res
                                     push_formula(&mut context.stack, kale.core, false)?;
                                 }
                                 Todo9::ComputeResult => {
+                                    let mut tracepoint = None;
+
                                     if let Ok(mut formula) = res.slot_atom(kale.axis) {
                                         if !cfg!(feature = "sham_hints") {
-                                            if let Some((jet, _path)) = context.warm.find_jet(
+                                            if let Some((jet, path)) = context.warm.find_jet(
                                                 &mut context.stack, &mut res, &mut formula,
                                             ) {
+                                                if let Some(trace_info) = context
+                                                    .trace_info
+                                                    .as_mut()
+                                                    .filter(|v| v.trace_jets)
+                                                {
+                                                    tracepoint = trace_info.append_trace(
+                                                        &mut context.stack, path, !kale.tail,
+                                                    );
+                                                }
+
                                                 match jet(context, res) {
                                                     Ok(jet_res) => {
                                                         res = jet_res;
                                                         context.stack.pop::<NockWork>();
+
+                                                        // Write this trace, because it's unlinked
+                                                        // from the frame, and it will otherwise be
+                                                        // lost.
+                                                        if !kale.tail {
+                                                            if let Some(tracepoint) =
+                                                                tracepoint.take()
+                                                            {
+                                                                write_trace2(
+                                                                    context,
+                                                                    tracepoint.as_ptr(),
+                                                                );
+                                                            }
+                                                        }
+
                                                         continue;
                                                     }
                                                     Err(JetErr::Punt) => {}
@@ -699,19 +726,21 @@ pub fn interpret(context: &mut Context, mut subject: Noun, formula: Noun) -> Res
                                         if kale.tail {
                                             stack.pop::<NockWork>();
 
-                                            // We could trace on 2 as well, but 2 only comes from Hoon via
-                                            // '.*', so we can assume it's never directly used to invoke
-                                            // jetted code.
-                                            if let Some((path, trace_info)) =
-                                                context.trace_info.as_mut().and_then(|v| {
-                                                    context
-                                                        .cold
-                                                        .matches(stack, &mut res)
-                                                        .zip(Some(v))
-                                                })
-                                            {
-                                                trace_info.append_trace(stack, path);
-                                            };
+                                            if tracepoint.is_none() {
+                                                // We could trace on 2 as well, but 2 only comes from Hoon via
+                                                // '.*', so we can assume it's never directly used to invoke
+                                                // jetted code.
+                                                if let Some((path, trace_info)) =
+                                                    context.trace_info.as_mut().and_then(|v| {
+                                                        context
+                                                            .cold
+                                                            .matches(stack, &mut res)
+                                                            .zip(Some(v))
+                                                    })
+                                                {
+                                                    trace_info.append_trace(stack, path, false);
+                                                };
+                                            }
 
                                             subject = res;
                                             push_formula(stack, formula, true)?;
@@ -729,19 +758,27 @@ pub fn interpret(context: &mut Context, mut subject: Noun, formula: Noun) -> Res
                                             *stack.push() = NockWork::Ret;
                                             push_formula(stack, formula, true)?;
 
-                                            // We could trace on 2 as well, but 2 only comes from Hoon via
-                                            // '.*', so we can assume it's never directly used to invoke
-                                            // jetted code.
-                                            if let Some((path, trace_info)) =
-                                                context.trace_info.as_mut().and_then(|v| {
-                                                    context
-                                                        .cold
-                                                        .matches(stack, &mut res)
-                                                        .zip(Some(v))
-                                                })
-                                            {
-                                                trace_info.append_trace(stack, path);
-                                            };
+                                            if let Some(tracepoint) = tracepoint.take() {
+                                                // Link the existing jetted frame onto this new
+                                                // frame.
+                                                *(stack.local_noun_pointer(1)
+                                                    as *mut *const TraceStack) =
+                                                    tracepoint.as_ptr();
+                                            } else {
+                                                // We could trace on 2 as well, but 2 only comes from Hoon via
+                                                // '.*', so we can assume it's never directly used to invoke
+                                                // jetted code.
+                                                if let Some((path, trace_info)) =
+                                                    context.trace_info.as_mut().and_then(|v| {
+                                                        context
+                                                            .cold
+                                                            .matches(stack, &mut res)
+                                                            .zip(Some(v))
+                                                    })
+                                                {
+                                                    trace_info.append_trace(stack, path, false);
+                                                };
+                                            }
                                         }
                                     } else {
                                         // Axis into core must be atom
@@ -1242,7 +1279,7 @@ fn mean_frame_push(stack: &mut NockStack, slots: usize) {
         let trace = *(stack.local_noun_pointer(0));
         stack.frame_push(slots + 2);
         *(stack.local_noun_pointer(0)) = trace;
-        *(stack.local_noun_pointer(1) as *mut *const Noun) = std::ptr::null();
+        *(stack.local_noun_pointer(1) as *mut *const TraceStack) = std::ptr::null();
     }
 }
 
@@ -1339,8 +1376,12 @@ pub fn inc(stack: &mut NockStack, atom: Atom) -> Atom {
 
 /// Write fast-hinted traces to trace file
 unsafe fn write_trace(context: &mut Context) {
+    let trace_stack = *(context.stack.local_noun_pointer(1) as *mut *const TraceStack);
+    write_trace2(context, trace_stack)
+}
+
+unsafe fn write_trace2(context: &mut Context, trace_stack: *const TraceStack) {
     if let Some(ref mut info) = &mut context.trace_info {
-        let trace_stack = *(context.stack.local_noun_pointer(1) as *mut *const Noun);
         // Abort writing to trace file if we encountered an error. This should
         // result in a well-formed partial trace file.
         if let Err(_e) = write_nock_trace(&mut context.stack, info, trace_stack) {
@@ -1630,7 +1671,7 @@ mod hint {
                                     context, "serf: cold: register: bad clue formula: {:?}", clue
                                 );
                             }
-                            _ => {},
+                            _ => {}
                         }
                     } else {
                         flog!(context, "serf: cold: register: no clue for %fast");
