@@ -195,8 +195,13 @@ where
 /// In development mode, the base filter is set to INFO level, with application
 /// modules set to DEBUG. Additional modules can be specified with dev_modules.
 pub fn init_default_tracing(cli: &Cli) {
+    use tracing_subscriber::Layer;
+
     let filter = EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(|_| "trace".to_string()));
     let use_ansi = cli.color == ColorChoice::Auto || cli.color == ColorChoice::Always;
+
+    let nockcode_filter = tracing_subscriber::filter::filter_fn(|meta| meta.target() == "nockcode");
+    let tracy = tracing_tracy::TracyLayer::default();
 
     // Build and initialize the subscriber based on format and mode
     match std::env::var("MINIMAL_LOG_FORMAT").unwrap_or_else(|_| "false".to_string()) == "true" {
@@ -210,6 +215,7 @@ pub fn init_default_tracing(cli: &Cli) {
                         .with_level(true),
                 )
                 .with(filter)
+                .with(tracy.with_filter(nockcode_filter))
                 .init();
         }
         // Development mode with minimal formatter
@@ -221,6 +227,7 @@ pub fn init_default_tracing(cli: &Cli) {
             tracing_subscriber::registry()
                 .with(fmt_layer)
                 .with(filter)
+                .with(tracy.with_filter(nockcode_filter))
                 .init();
         }
     }
