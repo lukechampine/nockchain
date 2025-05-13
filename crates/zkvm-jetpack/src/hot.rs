@@ -4,6 +4,7 @@ use nockvm::jets::hot::{HotEntry, K_138};
 use crate::jets::base_jets::*;
 use crate::jets::bp_jets::*;
 use crate::jets::crypto_jets::*;
+use crate::jets::extra_jets::*;
 use crate::jets::tip5_jets::*;
 
 pub fn produce_prover_hot_state() -> Vec<HotEntry> {
@@ -13,6 +14,7 @@ pub fn produce_prover_hot_state() -> Vec<HotEntry> {
     jets.extend(ZTD_JETS);
     jets.extend(KEYGEN_JETS);
     jets.extend(UNVETTED_JETS);
+    jets.extend(EXTRA_JETS);
 
     jets
 }
@@ -326,3 +328,19 @@ pub const UNVETTED_JETS: &[HotEntry] = &[
         init_bpoly_jet,
     ),
 ];
+
+pub const EXTRA_JETS: &[HotEntry] = &[(
+    &[
+        K_138,
+        Left(b"one"),
+        Left(b"two"),
+        Left(b"tri"),
+        Left(b"qua"),
+        Left(b"pen"),
+        Left(b"zeke"),
+        Left(b"ave"),
+        Left(b"transpose"),
+    ],
+    1,
+    transpose_jet,
+)];
