@@ -12,6 +12,7 @@ pub fn produce_prover_hot_state() -> Vec<HotEntry> {
     jets.extend(BASE_POLY_JETS);
     jets.extend(ZTD_JETS);
     jets.extend(KEYGEN_JETS);
+    jets.extend(UNVETTED_JETS);
 
     jets
 }
@@ -248,3 +249,80 @@ pub const KEYGEN_JETS: &[HotEntry] = &[(
     1,
     argon2_jet,
 )];
+
+pub const UNVETTED_JETS: &[HotEntry] = &[
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"bp-ntt"),
+        ],
+        1,
+        bp_ntt_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"bp-fft"),
+        ],
+        1,
+        bp_fft_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"bp-shift"),
+        ],
+        1,
+        bp_shift_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"bp-coseword"),
+        ],
+        1,
+        bp_coseword_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"init-bpoly"),
+        ],
+        1,
+        init_bpoly_jet,
+    ),
+];
