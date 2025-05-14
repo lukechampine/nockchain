@@ -38,12 +38,16 @@ pub fn vec_to_hoon_list(context: &mut Context, vec: &[u64]) -> Noun {
     list
 }
 
-pub fn permutation_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
-    let sample = slot(subject, 6)?;
+pub fn permutation(context: &mut Context, sample: Noun) -> Result<Noun, JetErr> {
     let mut sponge = hoon_list_to_sponge(sample)?;
     permute(&mut sponge);
 
     let new_sponge = vec_to_hoon_list(context, &sponge);
 
     Ok(new_sponge)
+}
+
+pub fn permutation_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+    let sample = slot(subject, 6)?;
+    permutation(context, sample)
 }

@@ -15,9 +15,8 @@
 use crate::interpreter::Context;
 use crate::jets::util::*;
 use crate::jets::Result;
-use crate::noun::{Atom, DirectAtom, IndirectAtom, Noun, D, DIRECT_MAX, T};
+use crate::noun::{Atom, DirectAtom, IndirectAtom, Noun, D};
 use either::{Left, Right};
-use ibig::ops::DivRem;
 use ibig::UBig;
 
 crate::gdb!();
@@ -91,27 +90,7 @@ pub fn jet_dvr(context: &mut Context, subject: Noun) -> Result {
     let a = slot(arg, 2)?.as_atom()?;
     let b = slot(arg, 3)?.as_atom()?;
 
-    if unsafe { b.as_noun().raw_equals(&D(0)) } {
-        Err(BAIL_EXIT)
-    } else {
-        let (div, rem) = if let (Ok(a), Ok(b)) = (a.as_direct(), b.as_direct()) {
-            let (div, rem) = (a.data() / b.data(), a.data() % b.data());
-            unsafe {
-                (
-                    DirectAtom::new_unchecked(div).as_noun(),
-                    DirectAtom::new_unchecked(rem).as_noun(),
-                )
-            }
-        } else {
-            let (div, rem) = a.as_ubig(stack).div_rem(b.as_ubig(stack));
-            (
-                Atom::from_ubig(stack, &div).as_noun(),
-                Atom::from_ubig(stack, &rem).as_noun(),
-            )
-        };
-
-        Ok(T(stack, &[div, rem]))
-    }
+    util::dvr(stack, a, b).ok_or(BAIL_EXIT)
 }
 
 pub fn jet_gte(context: &mut Context, subject: Noun) -> Result {
@@ -218,26 +197,7 @@ pub fn jet_mul(context: &mut Context, subject: Noun) -> Result {
     let a = slot(arg, 2)?.as_atom()?;
     let b = slot(arg, 3)?.as_atom()?;
 
-    if let (Ok(a), Ok(b)) = (a.as_direct(), b.as_direct()) {
-        let res = a.data() as u128 * b.data() as u128;
-        if res < DIRECT_MAX as u128 {
-            Ok(Atom::new(stack, res as u64).as_noun())
-        } else {
-            Ok(unsafe {
-                IndirectAtom::new_raw_bytes(
-                    stack,
-                    if res < u64::MAX as u128 { 8 } else { 16 },
-                    &res as *const u128 as *const u8,
-                )
-            }
-            .as_noun())
-        }
-    } else {
-        let a_big = a.as_ubig(stack);
-        let b_big = b.as_ubig(stack);
-        let res = UBig::mul_stack(stack, a_big, b_big);
-        Ok(Atom::from_ubig(stack, &res).as_noun())
-    }
+    Ok(util::mul(stack, a, b).as_noun())
 }
 
 pub fn jet_sub(context: &mut Context, subject: Noun) -> Result {
@@ -250,8 +210,9 @@ pub fn jet_sub(context: &mut Context, subject: Noun) -> Result {
 
 pub mod util {
     use crate::mem::NockStack;
-    use crate::noun::{Atom, Error, Noun, Result, NO, YES};
+    use crate::noun::{Atom, T, D, Error, DirectAtom, IndirectAtom, Noun, Result, DIRECT_MAX, NO, YES};
     use ibig::UBig;
+    use ibig::ops::DivRem;
 
     /// Addition
     pub fn add(stack: &mut NockStack, a: Atom, b: Atom) -> Atom {
@@ -275,6 +236,30 @@ pub mod util {
             false
         } else {
             a.as_ubig(stack) >= b.as_ubig(stack)
+        }
+    }
+
+    pub fn dvr(stack: &mut NockStack, a: Atom, b: Atom) -> Option<Noun> {
+        if unsafe { b.as_noun().raw_equals(&D(0)) } {
+            None
+        } else {
+            let (div, rem) = if let (Ok(a), Ok(b)) = (a.as_direct(), b.as_direct()) {
+                let (div, rem) = (a.data() / b.data(), a.data() % b.data());
+                unsafe {
+                    (
+                        DirectAtom::new_unchecked(div).as_noun(),
+                        DirectAtom::new_unchecked(rem).as_noun(),
+                    )
+                }
+            } else {
+                let (div, rem) = a.as_ubig(stack).div_rem(b.as_ubig(stack));
+                (
+                    Atom::from_ubig(stack, &div).as_noun(),
+                    Atom::from_ubig(stack, &rem).as_noun(),
+                )
+            };
+
+            Some(T(stack, &[div, rem]))
         }
     }
 
@@ -376,6 +361,30 @@ pub mod util {
                 let res = UBig::sub_stack(stack, a_big, b_big);
                 Ok(Atom::from_ubig(stack, &res))
             }
+        }
+    }
+
+    /// Multiplication
+    pub fn mul(stack: &mut NockStack, a: Atom, b: Atom) -> Atom {
+        if let (Ok(a), Ok(b)) = (a.as_direct(), b.as_direct()) {
+            let res = a.data() as u128 * b.data() as u128;
+            if res < DIRECT_MAX as u128 {
+                Atom::new(stack, res as u64)
+            } else {
+                unsafe {
+                    IndirectAtom::new_raw_bytes(
+                        stack,
+                        if res < u64::MAX as u128 { 8 } else { 16 },
+                        &res as *const u128 as *const u8,
+                    )
+                }
+                .as_atom()
+            }
+        } else {
+            let a_big = a.as_ubig(stack);
+            let b_big = b.as_ubig(stack);
+            let res = UBig::mul_stack(stack, a_big, b_big);
+            Atom::from_ubig(stack, &res)
         }
     }
 }
