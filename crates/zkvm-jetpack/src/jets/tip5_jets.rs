@@ -2,6 +2,7 @@ use nockvm::interpreter::Context;
 use nockvm::jets::util::slot;
 use nockvm::jets::JetErr;
 use nockvm::noun::{Atom, Noun, D, T};
+use nockvm::mem::NockStack;
 
 use crate::form::math::tip5::*;
 use crate::jets::utils::jet_err;
@@ -29,25 +30,25 @@ pub fn hoon_list_to_sponge(list: Noun) -> Result<[u64; STATE_SIZE], JetErr> {
     Ok(sponge)
 }
 
-pub fn vec_to_hoon_list(context: &mut Context, vec: &[u64]) -> Noun {
+pub fn vec_to_hoon_list(stack: &mut NockStack, vec: &[u64]) -> Noun {
     let mut list = D(0);
     for e in vec.iter().rev() {
-        let n = Atom::new(&mut context.stack, *e).as_noun();
-        list = T(&mut context.stack, &[n, list]);
+        let n = Atom::new(stack, *e).as_noun();
+        list = T(stack, &[n, list]);
     }
     list
 }
 
-pub fn permutation(context: &mut Context, sample: Noun) -> Result<Noun, JetErr> {
+pub fn permutation(stack: &mut NockStack, sample: Noun) -> Result<Noun, JetErr> {
     let mut sponge = hoon_list_to_sponge(sample)?;
     permute(&mut sponge);
 
-    let new_sponge = vec_to_hoon_list(context, &sponge);
+    let new_sponge = vec_to_hoon_list(stack, &sponge);
 
     Ok(new_sponge)
 }
 
 pub fn permutation_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let sample = slot(subject, 6)?;
-    permutation(context, sample)
+    permutation(&mut context.stack, sample)
 }

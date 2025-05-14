@@ -1,5 +1,6 @@
 use crate::form::math::tip5;
 use crate::hand::structs::HoonList;
+use crate::jets::bp_jets::bpoly_to_list;
 use either::Either;
 use nockvm::interpreter::Context;
 use nockvm::jets::bits::util as bits;
@@ -13,10 +14,84 @@ use nockvm_macros::tas;
 
 use tracing::log::*;
 
+/// Extracts sample and calls the jet implementation.
+///
+/// This is so that we can have callable implementations for composing jets.
+macro_rules! sam_jet {
+    ($name:ident => $imp:ident$(,)?) => {
+        pub fn $name(context: &mut Context, subject: Noun) -> Result {
+            let sam = slot(subject, 6)?;
+            $imp(&mut context.stack, sam)
+        }
+    };
+    ($name:ident => $imp:ident, $($rest:tt)*) => {
+        sam_jet!($name => $imp);
+        sam_jet!($($rest)*);
+    };
+}
+
+sam_jet! {
+    hash_10_jet => hash_10,
+    hash_belts_list_jet => hash_belts_list,
+    hash_noun_varlen_jet => hash_noun_varlen,
+    hash_varlen_jet => hash_varlen,
+    hash_hashable_jet => hash_hashable,
+    hash_ten_cell_jet => hash_ten_cell,
+    leaf_sequence_jet => leaf_sequence,
+}
+
 /*
  * +$  array  [len=@ dat=@ux]
  * +$  mary   [step=@ =array]
 */
+
+pub fn step_mary(ma: Noun) -> Result {
+    slot(ma, 2)
+}
+
+pub fn len_mary(ma: Noun) -> Result {
+    slot(ma, 6)
+}
+
+pub fn array_mary(ma: Noun) -> Result {
+    slot(ma, 3)
+}
+
+pub fn dat_mary(ma: Noun) -> Result {
+    slot(ma, 7)
+}
+
+pub fn change_step(stack: &mut NockStack, new_step: Noun, ma: Noun) -> Result {
+    // |=  [new-step=@]
+    // ^-  mary
+
+    let new_step = new_step.as_direct()?.data();
+
+    let cur_step = slot(ma, 2)?.as_direct()?.data();
+    let arr = slot(ma, 3)?;
+    let cur_len = slot(arr, 2)?.as_direct()?.data();
+    let data = slot(arr, 3)?.as_atom()?;
+
+    // ?:  =(step.ma new-step)  ma
+    if cur_step == new_step {
+        return Ok(ma);
+    }
+
+    // ?>  =((mod (mul step.ma len.array.ma) new-step) 0)
+    debug_assert_eq!((cur_step * cur_len) % new_step, 0);
+
+    // :+  new-step
+    //   (div (mul step.ma len.array.ma) new-step)
+    // dat.array.ma
+    Ok(T(
+        stack,
+        &[
+            D(new_step),
+            D((cur_step * cur_len) / new_step),
+            data.as_noun(),
+        ],
+    ))
+}
 
 pub fn transpose_jet(context: &mut Context, subject: Noun) -> Result {
     let sam = slot(subject, 6)?;
@@ -336,7 +411,7 @@ pub fn slag(n: usize, list: Noun) -> Result {
     Ok(cell.as_noun())
 }
 
-pub fn hash_10(context: &mut Context, input: Noun) -> Result {
+pub fn hash_10(stack: &mut NockStack, input: Noun) -> Result {
     // ::  +hash-10: hash list of 10 belts into a list of 5 belts
     // |=  input=(list belt)
     // ::  output length is 5
@@ -348,38 +423,54 @@ pub fn hash_10(context: &mut Context, input: Noun) -> Result {
     // FIXME: acc verify this
 
     // =.  input   (turn input montify)
-    let input = scag_map(&mut context.stack, usize::MAX, input, |stack, i| {
+    let input = scag_map(stack, usize::MAX, input, |stack, i| {
         montify(stack, i.as_atom()?).map(Atom::as_noun)
     })?;
 
     // =/  sponge  (init-tip5-state %fixed)
-    let sponge = init_tip5_state(&mut context.stack, DirectAtom::new(tas!(b"fixed"))?)?;
+    let sponge = init_tip5_state(stack, DirectAtom::new(tas!(b"fixed"))?)?;
 
     // =.  sponge  (permutation (weld input (slag rate sponge)))
     let slagged = slag(RATE, sponge)?;
-    let welded = list::weld(&mut context.stack, input, slagged)?;
-    let sponge = crate::jets::tip5_jets::permutation(context, welded)?;
+    let welded = list::weld(stack, input, slagged)?;
+    let sponge = crate::jets::tip5_jets::permutation(stack, welded)?;
 
     // (turn (scag digest-length sponge) mont-reduction)
-    let scagged = scag_map(&mut context.stack, DIGEST_LENGTH, sponge, |stack, v| {
+    let scagged = scag_map(stack, DIGEST_LENGTH, sponge, |stack, v| {
         mont_reduction(stack, v.as_atom()?).map(Atom::as_noun)
     })?;
 
     Ok(scagged)
 }
 
-pub fn hash_10_jet(context: &mut Context, input: Noun) -> Result {
-    let sam = slot(input, 6)?;
-    hash_10(context, sam)
-}
-
-/*pub fn hash_belts_list(context: &mut Context, belts: Noun) -> Result {
+pub fn hash_belts_list(stack: &mut NockStack, belts: Noun) -> Result {
     // |=  belts=(list belt)
     // ^-  noun-digest:tip5
     // =-  ?>  ?=(noun-digest -)  -
     // %-  list-to-tuple
     // (hash-varlen belts)
-}*/
+    let hashed = hash_varlen(stack, belts)?;
+    list_to_tuple_inplace(hashed)
+}
+
+pub fn hash_noun_varlen(stack: &mut NockStack, n: Noun) -> Result {
+    // ~/  %hash-noun-varlen
+    // |=  n=*
+    // ^-  noun-digest
+    // =/  leaf=(list @)  (leaf-sequence:shape n)
+    let leaf = leaf_sequence(stack, n)?;
+
+    // =/  dyck=(list @)  (dyck:shape n)
+    let dyck = dyck(stack, leaf)?;
+
+    // =/  size  (lent leaf)
+    let size = list::lent(leaf)?;
+
+    // (hash-belts-list [size (weld leaf dyck)])
+    let welded = list::weld(stack, leaf, dyck)?;
+    let t = T(stack, &[D(size as u64), welded]);
+    hash_belts_list(stack, t)
+}
 
 pub fn new_sponge(stack: &mut NockStack) -> Result {
     init_tip5_state(stack, DirectAtom::new(tas!(b"variable"))?)
@@ -477,11 +568,6 @@ pub fn hash_varlen(stack: &mut NockStack, input: Noun) -> Result {
     scag(stack, DIGEST_LENGTH, output)
 }
 
-pub fn hash_varlen_jet(context: &mut Context, subject: Noun) -> Result {
-    let sam = slot(subject, 6)?;
-    hash_varlen(&mut context.stack, sam)
-}
-
 pub fn hash_pairs_jet(context: &mut Context, subject: Noun) -> Result {
     let sam = slot(subject, 6)?;
 
@@ -523,7 +609,7 @@ pub fn hash_pairs_jet(context: &mut Context, subject: Noun) -> Result {
         // :: (weld <...>)
         let welded = list::weld(&mut context.stack, first, second)?;
         // hash-10:tip5
-        let hashed = hash_10(context, welded)
+        let hashed = hash_10(&mut context.stack, welded)
             .inspect_err(|e| eprintln!("hash_10 failed: {e:?}"))
             .map_err(|_| JetErr::Punt)?;
 
@@ -540,6 +626,227 @@ pub fn hash_pairs_jet(context: &mut Context, subject: Noun) -> Result {
         let new_cell = Cell::new(&mut context.stack, D(0), D(0));
         unsafe { (*cur.to_raw_pointer_mut()).tail = new_cell.as_noun() };
         cur = new_cell;
+    }
+
+    Ok(ret.as_noun())
+}
+
+pub fn hash_hashable(stack: &mut NockStack, h: Noun) -> Result {
+    // ~/  %hash-hashable
+    // |=  h=hashable
+    // ^-  noun-digest
+    let h = h.as_cell()?;
+    let ty = h.head().as_direct().map(|v| v.data());
+
+    match ty {
+        Ok(tas!(b"hash")) => {
+            //trace!("hash");
+            // ?:  ?=(%hash -.h)
+            //   p.h
+            return Ok(h.tail());
+        }
+        Ok(tas!(b"leaf")) => {
+            //trace!("leaf");
+            // ?:  ?=(%leaf -.h)
+            //   (hash-noun-varlen p.h)
+            return hash_noun_varlen(stack, h.tail());
+        }
+        Ok(tas!(b"list")) => {
+            //trace!("list");
+            // ?:  ?=(%list -.h)
+            //   (hash-noun-varlen (turn p.h hash-hashable))
+            let list = scag_map(stack, usize::MAX, h.tail(), |stack, v| {
+                hash_hashable(stack, v)
+            })?;
+            return hash_noun_varlen(stack, list);
+        }
+        Ok(tas!(b"mary")) => {
+            //trace!("mary");
+            // ?:  ?=(%mary -.h)
+            let ma = h.tail();
+
+            //   %-  hash-hashable
+
+            //   :-  leaf+step.p.h
+            let step_ma = step_mary(ma).inspect_err(|e| trace!("step {e:?}"))?;
+            let step = T(stack, &[D(tas!(b"leaf")), step_ma]);
+
+            //   :-  leaf+len.array.p.h
+            let len_ma = len_mary(ma).inspect_err(|e| trace!("len {e:?}"))?;
+            let len = T(stack, &[D(tas!(b"leaf")), len_ma]);
+
+            //   hash+(hash-belts-list (bpoly-to-list array:(~(change-step ave p.h) 1)))
+            let ma = change_step(stack, D(1), ma).inspect_err(|e| trace!("change step {e:?}"))?;
+            let arr = array_mary(ma).inspect_err(|e| trace!("arr {e:?}"))?;
+            let l = bpoly_to_list(stack, arr).inspect_err(|e| trace!("bplist {e:?}"))?;
+            let hash = hash_belts_list(stack, l).inspect_err(|e| trace!("hbl {e:?}"))?;
+            let hash = T(stack, &[D(tas!(b"hash")), hash]);
+
+            let f = T(stack, &[len, hash]);
+            let f = T(stack, &[step, f]);
+
+            return hash_hashable(stack, f);
+        }
+        _ => {
+            //trace!("other");
+            // %-  hash-ten-cell
+            // [$(h p.h) $(h q.h)]
+            let p = hash_hashable(stack, h.head())?;
+            let q = hash_hashable(stack, h.tail())?;
+            let c = Cell::new(stack, p, q);
+            return hash_ten_cell(stack, c.as_noun());
+        }
+    }
+}
+
+/// Inplace modify list to a tuple.
+/// If you wish to make this jettable, create a copy of the list, and then call this func.
+pub fn list_to_tuple_inplace(n: Noun) -> Result {
+    let mut prev = None;
+    let mut cell = n.as_cell()?;
+
+    loop {
+        if let Ok(tail) = cell.tail().as_cell() {
+            prev = Some(cell);
+            cell = tail;
+        } else {
+            if let Some(mut prev) = prev {
+                unsafe { (*prev.to_raw_pointer_mut()).tail = cell.head() };
+                return Ok(n);
+            } else {
+                return Ok(cell.head());
+            }
+        }
+    }
+}
+
+pub fn hash_ten_cell(stack: &mut NockStack, ten_cell: Noun) -> Result {
+    // ~/  %hash-ten-cell
+    // |=  =ten-cell
+    // ^-  noun-digest
+    // =-  ?>  ?=(noun-digest -)  -
+
+    // NOTE: reversed order
+    // %-  leaf-sequence:shape
+    let seq = leaf_sequence(stack, ten_cell)?;
+
+    // %-  hash-10
+    let hash = hash_10(stack, seq)?;
+
+    // %-  list-to-tuple
+    let tup = list_to_tuple_inplace(hash)?;
+
+    Ok(tup)
+}
+
+pub fn dyck(stack: &mut NockStack, mut t: Noun) -> Result {
+    // ~/  %dyck
+    // |=  t=*
+    // %-  flop
+    // ^-  (list @)
+    // =|  vec=(list @)
+    // |-
+    // ?@  t  vec
+    // $(t +.t, vec [1 $(t -.t, vec [0 vec])])
+
+    // NOTE: Let's do this differently...
+    //
+    // if cell:
+    // vec = 1^recurse(head, 0^vec)
+    // recurse(tail, vec)
+    // if atom:
+    // return vec
+    //
+    // reverse(vec)
+    let ret = Cell::new(stack, D(0), D(0));
+    let mut cur = ret;
+
+    let mut prev = D(0);
+
+    loop {
+        match t.as_either_atom_cell() {
+            Either::Left(_) => {
+                // if t = atom:
+
+                //   push 1 to cur.head
+                unsafe { (*cur.to_raw_pointer_mut()).head = D(1) };
+
+                //   t = prev.pop_cell() else break
+                let Ok(prev_t) = prev.as_cell() else { break };
+                t = prev_t.head();
+                prev = prev_t.tail();
+            }
+            Either::Right(c) => {
+                // else:
+
+                //   push 0 to cur.head
+                unsafe { (*cur.to_raw_pointer_mut()).head = D(0) };
+
+                //  prev.push_cell(cell.tail)
+                prev = Cell::new(stack, c.tail(), prev).as_noun();
+
+                //  t = cell.head
+                t = c.head();
+            }
+        }
+
+        //   cur.tail = new_cell
+        //   cur = new_cell
+        let new_cell = Cell::new(stack, D(0), D(0));
+        unsafe { (*cur.to_raw_pointer_mut()).tail = new_cell.as_noun() };
+        cur = new_cell;
+    }
+
+    Ok(ret.as_noun())
+}
+
+pub fn leaf_sequence(stack: &mut NockStack, mut t: Noun) -> Result {
+    // ~/  %leaf-sequence
+    // |=  t=*
+    // %-  flop
+    // ^-  (list @)
+    // =|  vec=(list @)
+    // |-
+    // ?@  t  t^vec
+    // $(t +.t, vec $(t -.t))
+
+    // NOTE: Let's do this differently...
+    // leaf-sequence constructs a flattened reversed list of all elems of t (as a list!), and then
+    // reverses it. So, let's just flatten in-order...
+    let ret = Cell::new(stack, D(0), D(0));
+    let mut cur = ret;
+
+    let mut prev = D(0);
+
+    loop {
+        match t.as_either_atom_cell() {
+            Either::Left(a) => {
+                // if t = atom:
+
+                //   push t to cur.head
+                unsafe { (*cur.to_raw_pointer_mut()).head = a.as_noun() };
+
+                //   t = prev.pop_cell() else break
+                let Ok(prev_t) = prev.as_cell() else { break };
+                t = prev_t.head();
+                prev = prev_t.tail();
+
+                //   cur.tail = new_cell
+                //   cur = new_cell
+                let new_cell = Cell::new(stack, D(0), D(0));
+                unsafe { (*cur.to_raw_pointer_mut()).tail = new_cell.as_noun() };
+                cur = new_cell;
+            }
+            Either::Right(c) => {
+                // else:
+
+                //  prev.push_cell(cell.tail)
+                prev = Cell::new(stack, c.tail(), prev).as_noun();
+
+                //  t = cell.head
+                t = c.head();
+            }
+        }
     }
 
     Ok(ret.as_noun())
