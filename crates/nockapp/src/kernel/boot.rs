@@ -22,7 +22,7 @@ pub enum TraceMode {
 
 #[derive(Args, Clone, Debug, Default)]
 pub struct TraceOpts {
-    #[arg(long = "trace", help = "Make a Sword trace", default_value = "none")]
+    #[arg(long = "trace", help = "Make a Sword trace")]
     pub mode: Option<TraceMode>,
 
     #[arg(long, requires = "trace")]
