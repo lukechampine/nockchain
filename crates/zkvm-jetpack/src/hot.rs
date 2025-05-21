@@ -13,7 +13,7 @@ pub fn produce_prover_hot_state() -> Vec<HotEntry> {
     jets.extend(BASE_POLY_JETS);
     jets.extend(ZTD_JETS);
     jets.extend(KEYGEN_JETS);
-    jets.extend(UNVETTED_JETS);
+    //jets.extend(UNVETTED_JETS);
     jets.extend(EXTRA_JETS);
 
     jets
