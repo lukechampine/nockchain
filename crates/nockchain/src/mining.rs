@@ -11,7 +11,7 @@ use nockapp::noun::{AtomExt, NounExt};
 use nockvm::noun::{Atom, D, T};
 use nockvm_macros::tas;
 use tempfile::tempdir;
-use tracing::{instrument, warn};
+use tracing::{debug, instrument, trace, warn};
 
 pub enum MiningWire {
     Mined,
@@ -161,6 +161,7 @@ pub fn create_mining_driver(
 }
 
 pub async fn mining_attempt(candidate: NounSlab, handle: NockAppHandle) -> () {
+    debug!("New mining attempt");
     let snapshot_dir =
         tokio::task::spawn_blocking(|| tempdir().expect("Failed to create temporary directory"))
             .await
@@ -182,6 +183,7 @@ pub async fn mining_attempt(candidate: NounSlab, handle: NockAppHandle) -> () {
             drop(effect);
             continue;
         };
+        trace!("Miner effect");
         if effect_cell.head().eq_bytes("command") {
             handle
                 .poke(MiningWire::Mined.to_wire(), effect)
