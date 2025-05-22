@@ -200,23 +200,33 @@ pub fn init_default_tracing(cli: &Cli) {
     let filter = EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(|_| "trace".to_string()));
     let use_ansi = cli.color == ColorChoice::Auto || cli.color == ColorChoice::Always;
 
-    let nockcode_filter = tracing_subscriber::filter::filter_fn(|meta| meta.target() == "nockcode");
-    let tracy = tracing_tracy::TracyLayer::default();
+    let tracy = if std::env::var("USE_TRACY").unwrap_or_else(|_| "false".to_string()) == "true" {
+        let nockcode_filter = tracing_subscriber::filter::filter_fn(|meta| meta.target() == "nockcode");
+        let tracy = tracing_tracy::TracyLayer::default();
+        Some((nockcode_filter, tracy))
+    } else {
+        None
+    };
 
     // Build and initialize the subscriber based on format and mode
     match std::env::var("MINIMAL_LOG_FORMAT").unwrap_or_else(|_| "false".to_string()) == "true" {
         // Default pretty format for production
         false => {
-            tracing_subscriber::registry()
+            let r = tracing_subscriber::registry()
                 .with(
                     fmt::layer()
                         .with_ansi(use_ansi)
                         .with_target(true)
                         .with_level(true),
                 )
-                .with(filter)
-                .with(tracy.with_filter(nockcode_filter))
-                .init();
+                .with(filter);
+
+            if let Some((nockcode_filter, tracy)) = tracy {
+                r.with(tracy.with_filter(nockcode_filter))
+                    .init();
+            } else {
+                r.init();
+            }
         }
         // Development mode with minimal formatter
         true => {
@@ -224,11 +234,16 @@ pub fn init_default_tracing(cli: &Cli) {
                 .with_ansi(use_ansi)
                 .event_format(MinimalFormatter);
 
-            tracing_subscriber::registry()
+            let r = tracing_subscriber::registry()
                 .with(fmt_layer)
-                .with(filter)
-                .with(tracy.with_filter(nockcode_filter))
-                .init();
+                .with(filter);
+
+            if let Some((nockcode_filter, tracy)) = tracy {
+                r.with(tracy.with_filter(nockcode_filter))
+                    .init();
+            } else {
+                r.init();
+            }
         }
     }
 }

@@ -67,18 +67,16 @@ impl TraceBackend for FileBackend {
                 }
             };
 
-            assert_no_alloc::permit_alloc(|| {
-                let obj = object! {
-                    "cat" => "nock",
-                    "name" => pc_str,
-                    "ph" => "X",
-                    "pid" => self.pid,
-                    "tid" => 1,
-                    "ts" => ts,
-                    "dur" => dur,
-                };
-                obj.write(&mut self.file)
-            })?;
+            let obj = object! {
+                "cat" => "nock",
+                "name" => pc_str,
+                "ph" => "X",
+                "pid" => self.pid,
+                "tid" => 1,
+                "ts" => ts,
+                "dur" => dur,
+            };
+            obj.write(&mut self.file)?;
             self.file.write_all(",\n".as_bytes())?;
 
             trace_stack = (*trace_stack).next;
@@ -93,18 +91,16 @@ impl TraceBackend for FileBackend {
             .as_micros() as f64;
         let dur = Instant::now().saturating_duration_since(start).as_micros() as f64;
 
-        assert_no_alloc::permit_alloc(|| {
-            let obj = object! {
-                "cat" => "event",
-                "name" => name,
-                "ph" => "X",
-                "pid" => self.pid,
-                "tid" => 1,
-                "ts" => ts,
-                "dur" => dur,
-            };
-            obj.write(&mut self.file)
-        })?;
+        let obj = object! {
+            "cat" => "event",
+            "name" => name,
+            "ph" => "X",
+            "pid" => self.pid,
+            "tid" => 1,
+            "ts" => ts,
+            "dur" => dur,
+        };
+        obj.write(&mut self.file)?;
         self.file.write_all(",\n".as_bytes())?;
 
         Ok(())

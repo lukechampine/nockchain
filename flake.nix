@@ -8,10 +8,10 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    naersk.url = "github:nix-community/naersk";
+    crane.url = "github:ipetkov/crane";
   };
 
-  outputs = { self, nixpkgs, flake-utils, rust-overlay, naersk }:
+  outputs = { self, nixpkgs, flake-utils, rust-overlay, crane }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = (import nixpkgs) {
@@ -23,13 +23,11 @@
         };
         lib = pkgs.lib;
 
-        toolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+        craneLib = (crane.mkLib pkgs).overrideToolchain (
+          p: p.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml
+        );
 
-        naersk' = pkgs.callPackage naersk {
-          cargo = toolchain;
-          rustc = toolchain;
-        };
-        code = pkgs.callPackage ./nix/. { inherit pkgs system naersk' lib; };
+        code = pkgs.callPackage ./nix/. { inherit pkgs system lib craneLib; };
       in rec {
         packages = {
           hoonc = code.hoonc;

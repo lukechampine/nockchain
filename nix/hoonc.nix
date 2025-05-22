@@ -1,4 +1,4 @@
-{ lib, stdenv, base, naersk', ... }:
+{ lib, stdenv, base, craneLib, ... }:
 let
   keepList = [
     "crates/nockapp"
@@ -8,25 +8,41 @@ let
     "Cargo.toml"
   ];
 
-  hoonc-base = naersk'.buildPackage {
-    name = "hoonc";
-    # Filter out as much as possible so that we don't have to rebuild unnecessarily
-    src = base.filteredRoot ../. (path: type:
-      if builtins.elem path keepList then
-        true
-      else if type == "directory" && lib.strings.hasInfix "crates" path then
-        true
-      else if lib.strings.hasSuffix "src/lib.rs" path then
-        true
-      else if lib.strings.hasSuffix "src/main.rs" path then
-        true
-      else
-        builtins.any (k: lib.strings.hasInfix "${k}" path) keepList
-    );
-    cargoBuildOptions = x: x ++ [ "-p" "hoonc" ];
+  # src = craneLib.cleanCargoSource ./.;
+  src = base.filteredRoot ../. (path: type:
+    if builtins.elem path keepList then
+      true
+    else if type == "directory" && lib.strings.hasInfix "crates" path then
+      true
+    else if lib.strings.hasSuffix "src/lib.rs" path then
+      true
+    else if lib.strings.hasSuffix "src/main.rs" path then
+      true
+    else
+      builtins.any (k: lib.strings.hasInfix "${k}" path) keepList
+  );
 
-    cargoLock = ../Cargo.lock;
+  commonArgs = {
+    inherit src;
+    strictDeps = true;
+    pname = "hoonc-deps";
+    # Additional environment variables can be set directly
+    # MY_CUSTOM_VAR = "some value";
   };
+  cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+
+  individualCrateArgs = commonArgs // {
+    inherit cargoArtifacts;
+    inherit (craneLib.crateNameFromCargoToml { inherit src; }) version;
+    # NB: we disable tests since we'll run them all via cargo-nextest
+    doCheck = false;
+  };
+
+  hoonc-base = craneLib.buildPackage (
+  individualCrateArgs // {
+    pname = "hoonc";
+    cargoExtraArgs = "-p hoonc";
+  });
 in
 {
   hoonc = hoonc-base;

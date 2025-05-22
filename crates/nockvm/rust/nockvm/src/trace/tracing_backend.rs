@@ -141,48 +141,46 @@ impl Drop for TracingBackend {
 
 impl TraceBackend for TracingBackend {
     fn append_trace(&mut self, stack: &mut NockStack, path: Noun) -> Option<NonNull<TraceStack>> {
-        assert_no_alloc::permit_alloc(|| {
-            let mut tmp = path;
+        let mut tmp = path;
 
-            let chum = loop {
-                match tmp.as_either_atom_cell() {
-                    Either::Left(atom) => break atom,
-                    Either::Right(cell) => tmp = cell.head(),
-                }
-            };
-
-            let chum = std::str::from_utf8(chum.as_ne_bytes()).ok()?;
-
-            let chum = chum.trim_end_matches('\0');
-
-            let path = path_to_cord(stack, path);
-            let path = std::str::from_utf8(path.as_ne_bytes()).unwrap_or("");
-
-            if self.subscriber.is_none() {
-                self.subscriber = Some(dispatcher::get_default(Clone::clone));
+        let chum = loop {
+            match tmp.as_either_atom_cell() {
+                Either::Left(atom) => break atom,
+                Either::Right(cell) => tmp = cell.head(),
             }
+        };
 
-            let subscriber = self.subscriber.as_ref().unwrap();
+        let chum = std::str::from_utf8(chum.as_ne_bytes()).ok()?;
 
-            let id = if let Some(entry) = self.entries.get(chum) {
-                entry.id.clone()
-            } else {
-                let entry = TraceEntry::new(chum, path, &subscriber, Level::DEBUG);
-                let id = entry.id.clone();
-                self.entries.insert(entry);
-                id
-            };
+        let chum = chum.trim_end_matches('\0');
 
-            subscriber.enter(&id);
+        let path = path_to_cord(stack, path);
+        let path = std::str::from_utf8(path.as_ne_bytes()).unwrap_or("");
 
-            unsafe {
-                let new_trace_entry = stack.struct_alloc(1);
-                *new_trace_entry = TraceStack::new(TraceData {
-                    span_id: id.into_u64(),
-                });
-                Some(NonNull::new_unchecked(new_trace_entry as *mut TraceStack))
-            }
-        })
+        if self.subscriber.is_none() {
+            self.subscriber = Some(dispatcher::get_default(Clone::clone));
+        }
+
+        let subscriber = self.subscriber.as_ref().unwrap();
+
+        let id = if let Some(entry) = self.entries.get(chum) {
+            entry.id.clone()
+        } else {
+            let entry = TraceEntry::new(chum, path, &subscriber, Level::DEBUG);
+            let id = entry.id.clone();
+            self.entries.insert(entry);
+            id
+        };
+
+        subscriber.enter(&id);
+
+        unsafe {
+            let new_trace_entry = stack.struct_alloc(1);
+            *new_trace_entry = TraceStack::new(TraceData {
+                span_id: id.into_u64(),
+            });
+            Some(NonNull::new_unchecked(new_trace_entry as *mut TraceStack))
+        }
     }
 
     unsafe fn write_nock_trace(
@@ -204,9 +202,7 @@ impl TraceBackend for TracingBackend {
         loop {
             let id = Id::from_u64((*trace_stack).span_id);
 
-            assert_no_alloc::permit_alloc(|| {
-                subscriber.exit(&id);
-            });
+            subscriber.exit(&id);
 
             trace_stack = (*trace_stack).next;
 

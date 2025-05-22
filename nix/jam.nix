@@ -22,5 +22,6 @@ let
 in
 {
   dumb-jam = build-jam "./apps/dumbnet/outer.hoon";
+  miner-jam = build-jam "./apps/dumbnet/miner.hoon";
   wallet-jam = build-jam "./apps/wallet/wallet.hoon";
 }
