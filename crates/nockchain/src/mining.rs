@@ -12,6 +12,8 @@ use nockvm::noun::{Atom, D, T};
 use nockvm_macros::tas;
 use tempfile::tempdir;
 use tracing::{debug, instrument, trace, warn};
+use tokio::sync::Notify;
+use std::sync::Arc;
 
 pub enum MiningWire {
     Mined,
@@ -113,6 +115,7 @@ pub fn create_mining_driver(
             }
             let mut next_attempt: Option<NounSlab> = None;
             let mut current_attempt: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
+            let mut cur_notify: Option<Arc<Notify>> = None;
 
             loop {
                 tokio::select! {
@@ -134,10 +137,13 @@ pub fn create_mining_driver(
                             };
                             if !current_attempt.is_empty() {
                                 next_attempt = Some(candidate_slab);
+                                let _ = cur_notify.take().map(|v| v.notify_one());
                             } else {
                                 let (cur_handle, attempt_handle) = handle.dup();
                                 handle = cur_handle;
-                                current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle));
+                                let notif = Arc::new(Notify::new());
+                                current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle, notif.clone()));
+                                cur_notify = Some(notif);
                             }
                         }
                     },
@@ -151,7 +157,9 @@ pub fn create_mining_driver(
                         next_attempt = None;
                         let (cur_handle, attempt_handle) = handle.dup();
                         handle = cur_handle;
-                        current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle));
+                        let notif = Arc::new(Notify::new());
+                        current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle, notif.clone()));
+                        cur_notify = Some(notif);
 
                     }
                 }
@@ -160,7 +168,7 @@ pub fn create_mining_driver(
     })
 }
 
-pub async fn mining_attempt(candidate: NounSlab, handle: NockAppHandle) -> () {
+pub async fn mining_attempt(candidate: NounSlab, handle: NockAppHandle, cancel_notify: Arc<Notify>) -> () {
     debug!("New mining attempt");
     let snapshot_dir =
         tokio::task::spawn_blocking(|| tempdir().expect("Failed to create temporary directory"))
@@ -174,23 +182,38 @@ pub async fn mining_attempt(candidate: NounSlab, handle: NockAppHandle) -> () {
         Kernel::load_with_hot_state_huge(snapshot_path_buf, jam_paths, KERNEL, &hot_state, None)
             .await
             .expect("Could not load mining kernel");
-    let effects_slab = kernel
-        .poke(MiningWire::Candidate.to_wire(), candidate)
-        .await
-        .expect("Could not poke mining kernel with candidate");
-    for effect in effects_slab.to_vec() {
-        let Ok(effect_cell) = (unsafe { effect.root().as_cell() }) else {
-            drop(effect);
-            continue;
-        };
-        trace!("Miner effect");
-        if effect_cell.head().eq_bytes("command") {
-            handle
-                .poke(MiningWire::Mined.to_wire(), effect)
-                .await
-                .expect("Could not poke nockchain with mined PoW");
+
+    let cancel_task = async {
+        cancel_notify.notified().await;
+        debug!("Cancelling mining attempt");
+    };
+
+    let main_task = async {
+        let effects_slab = kernel
+            .poke(MiningWire::Candidate.to_wire(), candidate)
+            .await
+            .expect("Could not poke mining kernel with candidate");
+        for effect in effects_slab.to_vec() {
+            let Ok(effect_cell) = (unsafe { effect.root().as_cell() }) else {
+                drop(effect);
+                continue;
+            };
+            trace!("Miner effect");
+            if effect_cell.head().eq_bytes("command") {
+                handle
+                    .poke(MiningWire::Mined.to_wire(), effect)
+                    .await
+                    .expect("Could not poke nockchain with mined PoW");
+            }
         }
-    }
+    };
+
+    tokio::select! {
+        _ = main_task => (),
+        _ = cancel_task => {
+            let _ = kernel.stop().await;
+        },
+    };
 }
 
 #[instrument(skip(handle, pubkey))]
