@@ -566,8 +566,14 @@ pub async fn init_with_kernel(
 
     let mine = cli.as_ref().map_or(false, |c| c.mine);
 
-    let mining_driver =
-        crate::mining::create_mining_driver(mining_config, mine, Some(mining_init_tx));
+    let mining_driver = crate::mining::create_mining_driver(
+        mining_config,
+        mine,
+        Some(mining_init_tx),
+        cli.as_ref()
+            .map(|v| v.nockapp_cli.trace_opts.clone())
+            .unwrap_or_default(),
+    );
     nockapp.add_io_driver(mining_driver).await;
 
     let libp2p_driver = nockchain_libp2p_io::nc::make_libp2p_driver(

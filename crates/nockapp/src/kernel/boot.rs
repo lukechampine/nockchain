@@ -4,6 +4,7 @@ use crate::{default_data_dir, NockApp};
 use chrono;
 use clap::{arg, command, Args, ColorChoice, Parser, ValueEnum};
 use nockvm::jets::hot::HotEntry;
+use nockvm::trace::{FileBackend, IntervalFilter, KeywordFilter, TraceBackend, TraceInfo, TracingBackend, TraceFilter};
 use std::fs;
 use std::path::PathBuf;
 use tracing::{debug, info, Level};
@@ -33,6 +34,46 @@ pub struct TraceOpts {
 
     #[arg(long, default_value = "false")]
     pub trace_jets: bool,
+}
+
+impl From<TraceOpts> for Option<TraceInfo> {
+    fn from(trace_opts: TraceOpts) -> Self {
+        let keyword_filter = trace_opts
+            .keyword_filter
+            .map(|v| v.split(",").map(String::from).collect::<Vec<String>>())
+            .map(|keywords| KeywordFilter { keywords });
+        let interval_filter = trace_opts
+            .interval_filter
+            .map(|interval| IntervalFilter { interval, cnt: 0 });
+
+        let filter = match (keyword_filter, interval_filter) {
+            (Some(a), Some(b)) => Some(a.or(b).boxed()),
+            (Some(a), _) => Some(a.boxed()),
+            (_, Some(b)) => Some(b.boxed()),
+            (None, None) => None,
+        };
+
+        let trace_jets = trace_opts.trace_jets;
+
+        trace_opts
+            .mode
+            .map(|mode| match mode {
+                TraceMode::File => {
+                    let file = std::fs::File::create("trace.json")
+                        .expect("Cannot create trace file trace.json");
+                    let pid = std::process::id();
+                    let process_start = std::time::Instant::now();
+
+                    Box::new(FileBackend {
+                        file,
+                        pid,
+                        process_start,
+                    }) as Box<dyn TraceBackend>
+                }
+                TraceMode::Tracing => Box::new(TracingBackend::new()),
+            })
+        .map(|backend| TraceInfo { backend, filter, trace_jets })
+    }
 }
 
 #[derive(Parser, Debug, Clone)]

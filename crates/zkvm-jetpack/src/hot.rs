@@ -18,8 +18,8 @@ pub fn produce_prover_hot_state() -> Vec<HotEntry> {
     jets.extend(CURVE_JETS);
     jets.extend(ZTD_JETS);
     jets.extend(KEYGEN_JETS);
-    //jets.extend(UNVETTED_JETS);
-    //jets.extend(EXTRA_JETS);
+    jets.extend(UNVETTED_JETS);
+    jets.extend(EXTRA_JETS);
     jets.extend(XTRA_JETS);
     jets.extend(EXTENSION_FIELD_JETS);
 
@@ -440,7 +440,7 @@ pub const KEYGEN_JETS: &[HotEntry] = &[(
     argon2_jet,
 )];
 
-/*pub const UNVETTED_JETS: &[HotEntry] = &[
+pub const UNVETTED_JETS: &[HotEntry] = &[
     (
         &[
             K_138,
@@ -515,7 +515,7 @@ pub const KEYGEN_JETS: &[HotEntry] = &[(
         1,
         init_bpoly_jet,
     ),
-];*/
+];
 
 pub const EXTRA_JETS: &[HotEntry] = &[
     /*(

@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use kernels::miner::KERNEL;
+use nockapp::kernel::boot::TraceOpts;
 use nockapp::kernel::checkpoint::JamPaths;
 use nockapp::kernel::form::Kernel;
 use nockapp::nockapp::driver::{IODriverFn, NockAppHandle, PokeResult};
@@ -77,6 +78,7 @@ pub fn create_mining_driver(
     mining_config: Option<Vec<MiningKeyConfig>>,
     mine: bool,
     init_complete_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    trc: TraceOpts,
 ) -> IODriverFn {
     Box::new(move |mut handle| {
         Box::pin(async move {
@@ -142,7 +144,7 @@ pub fn create_mining_driver(
                                 let (cur_handle, attempt_handle) = handle.dup();
                                 handle = cur_handle;
                                 let notif = Arc::new(Notify::new());
-                                current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle, notif.clone()));
+                                current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle, notif.clone(), trc.clone()));
                                 cur_notify = Some(notif);
                             }
                         }
@@ -158,7 +160,7 @@ pub fn create_mining_driver(
                         let (cur_handle, attempt_handle) = handle.dup();
                         handle = cur_handle;
                         let notif = Arc::new(Notify::new());
-                        current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle, notif.clone()));
+                        current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle, notif.clone(), trc.clone()));
                         cur_notify = Some(notif);
 
                     }
@@ -168,7 +170,7 @@ pub fn create_mining_driver(
     })
 }
 
-pub async fn mining_attempt(candidate: NounSlab, handle: NockAppHandle, cancel_notify: Arc<Notify>) -> () {
+pub async fn mining_attempt(candidate: NounSlab, handle: NockAppHandle, cancel_notify: Arc<Notify>, trc: TraceOpts) -> () {
     debug!("New mining attempt");
     let snapshot_dir =
         tokio::task::spawn_blocking(|| tempdir().expect("Failed to create temporary directory"))
@@ -179,7 +181,7 @@ pub async fn mining_attempt(candidate: NounSlab, handle: NockAppHandle, cancel_n
     let jam_paths = JamPaths::new(snapshot_dir.path());
     // Spawns a new std::thread for this mining attempt
     let kernel =
-        Kernel::load_with_hot_state_huge(snapshot_path_buf, jam_paths, KERNEL, &hot_state, None)
+        Kernel::load_with_hot_state_huge(snapshot_path_buf, jam_paths, KERNEL, &hot_state, trc.into())
             .await
             .expect("Could not load mining kernel");
 

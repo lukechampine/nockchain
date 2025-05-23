@@ -453,6 +453,18 @@ pub fn hash_belts_list(stack: &mut NockStack, belts: Noun) -> Result {
     list_to_tuple_inplace(hashed)
 }
 
+struct DP(Noun);
+
+impl core::fmt::Debug for DP {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        if let Ok(c) = self.0.as_cell() {
+            write!(f, "{:?}", nockvm::noun::FullDebugCellDepth(&c, 3))
+        } else {
+            write!(f, "{:?}", self.0)
+        }
+    }
+}
+
 pub fn hash_noun_varlen(stack: &mut NockStack, n: Noun) -> Result {
     // ~/  %hash-noun-varlen
     // |=  n=*
@@ -461,7 +473,7 @@ pub fn hash_noun_varlen(stack: &mut NockStack, n: Noun) -> Result {
     let leaf = leaf_sequence(stack, n)?;
 
     // =/  dyck=(list @)  (dyck:shape n)
-    let dyck = dyck(stack, leaf)?;
+    let dyck = dyck(stack, n)?;
 
     // =/  size  (lent leaf)
     let size = list::lent(leaf)?;
@@ -469,7 +481,8 @@ pub fn hash_noun_varlen(stack: &mut NockStack, n: Noun) -> Result {
     // (hash-belts-list [size (weld leaf dyck)])
     let welded = list::weld(stack, leaf, dyck)?;
     let t = T(stack, &[D(size as u64), welded]);
-    hash_belts_list(stack, t)
+    let r = hash_belts_list(stack, t)?;
+    Ok(r)
 }
 
 pub fn new_sponge(stack: &mut NockStack) -> Result {
@@ -739,7 +752,7 @@ pub fn hash_ten_cell(stack: &mut NockStack, ten_cell: Noun) -> Result {
     Ok(tup)
 }
 
-pub fn dyck(stack: &mut NockStack, mut t: Noun) -> Result {
+pub fn dyck(stack: &mut NockStack, t: Noun) -> Result {
     // ~/  %dyck
     // |=  t=*
     // %-  flop
@@ -748,56 +761,18 @@ pub fn dyck(stack: &mut NockStack, mut t: Noun) -> Result {
     // |-
     // ?@  t  vec
     // $(t +.t, vec [1 $(t -.t, vec [0 vec])])
-
-    // NOTE: Let's do this differently...
-    //
-    // if cell:
-    // vec = 1^recurse(head, 0^vec)
-    // recurse(tail, vec)
-    // if atom:
-    // return vec
-    //
-    // reverse(vec)
-    let ret = Cell::new(stack, D(0), D(0));
-    let mut cur = ret;
-
-    let mut prev = D(0);
-
-    loop {
-        match t.as_either_atom_cell() {
-            Either::Left(_) => {
-                // if t = atom:
-
-                //   push 1 to cur.head
-                unsafe { (*cur.to_raw_pointer_mut()).head = D(1) };
-
-                //   t = prev.pop_cell() else break
-                let Ok(prev_t) = prev.as_cell() else { break };
-                t = prev_t.head();
-                prev = prev_t.tail();
-            }
-            Either::Right(c) => {
-                // else:
-
-                //   push 0 to cur.head
-                unsafe { (*cur.to_raw_pointer_mut()).head = D(0) };
-
-                //  prev.push_cell(cell.tail)
-                prev = Cell::new(stack, c.tail(), prev).as_noun();
-
-                //  t = cell.head
-                t = c.head();
-            }
-        }
-
-        //   cur.tail = new_cell
-        //   cur = new_cell
-        let new_cell = Cell::new(stack, D(0), D(0));
-        unsafe { (*cur.to_raw_pointer_mut()).tail = new_cell.as_noun() };
-        cur = new_cell;
+    // TODO: make this non-recursive
+    fn recurse(stack: &mut NockStack, t: Noun, vec: Noun) -> Noun {
+        let Ok(t) = t.as_cell() else {
+            return vec;
+        };
+        let head_vec = Cell::new(stack, D(0), vec);
+        let head_res = recurse(stack, t.head(), head_vec.as_noun());
+        let tail_vec = Cell::new(stack, D(1), head_res);
+        recurse(stack, t.tail(), tail_vec.as_noun())
     }
-
-    Ok(ret.as_noun())
+    let res = recurse(stack, t, D(0));
+    list::flop(stack, res)
 }
 
 pub fn leaf_sequence(stack: &mut NockStack, mut t: Noun) -> Result {
