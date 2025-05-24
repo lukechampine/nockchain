@@ -6,13 +6,14 @@ use either::Either;
 use nockapp::kernel::boot;
 use nockapp::kernel::checkpoint::JamPaths;
 use nockapp::utils::{create_context, NOCK_STACK_SIZE_HUGE};
-use nockapp::Noun;
-use nockvm::interpreter::interpret;
+use nockapp::{Noun, NounExt};
+use nockvm::interpreter::{interpret, Context, Error as IntError, Mote};
 use nockvm::jets::cold::{Cold, Nounable};
 use nockvm::jets::hot::URBIT_HOT_STATE;
+use nockvm::jets::nock::util::mook;
 use nockvm::mem::NockStack;
 use nockvm::mug::mug;
-use nockvm::noun::{DirectAtom, FullDebugCell, IndirectAtom, D, T};
+use nockvm::noun::{Cell, DirectAtom, FullDebugCell, IndirectAtom, D, T};
 use nockvm::serialization::cue;
 use nockvm::trace::path_to_cord;
 use nockvm::unifying_equality::{self, unifying_equality};
@@ -155,6 +156,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 int_res = Some((res, m));
                 eprintln!("Ran OK (result mug: {m:?})");
             }
+            Err(IntError::Deterministic(a, e)) => {
+                eprintln!("ERROR INTERPRETING:");
+                let goof = goof(&mut context, a, e);
+                print_goof(&mut context, goof);
+            }
             Err(e) => {
                 eprintln!("ERROR INTERPRETING: {e:?}");
             }
@@ -162,4 +168,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
+}
+
+pub fn goof(context: &mut Context, mote: Mote, traces: Noun) -> Noun {
+    let tone = Cell::new(&mut context.stack, D(2), traces);
+    let tang = mook(context, tone, false)
+        .expect("serf: goof: +mook crashed on bail")
+        .tail();
+    T(&mut context.stack, &[D(mote as u64), tang])
+}
+
+pub fn print_goof(context: &mut Context, goof: Noun) {
+    let tang = goof
+        .as_cell()
+        .expect("print goof: expected goof to be a cell")
+        .tail();
+    tang.list_iter().for_each(|tank: Noun| {
+        //  TODO: Slogger should be emitting Results in case of failure
+        context.slogger.slog(&mut context.stack, 1, tank);
+    });
 }
