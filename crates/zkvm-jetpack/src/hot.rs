@@ -683,6 +683,21 @@ pub const EXTRA_JETS: &[HotEntry] = &[
         1,
         leaf_sequence_jet,
     ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"mp-substitute-mega"),
+        ],
+        1,
+        mp_substitute_mega_jet,
+    ),
 ];
 
 pub const CURVE_JETS: &[HotEntry] = &[(

@@ -1,4 +1,12 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use crate::form::bpoly::{bp_hadamard, bpscal};
+use crate::form::mary::MarySlice;
+use crate::form::math::bpoly::bpadd;
 use crate::form::math::tip5;
+use crate::form::{bpow, PolySlice};
+use crate::form::{poly::Poly, BPolySlice, Belt};
+use crate::hand::handle::{finalize_poly, new_handle_mut_slice};
 use crate::hand::structs::HoonList;
 use crate::jets::bp_jets::bpoly_to_list;
 use either::Either;
@@ -6,26 +14,92 @@ use nockvm::interpreter::Context;
 use nockvm::jets::bits::util as bits;
 use nockvm::jets::list::util as list;
 use nockvm::jets::math::util as math;
+use nockvm::jets::sort::util::gor;
 use nockvm::jets::util::{self, slot};
 use nockvm::jets::{util::BAIL_EXIT, JetErr, Result};
 use nockvm::mem::NockStack;
-use nockvm::noun::{Atom, Cell, DirectAtom, IndirectAtom, Noun, D, T};
+use nockvm::mug::mug;
+use nockvm::noun::{Atom, Cell, DirectAtom, IndirectAtom, Noun, D, T, YES};
+use nockvm::serialization::jam;
+use nockvm::unifying_equality::unifying_equality;
 use nockvm_macros::tas;
 
 use tracing::log::*;
+
+use super::bp_jets::init_bpoly;
+use super::utils::jet_err;
+
+macro_rules! jet_option {
+    (: $b:expr) => { $b };
+    // Run only only once, otherwise crash
+    ('run_once $($l:lifetime)*: $b:block) => {
+        jet_option! {
+            $($l)*:
+            {
+                static RUN: AtomicBool = AtomicBool::new(false);
+
+                if !RUN.fetch_or(true, Ordering::Relaxed) {
+                    $b
+                } else {
+                    jet_err()
+                }
+            }
+        }
+    };
+    // Write jam files on crashes
+    ('jam_errs $($l:lifetime)*: $b:block) => {
+        jet_option! {
+            $($l)*:
+            {
+                let ret = $b;
+                if ret.is_err() {
+                    Err(JetErr::PuntJam("."))
+                } else {
+                    ret
+                }
+            }
+        }
+    };
+    // Bypass crashes (reinterpret them)
+    ('punt_errs $($l:lifetime)*: $b:block) => {
+        jet_option! {
+            $($l)*:
+            {
+                let ret = $b;
+                if ret.is_err() {
+                    Err(JetErr::Punt)
+                } else {
+                    ret
+                }
+            }
+        }
+    };
+    // Jam invokations
+    ('jam $($l:lifetime)*: $b:block) => {
+        jet_option! {
+            $($l)*:
+            {
+                let _ret = $b;
+                Err(JetErr::PuntJam("."))
+            }
+        }
+    };
+}
 
 /// Extracts sample and calls the jet implementation.
 ///
 /// This is so that we can have callable implementations for composing jets.
 macro_rules! sam_jet {
-    ($name:ident => $imp:ident$(,)?) => {
+    ($name:ident => $imp:ident $($l:lifetime)*$(,)?) => {
         pub fn $name(context: &mut Context, subject: Noun) -> Result {
-            let sam = slot(subject, 6)?;
-            $imp(&mut context.stack, sam)
+            jet_option!($($l)*: {
+                let sam = slot(subject, 6)?;
+                $imp(&mut context.stack, sam)
+            })
         }
     };
-    ($name:ident => $imp:ident, $($rest:tt)*) => {
-        sam_jet!($name => $imp);
+    ($name:ident => $imp:ident $($l:lifetime)*, $($rest:tt)*) => {
+        sam_jet!($name => $imp $($l)*);
         sam_jet!($($rest)*);
     };
 }
@@ -38,6 +112,7 @@ sam_jet! {
     hash_hashable_jet => hash_hashable,
     hash_ten_cell_jet => hash_ten_cell,
     leaf_sequence_jet => leaf_sequence,
+    mp_substitute_mega_jet => mp_substitute_mega 'punt_errs 'run_once 'jam,
 }
 
 /*
@@ -223,6 +298,30 @@ fn rsh(
     }
 }
 
+fn cut_direct(
+    bloq: usize,
+    start: usize,
+    run: usize,
+    atom: DirectAtom,
+) -> core::result::Result<DirectAtom, JetErr> {
+    if run == 0 {
+        return Ok(D(0).as_direct()?);
+    }
+
+    if util::bite_to_word(bloq, run)? > 1 {
+        return jet_err();
+    }
+
+    let direct = unsafe {
+        let mut new_direct = D(0).as_direct()?;
+        let new_slice = new_direct.as_bitslice_mut();
+        util::chop(bloq, start, run, 0, new_slice, atom.as_bitslice())?;
+        new_direct
+    };
+
+    Ok(direct)
+}
+
 fn cut(
     stack: &mut NockStack,
     bloq: usize,
@@ -342,13 +441,17 @@ pub fn range_jet(context: &mut Context, subject: Noun) -> Result {
     produce_list(&mut context.stack, start, end, |_, i| D(i as u64))
 }
 
+pub fn reap(stack: &mut NockStack, size: usize, val: Noun) -> Result {
+    produce_list(stack, 0, size, |_, _| val)
+}
+
 pub fn init_tip5_state(stack: &mut NockStack, domain: DirectAtom) -> Result {
     match domain.data() {
         // ^~((reap state-size 0))
         tas!(b"variable") => produce_list(stack, 0, STATE_SIZE, |_, _| D(0)),
         // ^~((weld (reap rate 0) (reap capacity (montify 1))))
         tas!(b"fixed") => {
-            let reaped = produce_list(stack, 0, RATE, |_, _| D(0))?;
+            let reaped = reap(stack, RATE, D(0))?;
             let one = Atom::new(stack, 1);
             let montified = montify(stack, one)?.as_noun();
             let montified = produce_list(stack, 0, CAPACITY, |_, _| montified)?;
@@ -825,4 +928,379 @@ pub fn leaf_sequence(stack: &mut NockStack, mut t: Noun) -> Result {
     }
 
     Ok(ret.as_noun())
+}
+
+fn pull_arg(inp: Noun) -> core::result::Result<(Noun, Noun), JetErr> {
+    let c = inp.as_cell()?;
+    Ok((c.head(), c.tail()))
+}
+
+fn pull_args<const N: usize>(mut inp: Noun) -> core::result::Result<[Noun; N], JetErr> {
+    let ret = [(); N].map(|_| {
+        let c = inp.as_cell()?;
+        inp = c.tail();
+        Ok(c.head())
+    });
+    if let Some(Err(e)) = ret.iter().filter(|v| v.is_err()).next() {
+        return Err(*e);
+    }
+    Ok(ret.map(|v| v.unwrap()))
+}
+
+fn tap_by(stack: &mut NockStack, a: Noun) -> Result {
+    // =<  $
+    // =+  b=`(list _?>(?=(^ a) n.a))`~
+
+    fn recurse(stack: &mut NockStack, a: Noun, b: Noun) -> Result {
+        // |.  ^+  b
+        // ?~  a
+        if a.as_direct().map(|v| v.data()) == Ok(0u64) {
+            //   b
+            Ok(b)
+        } else {
+            // $(a r.a, b [n.a $(a l.a)])
+            let n = slot(a, 2)?;
+            let l = slot(a, 6)?;
+            let r = slot(a, 7)?;
+            let left = recurse(stack, l, b)?;
+            let b = Cell::new(stack, n, left);
+            recurse(stack, r, b.as_noun())
+        }
+    }
+
+    recurse(stack, a, D(0))
+}
+
+// Map walker
+fn get_by(stack: &mut NockStack, a: Noun, mut b: Noun) -> Result {
+    // ~/  %get
+    // |*  b=*
+    // =>  .(b `_?>(?=(^ a) p.n.a)`b)
+    // |-  ^-  (unit _?>(?=(^ a) q.n.a))
+    if a.as_direct().map(|v| v.data()) == Ok(0) {
+        // ?~  a
+        //   ~
+        return Ok(a);
+    }
+
+    let n = slot(a, 2)?.as_cell()?;
+    let mut p = n.head();
+    let q = n.tail();
+
+    if unsafe { unifying_equality(stack, &mut b, &mut p) } {
+        // ?:  =(b p.n.a)
+        //   (some q.n.a)
+        Ok(Cell::new(stack, q, D(0)).as_noun())
+    } else if gor(stack, b, p).as_direct().map(|v| v.data()) == Ok(0) {
+        // ?:  (gor b p.n.a)
+        //   $(a l.a)
+        let l = slot(a, 6)?;
+        get_by(stack, l, b)
+    } else {
+        // $(a r.a)
+        let r = slot(a, 7)?;
+        get_by(stack, r, b)
+    }
+}
+
+fn got_by(stack: &mut NockStack, a: Noun, b: Noun) -> Result {
+    let v = get_by(stack, a, b)?;
+    Ok(v.as_cell()?.head())
+}
+
+fn got_by_val(stack: &mut NockStack, a: Noun, b: usize) -> Result {
+    got_by(stack, a, D(b as u64))
+}
+
+fn noun_bpoly(stack: &mut NockStack, val: Noun) -> Result {
+    let zpoly = Cell::new(stack, val, D(0));
+    init_bpoly(stack, zpoly.as_noun())
+}
+
+fn zero_bpoly(stack: &mut NockStack) -> Result {
+    noun_bpoly(stack, D(0))
+}
+
+// +$  mega-typ  ?(%var %rnd %dyn %con %com)
+#[repr(u64)]
+enum MegaTyp {
+    Con = 0,
+    Var = 1,
+    Rnd = 2,
+    Dyn = 3,
+    Com = 4,
+}
+
+impl MegaTyp {
+    fn to_tas(self) -> u64 {
+        match self {
+            Self::Con => tas!(b"con"),
+            Self::Var => tas!(b"var"),
+            Self::Rnd => tas!(b"rnd"),
+            Self::Dyn => tas!(b"dyn"),
+            Self::Com => tas!(b"com"),
+        }
+    }
+}
+
+impl TryFrom<u64> for MegaTyp {
+    type Error = ();
+
+    fn try_from(value: u64) -> std::result::Result<Self, Self::Error> {
+        if value <= 4 {
+            Ok(unsafe { core::mem::transmute(value) })
+        } else {
+            Err(())
+        }
+    }
+}
+
+// ::  bit length of type
+// ++  typ-len  3
+const TYP_LEN: usize = 3;
+// ::  bit length of index
+// ++  idx-len  10
+const IDX_LEN: usize = 10;
+// ::  bit length of exponent
+// ++  exp-len  30
+const EXP_LEN: usize = 30;
+
+fn mega_typ(term: Noun) -> core::result::Result<MegaTyp, JetErr> {
+    // ^-  mega-typ
+    // ?+  (cut 0 [0 typ-len] term)  !!
+    cut_direct(0, 0, TYP_LEN, term.as_direct()?)?
+        .data()
+        .try_into()
+        .map_err(|_| jet_err().unwrap())
+}
+
+fn mega_idx(term: Noun) -> core::result::Result<usize, JetErr> {
+    // ^-  @ud
+    // (cut 0 [typ-len idx-len] term)
+    Ok(cut_direct(0, TYP_LEN, IDX_LEN, term.as_direct()?)?.data() as _)
+}
+
+fn mega_exp(term: Noun) -> core::result::Result<u64, JetErr> {
+    // ^-  @ud
+    // (cut 0 [(add typ-len idx-len) exp-len] term)
+    Ok(cut_direct(0, TYP_LEN + IDX_LEN, EXP_LEN, term.as_direct()?)?.data())
+}
+
+fn brek(ter: Noun) -> core::result::Result<(MegaTyp, usize, u64), JetErr> {
+    //  |=  ter=mega-term
+    //  ^-  [mega-typ @ @ud]
+    //  :+  ~(typ mega ter)
+    //    ~(idx mega ter)
+    //  ~(exp mega ter)
+    Ok((mega_typ(ter)?, mega_idx(ter)?, mega_exp(ter)?))
+}
+
+fn snag_bop(stack: &mut NockStack, k: Noun, i: usize) -> core::result::Result<u64, JetErr> {
+    // NOTE: heree construct a mary of [step=1 dat=k],
+    // and then snag i-th elem from the data.
+    // If step wasn't 1, then it would be more complicated than just array index.
+    let ma = Cell::new(stack, D(1), k);
+    let Ok(ma) = MarySlice::try_from(ma.as_noun()) else {
+        return jet_err();
+    };
+    Ok(ma.dat[i])
+}
+
+fn swag_bop(
+    stack: &mut NockStack,
+    k: Noun,
+    i: usize,
+    j: usize,
+) -> core::result::Result<&[u64], JetErr> {
+    // NOTE: see snag_bop
+    let ma = Cell::new(stack, D(1), k);
+    let Ok(ma) = MarySlice::try_from(ma.as_noun()) else {
+        return jet_err();
+    };
+
+    if i >= ma.dat.len() {
+        Ok(&[])
+    } else {
+        let r = ma.dat.split_at(i).1;
+        Ok(&r[..core::cmp::min(j, r.len())])
+    }
+}
+
+pub fn mp_substitute_mega(stack: &mut NockStack, inp: Noun) -> Result {
+    // ::
+    // ::  +mp-substitute-mega: Given a multipoly: sub in the chals, dyns, vars, and composition dependencies:
+    // ::
+    // ::  For vars, the trace polys: ~[p0(t) p1(t) ... ] are in eval form and we substitute pi(t) for xi.
+    // ::
+    // ::  The key insight is that multiplication is much faster on polynomials in eval form instead of
+    // ::  coefficient form. Calling bpmul will do ntt's on the arguments and an ifft on the result
+    // ::  over and over again. Instead we precompute the ntts for all the polynomials and those
+    // ::  are the arguments to substitute. Since they're already in the correct form we just compute
+    // ::  hadamard products on them, sum up all the terms, and do an ifft to get the result.
+    // ::
+    // ::  Another optimization is that the polynomials in eval form must be the length of the degree
+    // ::  of the final product. Since the max degree of the constraints is 4 (this method has this
+    // ::  constraint degree hardcoded for optimization purposes and must be changed by hand
+    // ::  if the constraint degree changes), the vectors must be 4*n where n is the height.
+    // ::
+    // ++  mp-substitute-mega
+    // ~/  %mp-substitute-mega
+    // |=  [p=mp-mega trace-evals=bpoly height=@ chal-map=(map @ belt) dyns=bpoly com-map=(map @ bpoly)]
+    eprintln!("inp: {:?}", inp);
+    let [p, trace_evals, height, chal_map, dyns, com_map] = pull_args(inp)?;
+    eprintln!("p={:?}", p);
+    eprintln!("trace_evals={:?}", mug(stack, trace_evals));
+    eprintln!("height={:?}", height);
+    eprintln!("chal_map={:?}", mug(stack, chal_map));
+    eprintln!("dyns={:?}", mug(stack, dyns));
+    eprintln!("com_map={:?}", mug(stack, com_map));
+
+    // ^-  bpoly
+
+    // %+  roll  ~(tap by p)
+    let mut p_list = tap_by(stack, p)?;
+    // |=  [[k=bpoly v=belt] acc=_zero-bpoly]
+    let mut acc = zero_bpoly(stack)?;
+
+    while let Ok(e) = p_list.as_cell() {
+        p_list = e.tail();
+        let [k, v] = pull_args(e.head())?;
+        let v = v.as_direct()?.data();
+        eprintln!("rollling: k={:?}, v={:?}, acc={:?}", k, v, acc);
+
+        // =/  [poly=bpoly len=@]  [trace-evals (mul 4 height)]
+        let poly = trace_evals;
+        let len = (height.as_direct()?.data() * 4) as usize;
+        eprintln!("trace-evals: poly={:?}, len={:?}", poly, len);
+
+        // =/  ones=bpoly  (init-bpoly (reap len 1))
+        let reaped = reap(stack, len, D(1))?;
+        let ones = init_bpoly(stack, reaped)?;
+
+        // ?:  =(v 0)  acc
+        if v == 0 {
+            continue;
+        }
+
+        // %+  bpadd  acc
+        // %+  bpscal  v
+        // %+  roll  (range len.k)
+        let len = slot(k, 2)?.as_direct()?.data() as usize;
+        // |=  [i=@ acc=_ones]
+        let rolled = {
+            let mut acc = ones;
+
+            // ^-  bpoly
+            for i in 0..len {
+                // =/  ter  (~(snag bop k) i)
+                let ter = snag_bop(stack, k, i)?;
+
+                // =/  [typ=mega-typ:mp-to-mega idx=@ exp=@ud]
+                //   (brek:mp-to-mega ter)
+                let (typ, idx, exp) = brek(D(ter))?;
+
+                // ?-  typ
+                acc = match typ {
+                    // %var
+                    MegaTyp::Var => {
+                        // =/  var=bpoly  (~(swag bop poly) (mul idx len) len)
+                        let var = swag_bop(stack, poly, idx * len, len)?;
+                        let var: BPolySlice = unsafe { core::mem::transmute(var) };
+                        // %+  roll  (range exp)
+                        // |=  [i=@ power=_acc]
+                        for _ in 0..exp {
+                            // (bp-hadamard power var)
+                            acc = with_belts(stack, bp_hadamard, acc, var)?;
+                        }
+                        acc
+                    }
+                    // %rnd
+                    MegaTyp::Rnd => {
+                        // =/  rnd  (~(got by chal-map) idx)
+                        let rnd = got_by_val(stack, chal_map, idx)?.as_direct()?.data();
+                        // (bpscal (bpow rnd exp) acc)
+                        let powed = bpow(rnd, exp);
+                        with_belts1(stack, bpscal, Belt(powed), acc)?
+                    }
+                    // %dyn
+                    MegaTyp::Dyn => {
+                        // =/  dyn  (~(snag bop dyns) idx)
+                        let _dyn = snag_bop(stack, dyns, idx)?;
+                        // (bpscal (bpow dyn exp) acc)
+                        let powed = bpow(_dyn, exp);
+                        with_belts1(stack, bpscal, Belt(powed), acc)?
+                    }
+                    // %con
+                    MegaTyp::Con => {
+                        // acc
+                        acc
+                    }
+                    // %com
+                    MegaTyp::Com => {
+                        // =/  com=bpoly  (~(got by com-map) idx)
+                        let com = got_by_val(stack, com_map, idx)?;
+                        // %+  roll  (range exp)
+                        // |=  [i=@ power=_acc]
+                        for _ in 0..exp {
+                            // (bp-hadamard power com)
+                            acc = with_belts(stack, bp_hadamard, acc, com)?;
+                        }
+                        acc
+                    }
+                }
+            }
+
+            acc
+        };
+        eprintln!("ROLLED {:?}", mug(stack, rolled));
+        // NOTE: in reverse
+        // :: %+  bpscal  v
+        let res = with_belts1(stack, bpscal, Belt(v), rolled)?;
+        eprintln!("RES {:?}", mug(stack, res));
+        // :: %+  bpadd  acc
+        acc = with_belts(stack, bpadd, acc, res)?;
+        eprintln!("ADDED {:?}", mug(stack, acc));
+    }
+
+    Ok(acc)
+    //Err(JetErr::Punt)
+}
+
+fn with_belts1<'b, T>(
+    stack: &mut NockStack,
+    f: impl FnOnce(T, &[Belt], &mut [Belt]),
+    bp: T,
+    bq: impl TryInto<BPolySlice<'b>>,
+) -> Result {
+    let Ok(bq_poly) = bq.try_into() else {
+        return jet_err();
+    };
+    let res_len = bq_poly.len();
+    let (res, res_poly): (IndirectAtom, &mut [Belt]) = new_handle_mut_slice(stack, Some(res_len));
+
+    f(bp, bq_poly.0, res_poly);
+
+    let res_cell = finalize_poly(stack, Some(res_poly.len()), res);
+
+    Ok(res_cell)
+}
+
+fn with_belts<'a, 'b>(
+    stack: &mut NockStack,
+    f: impl FnOnce(&[Belt], &[Belt], &mut [Belt]),
+    bp: impl TryInto<BPolySlice<'a>>,
+    bq: impl TryInto<BPolySlice<'b>>,
+) -> Result {
+    let (Ok(bp_poly), Ok(bq_poly)) = (bp.try_into(), bq.try_into()) else {
+        return jet_err();
+    };
+    //assert_eq!(bp_poly.len(), bq_poly.len());
+    let res_len = bp_poly.len();
+    let (res, res_poly): (IndirectAtom, &mut [Belt]) = new_handle_mut_slice(stack, Some(res_len));
+
+    f(bp_poly.0, bq_poly.0, res_poly);
+
+    let res_cell = finalize_poly(stack, Some(res_poly.len()), res);
+
+    Ok(res_cell)
 }
