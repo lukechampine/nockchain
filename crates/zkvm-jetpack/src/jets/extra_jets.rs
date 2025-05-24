@@ -153,7 +153,7 @@ sam_jet! {
     mp_substitute_mega_jet => mp_substitute_mega 'jam_errs 'create_jam_dir,// 'log 'punt_errs 'jam 'run_once 'create_jam_dir,
     mp_substitute_ultra_jet => mp_substitute_ultra, // 'punt_errs 'run_once 'log 'jam 'create_jam_dir,
     compute_composition_poly_jet => compute_composition_poly 'punt_errs 'run_once 'log 'jam 'create_jam_dir,
-    bpdiv_jet => bpdiv 'jam 'create_jam_dir,
+    // bpdiv_jet => bpdiv 'jam 'create_jam_dir,
 }
 
 /*
@@ -1174,61 +1174,6 @@ fn swag_bop(
     }
 }
 
-// Currently fails:
-// Jet invoked: mp_substitute_ultra
-// I (10:42:56) "mp-substitute-ultra - p=156.419.264; height=1.024; chal-map=1.419.372.573 dyns=924.507.158"
-// Jet invoked: mp_substitute_ultra
-// I (10:42:57) "mp-substitute-ultra - p=156.419.264; height=1.024; chal-map=1.419.372.573 dyns=924.507.158"
-// I (10:43:00) /common/ztd/one.hoon:<[1.241 9].[1.241 26]>
-// I (10:43:00) /common/ztd/one.hoon:<[1.241 5].[1.242 35]>
-// I (10:43:00) /common/ztd/one.hoon:<[1.240 3].[1.253 5]>
-// I (10:43:00) /common/ztd/one.hoon:<[1.239 3].[1.253 5]>
-// I (10:43:00) /common/ztd/one.hoon:<[1.238 3].[1.253 5]>
-// I (10:43:00) /common/ztd/one.hoon:<[1.237 3].[1.253 5]>
-// I (10:43:00) /common/ztd/one.hoon:<[1.233 3].[1.253 5]>
-// I (10:43:00) /common/ztd/one.hoon:<[1.230 3].[1.253 5]>
-// I (10:43:00) /common/ztd/one.hoon:<[1.229 3].[1.253 5]>
-// I (10:43:00) "Cannot divide by the zero polynomial."
-// I (10:43:00) /common/ztd/one.hoon:<[1.228 3].[1.253 5]>
-// I (10:43:00) /common/ztd/one.hoon:<[1.225 3].[1.253 5]>
-// I (10:43:00) /common/ztd/one.hoon:<[1.222 3].[1.253 5]>
-// I (10:43:00) /common/ztd/one.hoon:<[1.221 3].[1.253 5]>
-// I (10:43:00) /common/ztd/one.hoon:<[1.220 3].[1.253 5]>
-// I (10:43:00) /common/ztd/one.hoon:<[1.219 3].[1.253 5]>
-// I (10:43:00) /common/ztd/one.hoon:<[1.260 5].[1.260 16]>
-// I (10:43:00) /common/ztd/one.hoon:<[1.260 3].[1.260 16]>
-// I (10:43:00) /common/ztd/one.hoon:<[1.259 3].[1.260 16]>
-// I (10:43:00) /common/ztd/eight.hoon:<[350 5].[366 7]>
-// I (10:43:00) /common/ztd/eight.hoon:<[349 5].[366 7]>
-// I (10:43:00) /common/ztd/eight.hoon:<[295 3].[368 5]>
-// I (10:43:00) /common/ztd/eight.hoon:<[292 3].[368 5]>
-// I (10:43:00) /common/ztd/eight.hoon:<[290 3].[368 5]>
-// I (10:43:00) /common/ztd/eight.hoon:<[289 3].[368 5]>
-// I (10:43:00) /common/ztd/eight.hoon:<[288 3].[368 5]>
-// I (10:43:00) /common/ztd/eight.hoon:<[287 3].[368 5]>
-// I (10:43:00) /common/ztd/eight.hoon:<[286 3].[368 5]>
-// I (10:43:00) /common/ztd/eight.hoon:<[285 3].[368 5]>
-// I (10:43:00) /common/ztd/eight.hoon:<[284 3].[368 5]>
-// I (10:43:00) /common/ztd/eight.hoon:<[283 3].[368 5]>
-// I (10:43:00) /common/ztd/eight.hoon:<[281 3].[368 5]>
-// I (10:43:00) /common/ztd/eight.hoon:<[279 3].[368 5]>
-// I (10:43:00) /common/ztd/eight.hoon:<[278 3].[409 5]>
-// I (10:43:00) /common/ztd/eight.hoon:<[277 3].[409 5]>
-// I (10:43:00) /common/ztd/eight.hoon:<[274 3].[409 5]>
-// I (10:43:00) /common/ztd/eight.hoon:<[273 3].[409 5]>
-// I (10:43:00) /common/ztd/eight.hoon:<[259 3].[259 35]>
-// I (10:43:00) /common/ztd/eight.hoon:<[258 3].[259 35]>
-// I (10:43:00) /common/stark/prover.hoon:<[318 5].[328 7]>
-// I (10:43:00) /common/stark/prover.hoon:<[317 3].[549 28]>
-// I (10:43:00) /common/stark/prover.hoon:<[300 3].[549 28]>
-// I (10:43:00) /common/stark/prover.hoon:<[297 3].[549 28]>
-// I (10:43:00) /common/stark/prover.hoon:<[295 3].[549 28]>
-// I (10:43:00) /common/stark/prover.hoon:<[294 3].[549 28]>
-// I (10:43:00) /common/stark/prover.hoon:<[290 3].[549 28]>
-// I (10:43:00) /common/stark/prover.hoon:<[283 3].[549 28]>
-// I (10:43:00) /common/stark/prover.hoon:<[280 3].[549 28]>
-// I (10:43:00) /common/stark/prover.hoon:<[277 3].[549 28]>
-// I (10:43:00) /common/stark/prover.hoon:<[276 3].[549 28]>
 pub fn compute_composition_poly(stack: &mut NockStack, inp: Noun) -> Result {
     let args = pull_args(inp)?;
     let args = args.map(|v| mug(stack, v).data());
@@ -1236,10 +1181,11 @@ pub fn compute_composition_poly(stack: &mut NockStack, inp: Noun) -> Result {
     let [omicrons, heights, tworow_trace_polys, constraint_map, constraint_counts, composition_chals, chal_map, dyn_map, is_extra] =
         args;
 
-    eprintln!(
-        "COMPUTE COMPOSITION POLY {:?} => {args:?}",
-        mug(stack, inp).data()
-    );
+    // eprintln!(
+    //     "COMPUTE COMPOSITION POLY {:?} => {args:?}",
+    //     mug(stack, inp).data()
+    // );
+
     Err(JetErr::Punt)
 }
 
@@ -1249,14 +1195,19 @@ pub fn mp_substitute_ultra(stack: &mut NockStack, inp: Noun) -> Result {
 
     let [mp, trace, max_height, chal_map, dyns] = args;
 
-    eprintln!(
-        "MP SUBSTITUTE ULTRA {:?} => {args:?}",
-        mug(stack, inp).data()
-    );
+    // eprintln!(
+    //     "MP SUBSTITUTE ULTRA {:?} => {args:?}",
+    //     mug(stack, inp).data()
+    // );
+
     Err(JetErr::Punt)
 }
 
 pub fn bpdiv(stack: &mut NockStack, inp: Noun) -> Result {
+    let [a, b] = pull_args(inp)?;
+    let al = bpoly_to_list(stack, a)?;
+    let bl = bpoly_to_list(stack, b)?;
+    eprintln!("BPDIV {:?} {:?} | {:?} {:?}", DP(a), DP(b), DP(al), DP(bl));
     Err(JetErr::Punt)
 }
 

@@ -734,7 +734,7 @@ pub const EXTRA_JETS: &[HotEntry] = &[
         1,
         compute_composition_poly_jet,
     ),
-    (
+    /*(
         &[
             K_138,
             Left(b"one"),
@@ -747,7 +747,7 @@ pub const EXTRA_JETS: &[HotEntry] = &[
         ],
         1,
         bpdiv_jet,
-    ),
+    ),*/
 ];
 
 pub const CURVE_JETS: &[HotEntry] = &[(
