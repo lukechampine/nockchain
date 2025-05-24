@@ -28,11 +28,19 @@ use tracing::log::*;
 use super::bp_jets::init_bpoly;
 use super::utils::jet_err;
 
+macro_rules! jam_err {
+    ($name:ident) => {{
+        let jam_dir = concat!("./jams/", stringify!($name));
+        JetErr::PuntJam(jam_dir)
+    }};
+}
+
 macro_rules! jet_option {
-    (: $b:expr) => { $b };
+    ($name:ident => : $b:expr) => { $b };
     // Run only only once, otherwise crash
-    ('run_once $($l:lifetime)*: $b:block) => {
+    ($name:ident => 'run_once $($l:lifetime)*: $b:block) => {
         jet_option! {
+            $name =>
             $($l)*:
             {
                 static RUN: AtomicBool = AtomicBool::new(false);
@@ -46,13 +54,14 @@ macro_rules! jet_option {
         }
     };
     // Write jam files on crashes
-    ('jam_errs $($l:lifetime)*: $b:block) => {
+    ($name:ident => 'jam_errs $($l:lifetime)*: $b:block) => {
         jet_option! {
+            $name =>
             $($l)*:
             {
                 let ret = $b;
                 if ret.is_err() {
-                    Err(JetErr::PuntJam("."))
+                    Err(jam_err!($name))
                 } else {
                     ret
                 }
@@ -60,8 +69,9 @@ macro_rules! jet_option {
         }
     };
     // Bypass crashes (reinterpret them)
-    ('punt_errs $($l:lifetime)*: $b:block) => {
+    ($name:ident => 'punt_errs $($l:lifetime)*: $b:block) => {
         jet_option! {
+            $name =>
             $($l)*:
             {
                 let ret = $b;
@@ -74,12 +84,41 @@ macro_rules! jet_option {
         }
     };
     // Jam invokations
-    ('jam $($l:lifetime)*: $b:block) => {
+    ($name:ident => 'jam $($l:lifetime)*: $b:block) => {
         jet_option! {
+            $name =>
             $($l)*:
             {
                 let _ret = $b;
-                Err(JetErr::PuntJam("."))
+                Err(jam_err!($name))
+            }
+        }
+    };
+    // Create jam directory
+    ($name:ident => 'create_jam_dir $($l:lifetime)*: $b:block) => {
+        jet_option! {
+            $name =>
+            $($l)*:
+            {
+                let ret = $b;
+                match ret {
+                    Err(JetErr::PuntJam(d)) => {
+                        let _ = std::fs::create_dir_all(d);
+                        Err(JetErr::PuntJam(d))
+                    }
+                    v => v
+                }
+            }
+        }
+    };
+    // Log invokations
+    ($name:ident => 'log $($l:lifetime)*: $b:block) => {
+        jet_option! {
+            $name =>
+            $($l)*:
+            {
+                eprintln!("Jet invoked: {}", stringify!($name));
+                $b
             }
         }
     };
@@ -91,7 +130,7 @@ macro_rules! jet_option {
 macro_rules! sam_jet {
     ($name:ident => $imp:ident $($l:lifetime)*$(,)?) => {
         pub fn $name(context: &mut Context, subject: Noun) -> Result {
-            jet_option!($($l)*: {
+            jet_option!($imp => $($l)*: {
                 let sam = slot(subject, 6)?;
                 $imp(&mut context.stack, sam)
             })
@@ -111,7 +150,10 @@ sam_jet! {
     hash_hashable_jet => hash_hashable,
     hash_ten_cell_jet => hash_ten_cell,
     leaf_sequence_jet => leaf_sequence,
-    mp_substitute_mega_jet => mp_substitute_mega,
+    mp_substitute_mega_jet => mp_substitute_mega 'jam_errs 'create_jam_dir,// 'log 'punt_errs 'jam 'run_once 'create_jam_dir,
+    mp_substitute_ultra_jet => mp_substitute_ultra, // 'punt_errs 'run_once 'log 'jam 'create_jam_dir,
+    compute_composition_poly_jet => compute_composition_poly 'punt_errs 'run_once 'log 'jam 'create_jam_dir,
+    bpdiv_jet => bpdiv 'jam 'create_jam_dir,
 }
 
 /*
@@ -934,15 +976,16 @@ fn pull_arg(inp: Noun) -> core::result::Result<(Noun, Noun), JetErr> {
     Ok((c.head(), c.tail()))
 }
 
-fn pull_args<const N: usize>(inp: Noun) -> core::result::Result<[Noun; N], JetErr> {
-    let mut inp = Some(inp);
+fn pull_args<const N: usize>(mut inp: Noun) -> core::result::Result<[Noun; N], JetErr> {
+    let mut cnt = 0;
     let ret = [(); N].map(|_| {
-        let Some(i) = inp.take() else { jet_err()? };
-        if let Ok(c) = i.as_cell() {
-            inp = Some(c.tail());
-            Ok(c.head())
+        cnt += 1;
+        if cnt == N {
+            Ok(inp)
         } else {
-            Ok(i)
+            let c = inp.as_cell()?;
+            inp = c.tail();
+            Ok(c.head())
         }
     });
     if let Some(Err(e)) = ret.iter().filter(|v| v.is_err()).next() {
@@ -1027,6 +1070,7 @@ fn zero_bpoly(stack: &mut NockStack) -> Result {
 
 // +$  mega-typ  ?(%var %rnd %dyn %con %com)
 #[repr(u64)]
+#[derive(Clone, Copy, Debug)]
 enum MegaTyp {
     Con = 0,
     Var = 1,
@@ -1130,6 +1174,92 @@ fn swag_bop(
     }
 }
 
+// Currently fails:
+// Jet invoked: mp_substitute_ultra
+// I (10:42:56) "mp-substitute-ultra - p=156.419.264; height=1.024; chal-map=1.419.372.573 dyns=924.507.158"
+// Jet invoked: mp_substitute_ultra
+// I (10:42:57) "mp-substitute-ultra - p=156.419.264; height=1.024; chal-map=1.419.372.573 dyns=924.507.158"
+// I (10:43:00) /common/ztd/one.hoon:<[1.241 9].[1.241 26]>
+// I (10:43:00) /common/ztd/one.hoon:<[1.241 5].[1.242 35]>
+// I (10:43:00) /common/ztd/one.hoon:<[1.240 3].[1.253 5]>
+// I (10:43:00) /common/ztd/one.hoon:<[1.239 3].[1.253 5]>
+// I (10:43:00) /common/ztd/one.hoon:<[1.238 3].[1.253 5]>
+// I (10:43:00) /common/ztd/one.hoon:<[1.237 3].[1.253 5]>
+// I (10:43:00) /common/ztd/one.hoon:<[1.233 3].[1.253 5]>
+// I (10:43:00) /common/ztd/one.hoon:<[1.230 3].[1.253 5]>
+// I (10:43:00) /common/ztd/one.hoon:<[1.229 3].[1.253 5]>
+// I (10:43:00) "Cannot divide by the zero polynomial."
+// I (10:43:00) /common/ztd/one.hoon:<[1.228 3].[1.253 5]>
+// I (10:43:00) /common/ztd/one.hoon:<[1.225 3].[1.253 5]>
+// I (10:43:00) /common/ztd/one.hoon:<[1.222 3].[1.253 5]>
+// I (10:43:00) /common/ztd/one.hoon:<[1.221 3].[1.253 5]>
+// I (10:43:00) /common/ztd/one.hoon:<[1.220 3].[1.253 5]>
+// I (10:43:00) /common/ztd/one.hoon:<[1.219 3].[1.253 5]>
+// I (10:43:00) /common/ztd/one.hoon:<[1.260 5].[1.260 16]>
+// I (10:43:00) /common/ztd/one.hoon:<[1.260 3].[1.260 16]>
+// I (10:43:00) /common/ztd/one.hoon:<[1.259 3].[1.260 16]>
+// I (10:43:00) /common/ztd/eight.hoon:<[350 5].[366 7]>
+// I (10:43:00) /common/ztd/eight.hoon:<[349 5].[366 7]>
+// I (10:43:00) /common/ztd/eight.hoon:<[295 3].[368 5]>
+// I (10:43:00) /common/ztd/eight.hoon:<[292 3].[368 5]>
+// I (10:43:00) /common/ztd/eight.hoon:<[290 3].[368 5]>
+// I (10:43:00) /common/ztd/eight.hoon:<[289 3].[368 5]>
+// I (10:43:00) /common/ztd/eight.hoon:<[288 3].[368 5]>
+// I (10:43:00) /common/ztd/eight.hoon:<[287 3].[368 5]>
+// I (10:43:00) /common/ztd/eight.hoon:<[286 3].[368 5]>
+// I (10:43:00) /common/ztd/eight.hoon:<[285 3].[368 5]>
+// I (10:43:00) /common/ztd/eight.hoon:<[284 3].[368 5]>
+// I (10:43:00) /common/ztd/eight.hoon:<[283 3].[368 5]>
+// I (10:43:00) /common/ztd/eight.hoon:<[281 3].[368 5]>
+// I (10:43:00) /common/ztd/eight.hoon:<[279 3].[368 5]>
+// I (10:43:00) /common/ztd/eight.hoon:<[278 3].[409 5]>
+// I (10:43:00) /common/ztd/eight.hoon:<[277 3].[409 5]>
+// I (10:43:00) /common/ztd/eight.hoon:<[274 3].[409 5]>
+// I (10:43:00) /common/ztd/eight.hoon:<[273 3].[409 5]>
+// I (10:43:00) /common/ztd/eight.hoon:<[259 3].[259 35]>
+// I (10:43:00) /common/ztd/eight.hoon:<[258 3].[259 35]>
+// I (10:43:00) /common/stark/prover.hoon:<[318 5].[328 7]>
+// I (10:43:00) /common/stark/prover.hoon:<[317 3].[549 28]>
+// I (10:43:00) /common/stark/prover.hoon:<[300 3].[549 28]>
+// I (10:43:00) /common/stark/prover.hoon:<[297 3].[549 28]>
+// I (10:43:00) /common/stark/prover.hoon:<[295 3].[549 28]>
+// I (10:43:00) /common/stark/prover.hoon:<[294 3].[549 28]>
+// I (10:43:00) /common/stark/prover.hoon:<[290 3].[549 28]>
+// I (10:43:00) /common/stark/prover.hoon:<[283 3].[549 28]>
+// I (10:43:00) /common/stark/prover.hoon:<[280 3].[549 28]>
+// I (10:43:00) /common/stark/prover.hoon:<[277 3].[549 28]>
+// I (10:43:00) /common/stark/prover.hoon:<[276 3].[549 28]>
+pub fn compute_composition_poly(stack: &mut NockStack, inp: Noun) -> Result {
+    let args = pull_args(inp)?;
+    let args = args.map(|v| mug(stack, v).data());
+
+    let [omicrons, heights, tworow_trace_polys, constraint_map, constraint_counts, composition_chals, chal_map, dyn_map, is_extra] =
+        args;
+
+    eprintln!(
+        "COMPUTE COMPOSITION POLY {:?} => {args:?}",
+        mug(stack, inp).data()
+    );
+    Err(JetErr::Punt)
+}
+
+pub fn mp_substitute_ultra(stack: &mut NockStack, inp: Noun) -> Result {
+    let args = pull_args(inp)?;
+    let args = args.map(|v| mug(stack, v).data());
+
+    let [mp, trace, max_height, chal_map, dyns] = args;
+
+    eprintln!(
+        "MP SUBSTITUTE ULTRA {:?} => {args:?}",
+        mug(stack, inp).data()
+    );
+    Err(JetErr::Punt)
+}
+
+pub fn bpdiv(stack: &mut NockStack, inp: Noun) -> Result {
+    Err(JetErr::Punt)
+}
+
 pub fn mp_substitute_mega(stack: &mut NockStack, inp: Noun) -> Result {
     // ::
     // ::  +mp-substitute-mega: Given a multipoly: sub in the chals, dyns, vars, and composition dependencies:
@@ -1151,18 +1281,18 @@ pub fn mp_substitute_mega(stack: &mut NockStack, inp: Noun) -> Result {
     // ~/  %mp-substitute-mega
     // |=  [p=mp-mega trace-evals=bpoly height=@ chal-map=(map @ belt) dyns=bpoly com-map=(map @ bpoly)]
     let [p, trace_evals, height, chal_map, dyns, com_map] = pull_args(inp)?;
-    // eprintln!("p={:?}", DP(p));
-    // eprintln!("trace_evals={:?}", mug(stack, trace_evals));
+    // eprintln!("p={:?}", mug(stack, p).data());
+    // eprintln!("trace_evals={:?}", mug(stack, trace_evals).data());
     // eprintln!("height={:?}", height);
-    // eprintln!("chal_map={:?}", mug(stack, chal_map));
-    // eprintln!("dyns={:?}", mug(stack, dyns));
-    // eprintln!("com_map={:?}", mug(stack, com_map));
+    // eprintln!("chal_map={:?}", mug(stack, chal_map).data());
+    // eprintln!("dyns={:?}", mug(stack, dyns).data());
+    // eprintln!("com_map={:?}", mug(stack, com_map).data());
 
     // ^-  bpoly
 
     // %+  roll  ~(tap by p)
     let mut p_list = tap_by(stack, p)?;
-    // eprintln!("plist={:?}", DP(p_list));
+    // eprintln!("plist={:?}", mug(stack, p_list));
     // |=  [[k=bpoly v=belt] acc=_zero-bpoly]
     let mut acc = zero_bpoly(stack)?;
 
@@ -1171,7 +1301,7 @@ pub fn mp_substitute_mega(stack: &mut NockStack, inp: Noun) -> Result {
         let [k, v] = pull_args(e.head())?;
         let v = v.as_atom()?.as_u64()?;
         // eprintln!(
-        //     "rollling: k={:?}, v={:?}, acc={:?}",
+        //     "rollling: k={:?}, v={:x}, acc={:?}",
         //     mug(stack, k),
         //     v,
         //     mug(stack, acc)
@@ -1312,3 +1442,19 @@ fn with_belts<'a, 'b>(
 
     Ok(res_cell)
 }
+
+/*fn precompute_ntts(stack: &mut NockStack, inp: Noun) -> Result {
+    // |=  [polys=mary height=@ ntt-len=@]
+    let [polys, height, ntt_len] = pull_args(inp)?;
+    // ^-  bpoly
+    // %-  need
+    // =/  new-len  (mul height ntt-len)
+    let new_len = math::mul(stack, height, ntt_len)?;
+    // %+  roll  (range len.array.polys)
+    // |=  [i=@ acc=(unit bpoly)]
+    // =/  p=bpoly  (~(snag-as-bpoly ave polys) i)
+    // =/  fft=bpoly
+    //   (bp-fft (~(zero-extend bop p) (sub new-len len.p)))
+    // ?~  acc  (some fft)
+    // (some (~(weld bop u.acc) fft))
+}*/

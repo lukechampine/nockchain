@@ -1,5 +1,5 @@
 use crate::hamt::Hamt;
-use crate::jets::cold::Cold;
+use crate::jets::cold::{Cold, Nounable};
 use crate::jets::hot::Hot;
 use crate::jets::list::util::weld;
 use crate::jets::warm::Warm;
@@ -787,6 +787,9 @@ pub fn interpret(context: &mut Context, mut subject: Noun, formula: Noun) -> Res
                                                 let _ = std::fs::write(dir.join("formula.jam"), formula.as_ne_bytes());
                                                 let path = jam(&mut context.stack, path);
                                                 let _ = std::fs::write(dir.join("jetpath.jam"), path.as_ne_bytes());
+                                                let cold = context.cold.into_noun(&mut context.stack);
+                                                let cold = jam(&mut context.stack, cold);
+                                                let _ = std::fs::write(dir.join("cold.jam"), cold.as_ne_bytes());
                                             }
                                             Err(err) => {
                                                 break Err(err.into());

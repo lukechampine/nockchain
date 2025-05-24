@@ -8,9 +8,10 @@ use nockapp::kernel::checkpoint::JamPaths;
 use nockapp::utils::{create_context, NOCK_STACK_SIZE_HUGE};
 use nockapp::Noun;
 use nockvm::interpreter::interpret;
-use nockvm::jets::cold::Cold;
+use nockvm::jets::cold::{Cold, Nounable};
 use nockvm::jets::hot::URBIT_HOT_STATE;
 use nockvm::mem::NockStack;
+use nockvm::mug::mug;
 use nockvm::noun::{DirectAtom, FullDebugCell, IndirectAtom, D, T};
 use nockvm::serialization::cue;
 use nockvm::trace::path_to_cord;
@@ -32,6 +33,8 @@ pub struct JettestCli {
     pub jet_run: bool,
     #[arg(long)]
     pub snapshot_dir: Option<String>,
+    #[arg(long)]
+    pub cold_jam: Option<String>,
 }
 
 fn load_jam(stack: &mut NockStack, path: impl AsRef<Path>) -> Result<Noun, Box<dyn Error>> {
@@ -52,6 +55,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let mut stack = NockStack::new(NOCK_STACK_SIZE_HUGE, 0);
 
+    let p = Path::new(&cli.jamdir);
+    let subject = load_jam(&mut stack, p.join("subject.jam"))?;
+    let formula = load_jam(&mut stack, p.join("formula.jam"))?;
+    let jetpath = load_jam(&mut stack, p.join("jetpath.jam"))?;
+    let cold = load_jam(
+        &mut stack,
+        if let Some(p) = cli.cold_jam.as_deref() {
+            Path::new(p).into()
+        } else {
+            p.join("cold.jam")
+        },
+    );
+
     let cold = if let Some(snapshot_dir) = cli.snapshot_dir {
         let jam_paths = JamPaths::new(Path::new(&snapshot_dir));
         let checkpoint = if jam_paths.checkpoint_exists() {
@@ -70,23 +86,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
         debug!("Cold state from event {event_num_raw}");
 
         cold
+    } else if let Ok(cold) = cold {
+        let cold = Cold::from_noun(&mut stack, &cold)?;
+        Cold::from_vecs(&mut stack, cold.0, cold.1, cold.2)
     } else {
-        debug!("Snapshot dir unspecified, making empty cold state!");
+        debug!("Snapshot dir unspecified, no jammed cold state, making empty cold state!");
         Cold::new(&mut stack)
     };
 
     let mut context = create_context(stack, &hot_state, cold, cli.nockapp_cli.trace_opts.into());
-
-    let p = Path::new(&cli.jamdir);
-    let subject = load_jam(&mut context.stack, p.join("subject.jam"))?;
-    let formula = load_jam(&mut context.stack, p.join("formula.jam"))?;
-    let jetpath = load_jam(&mut context.stack, p.join("jetpath.jam"))?;
 
     let jetcord = path_to_cord(&mut context.stack, jetpath);
     let jetcord = std::str::from_utf8(jetcord.as_ne_bytes()).unwrap_or("");
     debug!("Formula in question: {jetcord}");
     let jetpath = jetpath.as_cell()?;
 
+    let mut jet_res = None;
     if cli.jet_run {
         for (path, _, jet) in hot_state {
             let mut a_path = D(0);
@@ -113,11 +128,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 };
             }
 
-            if unsafe { unifying_equality(&mut context.stack, &mut jetpath.as_noun(), &mut a_path) } {
+            if unsafe { unifying_equality(&mut context.stack, &mut jetpath.as_noun(), &mut a_path) }
+            {
                 eprintln!("Found Jet!");
                 match jet(&mut context, subject) {
                     Ok(res) => {
-                        eprintln!("Jet Ran OK");
+                        let m = mug(&mut context.stack, res);
+                        jet_res = Some((res, m));
+                        eprintln!("Jet Ran OK (result mug: {m:?})");
                     }
                     Err(e) => {
                         eprintln!("ERROR JET: {e:?}");
@@ -129,10 +147,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // let res =
     }
 
+    let mut int_res = None;
     if cli.interpret {
         match interpret(&mut context, subject, formula) {
             Ok(res) => {
-                eprintln!("Ran OK");
+                let m = mug(&mut context.stack, res);
+                int_res = Some((res, m));
+                eprintln!("Ran OK (result mug: {m:?})");
             }
             Err(e) => {
                 eprintln!("ERROR INTERPRETING: {e:?}");
