@@ -235,16 +235,23 @@ pub fn init_bpoly_jet(context: &mut Context, subject: Noun) -> Result {
 }
 
 pub fn init_bpoly(stack: &mut NockStack, poly: Noun) -> Result {
-    let list_belt = HoonList::try_from(poly)?.into_iter();
-    let count = list_belt.count();
-    let (res, res_poly): (IndirectAtom, &mut [Belt]) =
-        new_handle_mut_slice(stack, Some(count as usize));
-    for (i, belt_noun) in list_belt.enumerate() {
-        let Ok(belt) = belt_noun.as_belt() else {
-            return jet_err();
-        };
-        res_poly[i] = belt;
-    }
+    let (res, res_poly) = if poly.as_direct().map(|v| v.data()) != Ok(0) {
+        let list_belt = HoonList::try_from(poly)?.into_iter();
+        let count = list_belt.count();
+        let (res, res_poly): (IndirectAtom, &mut [Belt]) =
+                              new_handle_mut_slice(stack, Some(count as usize));
+        for (i, belt_noun) in list_belt.enumerate() {
+            let Ok(belt) = belt_noun.as_belt() else {
+                return jet_err();
+            };
+            res_poly[i] = belt;
+        }
+        (res, res_poly)
+    } else {
+        let (res, res_poly): (IndirectAtom, &mut [Belt]) = new_handle_mut_slice(stack, Some(1));
+        res_poly[0] = Belt(0);
+        (res, res_poly)
+    };
 
     let res_cell = finalize_poly(stack, Some(res_poly.len()), res);
 
