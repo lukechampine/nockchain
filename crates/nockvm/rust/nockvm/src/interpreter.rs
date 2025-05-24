@@ -6,6 +6,7 @@ use crate::jets::warm::Warm;
 use crate::jets::{cold, JetErr};
 use crate::mem::{NockStack, Preserve};
 use crate::noun::{Atom, Cell, IndirectAtom, Noun, Slots, D, T};
+use crate::serialization::jam;
 use crate::trace::{write_nock_trace, TraceInfo, TraceStack};
 use crate::unifying_equality::unifying_equality;
 use crate::{assert_acyclic, assert_no_forwarding_pointers, assert_no_junior_pointers, flog, noun};
@@ -778,6 +779,15 @@ pub fn interpret(context: &mut Context, mut subject: Noun, formula: Noun) -> Res
                                                 continue;
                                             }
                                             Err(JetErr::Punt) => {}
+                                            Err(JetErr::PuntJam(dir)) => {
+                                                let dir = std::path::Path::new(dir);
+                                                let res = jam(&mut context.stack, res);
+                                                let _ = std::fs::write(dir.join("subject.jam"), res.as_ne_bytes());
+                                                let formula = jam(&mut context.stack, formula);
+                                                let _ = std::fs::write(dir.join("formula.jam"), formula.as_ne_bytes());
+                                                let path = jam(&mut context.stack, path);
+                                                let _ = std::fs::write(dir.join("jetpath.jam"), path.as_ne_bytes());
+                                            }
                                             Err(err) => {
                                                 break Err(err.into());
                                             }

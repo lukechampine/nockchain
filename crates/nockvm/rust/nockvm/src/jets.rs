@@ -54,20 +54,21 @@ pub type Jet = fn(&mut Context, Noun) -> Result;
 #[derive(Clone, Copy, Debug)]
 pub enum JetErr {
     Punt,        // Retry with the raw nock
+    PuntJam(&'static str), // Jam subject+formula to given paths, and retry with the raw nock
     Fail(Error), // Error; do not retry
 }
 
 impl Preserve for JetErr {
     unsafe fn preserve(&mut self, stack: &mut NockStack) {
         match self {
-            JetErr::Punt => {}
+            JetErr::Punt | JetErr::PuntJam(_) => {}
             JetErr::Fail(ref mut err) => err.preserve(stack),
         }
     }
 
     unsafe fn assert_in_stack(&self, stack: &NockStack) {
         match self {
-            JetErr::Punt => {}
+            JetErr::Punt | JetErr::PuntJam(_) => {}
             JetErr::Fail(ref err) => err.assert_in_stack(stack),
         }
     }
@@ -101,6 +102,7 @@ impl From<JetErr> for Error {
         match e {
             JetErr::Fail(f) => f,
             JetErr::Punt => panic!("unhandled JetErr::Punt"),
+            JetErr::PuntJam(_) => panic!("unhandled JetErr::PuntJam"),
         }
     }
 }
