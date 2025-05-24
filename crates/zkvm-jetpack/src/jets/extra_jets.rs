@@ -20,7 +20,6 @@ use nockvm::jets::{util::BAIL_EXIT, JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::mug::mug;
 use nockvm::noun::{Atom, Cell, DirectAtom, IndirectAtom, Noun, D, T, YES};
-use nockvm::serialization::jam;
 use nockvm::unifying_equality::unifying_equality;
 use nockvm_macros::tas;
 
@@ -112,7 +111,7 @@ sam_jet! {
     hash_hashable_jet => hash_hashable,
     hash_ten_cell_jet => hash_ten_cell,
     leaf_sequence_jet => leaf_sequence,
-    mp_substitute_mega_jet => mp_substitute_mega 'punt_errs 'run_once 'jam,
+    mp_substitute_mega_jet => mp_substitute_mega,
 }
 
 /*
@@ -935,11 +934,16 @@ fn pull_arg(inp: Noun) -> core::result::Result<(Noun, Noun), JetErr> {
     Ok((c.head(), c.tail()))
 }
 
-fn pull_args<const N: usize>(mut inp: Noun) -> core::result::Result<[Noun; N], JetErr> {
+fn pull_args<const N: usize>(inp: Noun) -> core::result::Result<[Noun; N], JetErr> {
+    let mut inp = Some(inp);
     let ret = [(); N].map(|_| {
-        let c = inp.as_cell()?;
-        inp = c.tail();
-        Ok(c.head())
+        let Some(i) = inp.take() else { jet_err()? };
+        if let Ok(c) = i.as_cell() {
+            inp = Some(c.tail());
+            Ok(c.head())
+        } else {
+            Ok(i)
+        }
     });
     if let Some(Err(e)) = ret.iter().filter(|v| v.is_err()).next() {
         return Err(*e);
@@ -1146,32 +1150,37 @@ pub fn mp_substitute_mega(stack: &mut NockStack, inp: Noun) -> Result {
     // ++  mp-substitute-mega
     // ~/  %mp-substitute-mega
     // |=  [p=mp-mega trace-evals=bpoly height=@ chal-map=(map @ belt) dyns=bpoly com-map=(map @ bpoly)]
-    eprintln!("inp: {:?}", inp);
     let [p, trace_evals, height, chal_map, dyns, com_map] = pull_args(inp)?;
-    eprintln!("p={:?}", p);
-    eprintln!("trace_evals={:?}", mug(stack, trace_evals));
-    eprintln!("height={:?}", height);
-    eprintln!("chal_map={:?}", mug(stack, chal_map));
-    eprintln!("dyns={:?}", mug(stack, dyns));
-    eprintln!("com_map={:?}", mug(stack, com_map));
+    // eprintln!("p={:?}", DP(p));
+    // eprintln!("trace_evals={:?}", mug(stack, trace_evals));
+    // eprintln!("height={:?}", height);
+    // eprintln!("chal_map={:?}", mug(stack, chal_map));
+    // eprintln!("dyns={:?}", mug(stack, dyns));
+    // eprintln!("com_map={:?}", mug(stack, com_map));
 
     // ^-  bpoly
 
     // %+  roll  ~(tap by p)
     let mut p_list = tap_by(stack, p)?;
+    // eprintln!("plist={:?}", DP(p_list));
     // |=  [[k=bpoly v=belt] acc=_zero-bpoly]
     let mut acc = zero_bpoly(stack)?;
 
     while let Ok(e) = p_list.as_cell() {
         p_list = e.tail();
         let [k, v] = pull_args(e.head())?;
-        let v = v.as_direct()?.data();
-        eprintln!("rollling: k={:?}, v={:?}, acc={:?}", k, v, acc);
+        let v = v.as_atom()?.as_u64()?;
+        // eprintln!(
+        //     "rollling: k={:?}, v={:?}, acc={:?}",
+        //     mug(stack, k),
+        //     v,
+        //     mug(stack, acc)
+        // );
 
         // =/  [poly=bpoly len=@]  [trace-evals (mul 4 height)]
         let poly = trace_evals;
-        let len = (height.as_direct()?.data() * 4) as usize;
-        eprintln!("trace-evals: poly={:?}, len={:?}", poly, len);
+        let len = (height.as_atom()?.as_u64()? * 4) as usize;
+        // eprintln!("trace-evals: poly={:?}, len={:?}", mug(stack, poly), len);
 
         // =/  ones=bpoly  (init-bpoly (reap len 1))
         let reaped = reap(stack, len, D(1))?;
@@ -1185,13 +1194,13 @@ pub fn mp_substitute_mega(stack: &mut NockStack, inp: Noun) -> Result {
         // %+  bpadd  acc
         // %+  bpscal  v
         // %+  roll  (range len.k)
-        let len = slot(k, 2)?.as_direct()?.data() as usize;
+        let len_k = slot(k, 2)?.as_atom()?.as_u64()? as usize;
         // |=  [i=@ acc=_ones]
         let rolled = {
             let mut acc = ones;
 
             // ^-  bpoly
-            for i in 0..len {
+            for i in 0..len_k {
                 // =/  ter  (~(snag bop k) i)
                 let ter = snag_bop(stack, k, i)?;
 
@@ -1217,7 +1226,7 @@ pub fn mp_substitute_mega(stack: &mut NockStack, inp: Noun) -> Result {
                     // %rnd
                     MegaTyp::Rnd => {
                         // =/  rnd  (~(got by chal-map) idx)
-                        let rnd = got_by_val(stack, chal_map, idx)?.as_direct()?.data();
+                        let rnd = got_by_val(stack, chal_map, idx)?.as_atom()?.as_u64()?;
                         // (bpscal (bpow rnd exp) acc)
                         let powed = bpow(rnd, exp);
                         with_belts1(stack, bpscal, Belt(powed), acc)?
@@ -1252,18 +1261,17 @@ pub fn mp_substitute_mega(stack: &mut NockStack, inp: Noun) -> Result {
 
             acc
         };
-        eprintln!("ROLLED {:?}", mug(stack, rolled));
+        // eprintln!("ROLLED {:?}", mug(stack, rolled));
         // NOTE: in reverse
         // :: %+  bpscal  v
         let res = with_belts1(stack, bpscal, Belt(v), rolled)?;
-        eprintln!("RES {:?}", mug(stack, res));
+        // eprintln!("RES {:?}", mug(stack, res));
         // :: %+  bpadd  acc
         acc = with_belts(stack, bpadd, acc, res)?;
-        eprintln!("ADDED {:?}", mug(stack, acc));
+        // eprintln!("ADDED {:?}", mug(stack, acc));
     }
 
     Ok(acc)
-    //Err(JetErr::Punt)
 }
 
 fn with_belts1<'b, T>(
@@ -1295,7 +1303,7 @@ fn with_belts<'a, 'b>(
         return jet_err();
     };
     //assert_eq!(bp_poly.len(), bq_poly.len());
-    let res_len = bp_poly.len();
+    let res_len = core::cmp::max(bp_poly.len(), bq_poly.len());
     let (res, res_poly): (IndirectAtom, &mut [Belt]) = new_handle_mut_slice(stack, Some(res_len));
 
     f(bp_poly.0, bq_poly.0, res_poly);
