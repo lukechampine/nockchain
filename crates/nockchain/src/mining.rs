@@ -9,7 +9,7 @@ use nockapp::nockapp::wire::Wire;
 use nockapp::nockapp::NockAppError;
 use nockapp::noun::slab::NounSlab;
 use nockapp::noun::{AtomExt, NounExt};
-use nockvm::noun::{Atom, D, T};
+use nockvm::noun::{Atom, FullDebugCell, D, T};
 use nockvm_macros::tas;
 use tempfile::tempdir;
 use tracing::{debug, instrument, trace, warn};
@@ -200,7 +200,9 @@ pub async fn mining_attempt(candidate: NounSlab, handle: NockAppHandle, cancel_n
                 drop(effect);
                 continue;
             };
-            trace!("Miner effect");
+            unsafe {
+                trace!("Miner effect {:?}", effect.root().as_cell().as_ref().map(FullDebugCell));
+            }
             if effect_cell.head().eq_bytes("command") {
                 handle
                     .poke(MiningWire::Mined.to_wire(), effect)
