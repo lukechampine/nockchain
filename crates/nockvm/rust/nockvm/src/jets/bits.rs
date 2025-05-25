@@ -149,43 +149,7 @@ pub fn jet_rep(context: &mut Context, subject: Noun) -> Result {
     let arg = slot(subject, 6)?;
     let (bloq, step) = bite(slot(arg, 2)?)?;
     let original_list = slot(arg, 3)?;
-
-    let mut len = 0usize;
-    let mut list = original_list;
-    loop {
-        if unsafe { list.raw_equals(&D(0)) } {
-            break;
-        }
-
-        let cell = list.as_cell()?;
-
-        len = checked_add(len, step)?;
-        list = cell.tail();
-    }
-
-    if len == 0 {
-        Ok(D(0))
-    } else {
-        unsafe {
-            let (mut new_indirect, new_slice) =
-                IndirectAtom::new_raw_mut_bitslice(&mut context.stack, bite_to_word(bloq, len)?);
-            let mut pos = 0;
-            let mut list = original_list;
-            loop {
-                if list.raw_equals(&D(0)) {
-                    break;
-                }
-
-                let cell = list.as_cell()?;
-                let atom = cell.head().as_atom()?;
-                chop(bloq, 0, step, pos, new_slice, atom.as_bitslice())?;
-
-                pos += step;
-                list = cell.tail();
-            }
-            Ok(new_indirect.normalize_as_atom().as_noun())
-        }
-    }
+    Ok(util::rep(&mut context.stack, bloq, step, original_list)?.as_noun())
 }
 
 pub fn jet_rev(context: &mut Context, subject: Noun) -> Result {
@@ -452,6 +416,51 @@ pub mod util {
                     list = cell.tail();
                 }
 
+                Ok(new_indirect.normalize_as_atom())
+            }
+        }
+    }
+
+    pub fn rep(
+        stack: &mut NockStack,
+        bloq: usize,
+        step: usize,
+        original_list: Noun
+    ) -> result::Result<Atom, JetErr> {
+
+        let mut len = 0usize;
+        let mut list = original_list;
+        loop {
+            if unsafe { list.raw_equals(&D(0)) } {
+                break;
+            }
+
+            let cell = list.as_cell()?;
+
+            len = checked_add(len, step)?;
+            list = cell.tail();
+        }
+
+        if len == 0 {
+            Ok(D(0).as_atom()?)
+        } else {
+            unsafe {
+                let (mut new_indirect, new_slice) =
+                    IndirectAtom::new_raw_mut_bitslice(stack, bite_to_word(bloq, len)?);
+                let mut pos = 0;
+                let mut list = original_list;
+                loop {
+                    if list.raw_equals(&D(0)) {
+                        break;
+                    }
+
+                    let cell = list.as_cell()?;
+                    let atom = cell.head().as_atom()?;
+                    chop(bloq, 0, step, pos, new_slice, atom.as_bitslice())?;
+
+                    pos += step;
+                    list = cell.tail();
+                }
                 Ok(new_indirect.normalize_as_atom())
             }
         }

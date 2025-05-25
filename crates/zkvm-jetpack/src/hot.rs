@@ -734,6 +734,27 @@ pub const EXTRA_JETS: &[HotEntry] = &[
         1,
         compute_composition_poly_jet,
     ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"misc-lib"),
+            Left(b"proof-lib"),
+            Left(b"utils"),
+            Left(b"fri"),
+            Left(b"table-lib"),
+            Left(b"stark-core"),
+            Left(b"compute-deep"),
+        ],
+        1,
+        compute_deep_jet,
+    ),
     /*(
         &[
             K_138,

@@ -211,8 +211,14 @@ impl<'a> From<&'a Felt> for BPolySlice<'a> {
     }
 }
 
-impl<'a> From<&'a BPolySliceMut<'_>> for BPolySlice<'a> {
-    fn from(p: &'a BPolySliceMut) -> Self {
+impl<'a, T> From<PolySliceMut<'a, T>> for PolySlice<'a, T> {
+    fn from(p: PolySliceMut<'a, T>) -> Self {
+        Self(p.0)
+    }
+}
+
+impl<'a, T> From<&'a PolySliceMut<'_, T>> for PolySlice<'a, T> {
+    fn from(p: &'a PolySliceMut<'_, T>) -> Self {
         Self(p.0)
     }
 }

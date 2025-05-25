@@ -1,25 +1,29 @@
+use std::iter::repeat;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::form::bpoly::{bp_hadamard, bpscal};
+use crate::form::fext::{fadd, fadd_, fmul_, fneg, fneg_};
 use crate::form::mary::MarySlice;
 use crate::form::math::bpoly::bpadd;
 use crate::form::math::tip5;
-use crate::form::{bpow, PolySlice};
+use crate::form::{bpow, FPolySlice, FPolySliceMut, FPolyVec, Felt, PolySlice, PolySliceMut};
 use crate::form::{poly::Poly, BPolySlice, Belt};
-use crate::hand::handle::{finalize_poly, new_handle_mut_slice};
+use crate::hand::handle::{finalize_poly, new_handle_mut_felt, new_handle_mut_slice};
 use crate::hand::structs::HoonList;
 use crate::jets::bp_jets::bpoly_to_list;
+use crate::noun::noun_ext::NounExt;
 use either::Either;
+use ibig::Stack;
 use nockvm::interpreter::Context;
 use nockvm::jets::bits::util as bits;
-use nockvm::jets::list::util as list;
+use nockvm::jets::list::util::{self as list, lent};
 use nockvm::jets::math::util as math;
 use nockvm::jets::sort::util::gor;
 use nockvm::jets::util::{self, slot};
 use nockvm::jets::{util::BAIL_EXIT, JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::mug::mug;
-use nockvm::noun::{Atom, Cell, DirectAtom, IndirectAtom, Noun, D, T, YES};
+use nockvm::noun::{Atom, Cell, DirectAtom, IndirectAtom, Noun, NounAllocator, D, T, YES};
 use nockvm::unifying_equality::unifying_equality;
 use nockvm_macros::tas;
 
@@ -153,6 +157,7 @@ sam_jet! {
     mp_substitute_mega_jet => mp_substitute_mega 'jam_errs 'create_jam_dir,// 'log 'punt_errs 'jam 'run_once 'create_jam_dir,
     mp_substitute_ultra_jet => mp_substitute_ultra, // 'punt_errs 'run_once 'log 'jam 'create_jam_dir,
     compute_composition_poly_jet => compute_composition_poly 'punt_errs 'run_once 'log 'jam 'create_jam_dir,
+    compute_deep_jet => compute_deep 'jam 'create_jam_dir,
     // bpdiv_jet => bpdiv 'jam 'create_jam_dir,
 }
 
@@ -1199,6 +1204,509 @@ pub fn mp_substitute_ultra(stack: &mut NockStack, inp: Noun) -> Result {
     //     "MP SUBSTITUTE ULTRA {:?} => {args:?}",
     //     mug(stack, inp).data()
     // );
+
+    Err(JetErr::Punt)
+}
+
+fn met_elt(elt: Atom) -> usize {
+    // |=  =elt
+    // ^-  @
+    // (dec (max 2 (met 6 elt)))
+    core::cmp::max(2, bits::met(6, elt)) - 1
+}
+
+fn init_mary(stack: &mut NockStack, poly: Noun) -> Result {
+    // ~/  %init-mary
+    // |=  poly=(list elt)
+    // ^-  mary
+    // ?~  poly  !!  :: can't return zero-mary because we can't figure out the step from ~
+    let poly = poly.as_cell()?;
+    // (do-init-mary (met-elt (head poly)) poly)
+    let inp = Cell::new(
+        stack,
+        D(met_elt(poly.head().as_atom()?) as _),
+        poly.as_noun(),
+    );
+    do_init_mary(stack, inp.as_noun())
+}
+
+fn lift_elt(stack: &mut NockStack, step: usize, a: Noun) -> Result {
+    // ~/  %lift-elt
+    // |=  a=@
+    // ^-  elt
+    // ?:(=(step 1) `@ux`a dat:(init-bpoly [a (reap (dec step) 0)]))
+    if step == 1 {
+        Ok(a)
+    } else {
+        let reaped = reap(stack, step - 1, D(0))?;
+        let poly = T(stack, &[a, reaped]);
+        let bp = init_bpoly(stack, poly)?;
+        Ok(bp.as_cell()?.tail())
+    }
+}
+
+fn zero_mary(stack: &mut NockStack, step: usize) -> Result {
+    // ~+
+    // ^-  mary
+    // ?:  =(step 1)  [1 1 `@ux`0]
+    if step == 1 {
+        Ok(T(stack, &[D(1), D(1), D(0)]))
+    } else {
+        // (init-mary ~[(lift-elt 0)])
+        let lifted = lift_elt(stack, step, D(0))?;
+        let args = T(stack, &[lifted, D(0)]);
+        init_mary(stack, args)
+    }
+}
+
+fn do_init_mary(stack: &mut NockStack, inp: Noun) -> Result {
+    // ~/  %do-init-mary
+    // |=  [step=@ poly=(list elt)]
+    let [step, poly] = pull_args(inp)?;
+    let step = step.as_direct()?.data() as usize;
+
+    // ^-  mary
+    // ?:  =(~ poly)
+    if poly.is_atom() {
+        //   ~(zero-mary mary-utils step)
+        zero_mary(stack, step)
+    } else {
+        // ?>  (lth (lent poly) (bex 32))
+        // ?>  (levy poly |=(=elt &((~(fet mary-utils step) elt) =(step (met-elt elt)))))
+        // :-  step
+        // :-  (lent poly)
+        let poly_len = lent(poly)?;
+        // =/  high-bit  (lsh [0 (mul (bex 6) (mul step (lent poly)))] 1)
+        let step = (1 << 6) * step * poly_len;
+        let high_bit = bits::lsh(stack, 0, step, D(1).as_atom()?)?.as_atom()?;
+        // (add (rep [6 step] poly) high-bit)
+        let repped = bits::rep(stack, 6, step, poly)?;
+        let added = math::add(stack, repped, high_bit);
+
+        Ok(T(stack, &[D(step as _), D(poly_len as _), added.as_noun()]))
+    }
+}
+
+pub fn init_fpoly(stack: &mut NockStack, poly: Noun) -> Result {
+    // |=  poly=(list felt)
+    // ^-  fpoly
+    // ?~  poly  [0 (lift 0)]
+    if poly.is_atom() {
+        let (a, f) = new_handle_mut_felt(stack);
+        *f = Felt::lift(Belt(0));
+        Ok(Cell::new(stack, D(0), a.as_noun()).as_noun())
+    } else {
+        // array:(init-mary poly)
+        let mary = init_mary(stack, poly)?;
+        array_mary(mary)
+    }
+}
+
+pub fn zero_fpoly<'a>(stack: &mut NockStack) -> FPolySliceMut<'a> {
+    // (init-fpoly ~[(lift 0)])
+    zeroextend_slice(stack, PolySliceMut(&mut []), 1, Felt::zero())
+}
+
+pub fn id_fpoly<'a>(stack: &mut NockStack) -> FPolySlice<'a> {
+    // (init-fpoly ~[(lift 0) (lift 1)])
+    let zero_felt = T(stack, &[0, 0, 0].map(D));
+    let one_felt = T(stack, &[1, 0, 0].map(D));
+    let cell = T(stack, &[zero_felt, one_felt, D(0)]);
+    let res = init_fpoly(stack, cell).expect("id_fpoly cannot fail");
+    res.try_into().unwrap()
+}
+
+pub fn snag_mary(stack: &mut NockStack, ma: MarySlice, i: usize) -> Atom {
+    // ~/  %snag
+    // |=  i=@
+    // ^-  elt
+    // ?>  (lth i len.array.ma)
+    // =/  res  (cut 6 [(mul i step.ma) step.ma] dat.array.ma)
+    // NOTE: 6 is 64 bits, so... just index the mary
+    // ?:  =(step.ma 1)  res
+    let step = ma.step as usize;
+    if step == 1 {
+        Atom::new(stack, ma.dat[i])
+    } else {
+        let start = i * step;
+        let res = &ma.dat[start..(start + step)];
+        // =/  high-bit  (lsh [0 (mul (bex 6) step.ma)] 1)
+        // (add high-bit res)
+        let (out, dat) = unsafe { IndirectAtom::new_raw_mut(stack, step + 1) };
+        let dat = unsafe { core::slice::from_raw_parts_mut(dat, step + 1) };
+        dat[..step].copy_from_slice(res);
+        dat[step] = 1;
+        out.as_atom()
+    }
+}
+
+pub fn snag_as_bpoly_mary<'a>(
+    stack: &mut NockStack,
+    ma: MarySlice<'a>,
+    i: usize,
+) -> BPolySlice<'a> {
+    // ~/  %snag-as-bpoly
+    // |=  i=@
+    // ^-  bpoly
+    // :-  step.ma
+    // =/  dat  (snag i)
+    // ?:  =(step.ma 1)
+    let bpdat = if ma.step == 1 {
+        let dat = ma.dat[i];
+        //   =/  high-bit  (lsh [0 (mul (bex 6) step.ma)] 1)
+        //   (add high-bit dat)
+        let (out, indirect) = unsafe { IndirectAtom::new_raw_mut(stack, 2) };
+        let indirect = unsafe { core::slice::from_raw_parts_mut(indirect, 2) };
+        indirect[0] = dat;
+        indirect[1] = 1;
+        out.as_atom()
+    } else {
+        // dat
+        snag_mary(stack, ma, i)
+    }
+    .as_indirect()
+    .expect("Somehow got direct despite all paths being indirect?");
+
+    // SAFETY: we've got the correct amount of belts allocated here
+    PolySlice(unsafe {
+        let belts = bpdat.to_raw_pointer() as *const Belt;
+        core::slice::from_raw_parts(belts, ma.step as usize)
+    })
+}
+
+pub fn bpoly_to_fpoly<'a>(stack: &mut NockStack, bp: BPolySlice<'a>) -> FPolySlice<'a> {
+    // ~/  %bpoly-to-fpoly
+    // |=  bp=bpoly
+    // ^-  fpoly
+    // (lift-to-fpoly ~(to-poly bop bp))
+    // NOTE: (to-poly bop bp) creates a mary of step 1, and calls mary-to-list
+    // mary-to-list on a bpoly will always just give all atoms as a list, thus
+    // we can just skip that, and call lift-to-fpoly using the input bp.
+    // All in all, this function is just a lift_to_fpoly on a contiguous atom.
+    let felts = unsafe { stack.alloc_struct::<Felt>(bp.len()) };
+    let felts = unsafe { core::slice::from_raw_parts_mut(felts, bp.len()) };
+    for (f, b) in felts.iter_mut().zip(bp.data()) {
+        *f = Felt::lift(*b);
+    }
+    PolySlice(felts)
+}
+
+pub fn fpadd<'a>(
+    stack: &mut NockStack,
+    fp: FPolySliceMut<'a>,
+    fq: FPolySlice,
+) -> FPolySliceMut<'a> {
+    // ~/  %fpadd
+    // |:  [fp=`fpoly`zero-fpoly fq=`fpoly`zero-fpoly]
+    // ^-  fpoly
+    // ?>  &(!=(len.fp 0) !=(len.fq 0))
+    // =/  p  ~(to-poly fop fp)
+    // =/  q  ~(to-poly fop fq)
+    // =/  lp  (lent p)
+    // =/  lq  (lent q)
+    // =/  m  (max lp lq)
+    let m = core::cmp::max(fp.0.len(), fq.0.len());
+    let fp = zeroextend_slice(stack, fp, m, Felt::zero());
+    //debug_assert_eq!(m, fp.0.len());
+
+    // =:  p  (weld p (reap (sub m lp) (lift 0)))
+    //     q  (weld q (reap (sub m lq) (lift 0)))
+    //   ==
+    // %-  init-fpoly
+    // (zip p q fadd)
+    let zero_felt = &Felt::lift(Belt(0));
+    let fq_iter = fq.0.iter().chain(repeat(zero_felt));
+    for (p, q) in fp.0.iter_mut().zip(fq_iter) {
+        *p = fadd_(p, q);
+    }
+    fp
+}
+
+pub fn fpneg(fp: &mut FPolySliceMut) {
+    // |:  fp=`fpoly`zero-fpoly
+    // ^-  fpoly
+    // ?>  !=(len.fp 0)
+    // ~+
+    // =/  p  ~(to-poly fop fp)
+    // %-  init-fpoly
+    // (turn p fneg)
+    for f in &mut fp.0[..] {
+        *f = fneg_(f);
+    }
+}
+
+fn copy_slice<'a, T: Copy>(stack: &mut NockStack, a: PolySlice<'a, T>) -> PolySliceMut<'a, T> {
+    PolySliceMut(unsafe {
+        let dat = stack.alloc_struct::<T>(a.0.len());
+        core::ptr::copy_nonoverlapping(a.0.as_ptr(), dat, a.0.len());
+        core::slice::from_raw_parts_mut(dat, a.0.len())
+    })
+}
+
+fn copy_slice_extend_zero<'a, T: Copy>(
+    stack: &mut NockStack,
+    a: PolySlice<T>,
+    n: usize,
+    zero: T,
+) -> PolySliceMut<'a, T> {
+    PolySliceMut(unsafe {
+        assert!(n >= a.0.len());
+        let dat = stack.alloc_struct::<T>(n);
+        core::ptr::copy_nonoverlapping(a.0.as_ptr(), dat, a.0.len());
+        let r = core::slice::from_raw_parts_mut(dat, n);
+        r[a.0.len()..].iter_mut().for_each(|v| *v = zero);
+        r
+    })
+}
+
+fn alloc_slice<'a, T: Copy>(stack: &mut NockStack, num: usize) -> PolySliceMut<'a, T> {
+    PolySliceMut(unsafe {
+        let dat = stack.alloc_struct::<T>(num);
+        core::slice::from_raw_parts_mut(dat, num)
+    })
+}
+
+fn zeroextend_slice<'a, T: Copy>(
+    stack: &mut NockStack,
+    a: PolySliceMut<'a, T>,
+    n: usize,
+    zero: T,
+) -> PolySliceMut<'a, T> {
+    if a.0.len() >= n {
+        a
+    } else {
+        let new = alloc_slice(stack, n);
+        new.0[..a.0.len()].copy_from_slice(a.0);
+        new.0[a.0.len()..].iter_mut().for_each(|v| *v = zero);
+        new
+    }
+}
+
+pub fn fpsub<'a>(stack: &mut NockStack, p: FPolySlice, q: FPolySlice) -> FPolySliceMut<'a> {
+    // ~/  %fpsub
+    // |:  [p=`fpoly`zero-fpoly q=`fpoly`zero-fpoly]
+    // ^-  fpoly
+    // ~+
+    // ?>  &(!=(len.p 0) !=(len.q 0))
+    // (fpadd p (fpneg q))
+    let mut neg =
+        copy_slice_extend_zero(stack, q, core::cmp::max(p.0.len(), q.0.len()), Felt::zero());
+    fpneg(&mut neg);
+    fpadd(stack, neg, p)
+}
+
+pub fn fpscal<'a>(c: Felt, fp: FPolySliceMut) -> FPolySliceMut {
+    // ~/  %fpscal
+    // |:  [c=`felt`(lift 1) fp=`fpoly`one-fpoly]
+    // ^-  fpoly
+    // ~+
+    // =/  p  ~(to-poly fop fp)
+    // %-  init-fpoly
+    // %+  turn
+    //   p
+    // (cury fmul c)
+    fp.0.iter_mut().for_each(|v| *v = fmul_(v, &c));
+    fp
+}
+
+pub fn weighted_linear_combo<'a>(
+    stack: &mut NockStack,
+    polys: &[FPolySlice<'a>],
+    openings: FPolySlice<'a>,
+    idx: usize,
+    x_poly: FPolySlice<'a>,
+    weights: FPolySlice<'a>,
+) -> (FPolySlice<'a>, usize) {
+    // |=  [polys=(list fpoly) openings=fpoly idx=@ x-poly=fpoly weights=fpoly]
+    // ^-  [fpoly @]
+    // =-  [acc num]
+    let mut acc = zero_fpoly(stack);
+    let mut num = idx;
+
+    let id = id_fpoly(stack);
+    let id_x: FPolySlice = fpsub(stack, id, x_poly).into();
+
+    // %+  roll  polys
+    // |=  [poly=fpoly acc=_zero-fpoly num=_idx]
+    for &poly in polys {
+        // :_  +(num)
+        // %+  fpadd  acc
+        // %+  fpscal  (~(snag fop weights) num)
+        // %+  fpdiv
+        //   (fpsub poly (fp-c (~(snag fop openings) num)))
+        // (fpsub id-fpoly x-poly)
+        let fpc = [openings.0[num]];
+        let fpc = PolySlice(&fpc);
+        let res = fpsub(stack, poly, fpc);
+        //let res = fpdiv(stack, res, id_x);
+        let res = fpscal(weights.0[num], res);
+        acc = fpadd(stack, acc, res.into());
+        num += 1;
+    }
+
+    (acc.into(), num)
+}
+
+pub fn compute_deep(stack: &mut NockStack, inp: Noun) -> Result {
+    // let [a, b] = pull_args(inp)?;
+    // let al = bpoly_to_list(stack, a)?;
+    // let bl = bpoly_to_list(stack, b)?;
+    // eprintln!("BPDIV {:?} {:?} | {:?} {:?}", DP(a), DP(b), DP(al), DP(bl));
+    // ~/  %compute-deep
+    // |=  $:  trace-polys=(list mary)
+    //         trace-openings=fpoly
+    //         composition-pieces=(list fpoly)
+    //         composition-piece-openings=fpoly
+    //         weights=fpoly
+    //         omicrons=fpoly
+    //         deep-challenge=felt
+    //         comp-eval-point=felt
+    //     ==
+    let [trace_polys, trace_openings, composition_pieces, composition_piece_openings, weights, omicrons, deep_challenge, comp_eval_point] =
+        pull_args(inp)?;
+
+    // Convert nouns to appropriate types
+    let trace_polys = HoonList::try_from(trace_polys)?
+        .into_iter()
+        .map(|x| MarySlice::try_from(x))
+        .collect::<core::result::Result<Vec<_>, _>>()
+        .or_else(|_| jet_err())?;
+
+    let Ok(trace_openings) = FPolySlice::try_from(trace_openings) else {
+        debug!("trace_openings is not a valid FPolySlice");
+        return jet_err();
+    };
+
+    let composition_pieces = HoonList::try_from(composition_pieces)?
+        .into_iter()
+        .map(|x| FPolySlice::try_from(x))
+        .collect::<core::result::Result<Vec<_>, _>>()
+        .or_else(|_| {
+            debug!("composition_pieces contain invalid FPolySlice");
+            jet_err()
+        })?;
+
+    let Ok(composition_piece_openings) = FPolySlice::try_from(composition_piece_openings) else {
+        debug!("composition_piece_openings is not a valid FPolySlice");
+        return jet_err();
+    };
+
+    let Ok(weights) = FPolySlice::try_from(weights) else {
+        debug!("weights is not a valid FPolySlice");
+        return jet_err();
+    };
+
+    let Ok(omicrons) = FPolySlice::try_from(omicrons) else {
+        debug!("omicrons is not a valid FPolySlice");
+        return jet_err();
+    };
+
+    let deep_challenge = deep_challenge.as_felt()?;
+    let comp_eval_point = comp_eval_point.as_felt()?;
+
+    eprintln!(
+        "COMPUTE DEEP: tp={} to={} cp={} cpo={} w={} o={} dc={deep_challenge:?} cep={comp_eval_point:?}",
+        trace_polys.len(),
+        trace_openings.0.len(),
+        composition_pieces.len(),
+        composition_piece_openings.0.len(),
+        weights.0.len(),
+        omicrons.0.len()
+    );
+
+    let mut acc = zero_fpoly(stack);
+    let mut num = 0usize;
+
+    // |^  ^-  fpoly
+    // =/  [acc=fpoly num=@]
+    //   %^  zip-roll  (range (lent trace-polys))  trace-polys
+    //   |=  [[i=@ p=mary] acc=_zero-fpoly num=@]
+    for (i, &p) in trace_polys.iter().enumerate() {
+        //   =/  lis=(list fpoly)
+        //     %+  turn  (range len.array.p)
+        //     |=  i=@
+        //     (bpoly-to-fpoly (~(snag-as-bpoly ave p) i))
+        let mut lis = Vec::with_capacity(p.len as usize);
+        for i in 0..p.len {
+            lis.push(snag_as_bpoly_mary(stack, p, i as usize));
+        }
+
+        //   =/  omicron  (~(snag fop omicrons) i)
+        let omicron = omicrons.0[i];
+
+        //   =/  [first-row=fpoly num=@]    :: first row:  f(x)-f(Z)/x-Z
+        //     %-  weighted-linear-combo
+        //     :*  lis
+        //         trace-openings
+        //         num
+        //         (fp-c deep-challenge)
+        //         weights
+        //     ==
+        //   =/  [second-row=fpoly num=@]   :: second row:  f(x)-f(gZ)/x-gZ
+        //     %-  weighted-linear-combo
+        //     :*  lis
+        //         trace-openings
+        //         num
+        //         (fp-c (fmul omicron deep-challenge))
+        //         weights
+        //     ==
+        //   :_  num
+        //   :(fpadd acc first-row second-row)
+    }
+    // ::
+    // ::  do the same thing for the second composition poly evals
+    // =/  [acc=fpoly num=@]
+    //   %^  zip-roll  (range (lent trace-polys))  trace-polys
+    //   |=  [[i=@ p=mary] acc=_acc num=_num]
+    //   =/  lis=(list fpoly)
+    //     %+  turn  (range len.array.p)
+    //     |=  i=@
+    //     (bpoly-to-fpoly (~(snag-as-bpoly ave p) i))
+    //   =/  omicron  (~(snag fop omicrons) i)
+    //   ::  add new composition poly
+    //   =/  [new-first-row=fpoly num=@]    :: first row:  f(x)-f(Z)/x-Z
+    //     %-  weighted-linear-combo
+    //     :*  lis
+    //         trace-openings
+    //         num
+    //         (fp-c comp-eval-point)
+    //         weights
+    //     ==
+    //   ::  second row
+    //   =/  [new-second-row=fpoly num=@]   :: second row:  f(x)-f(gZ)/x-gZ
+    //     %-  weighted-linear-combo
+    //     :*  lis
+    //         trace-openings
+    //         num
+    //         (fp-c (fmul omicron comp-eval-point))
+    //         weights
+    //     ==
+    //   :_  num
+    //   :(fpadd acc new-first-row new-second-row)
+    // ::
+    // =/  [pieces=fpoly @]
+    //   %-  weighted-linear-combo
+    //   :*  composition-pieces
+    //       composition-piece-openings
+    //       0
+    //       (fp-c (fpow deep-challenge (lent composition-pieces))) :: f(X)=X^D
+    //       (~(slag fop weights) num)
+    //   ==
+    // (fpadd acc pieces)
+    // ::
+    // ++  weighted-linear-combo
+    //   |=  [polys=(list fpoly) openings=fpoly idx=@ x-poly=fpoly weights=fpoly]
+    //   ^-  [fpoly @]
+    //   =-  [acc num]
+    //   %+  roll  polys
+    //   |=  [poly=fpoly acc=_zero-fpoly num=_idx]
+    //   :_  +(num)
+    //   %+  fpadd  acc
+    //   %+  fpscal  (~(snag fop weights) num)
+    //   %+  fpdiv
+    //     (fpsub poly (fp-c (~(snag fop openings) num)))
+    //   (fpsub id-fpoly x-poly)
+    // --
 
     Err(JetErr::Punt)
 }
