@@ -116,7 +116,7 @@ assets/miner.jam: update-hoonc hoon/apps/dumbnet/miner.hoon $(HOON_SRCS)
 	RUST_LOG=trace hoonc hoon/apps/dumbnet/miner.hoon hoon
 	mv out.jam assets/miner.jam
 
-assets/jettest.jam: update-hoonc hoon/apps/tests/kernel.hoon $(HOON_SRCS)
+assets/jojo.jam: update-hoonc hoon/apps/jojo.hoon $(HOON_SRCS)
 	$(call show_env_vars)
-	RUST_LOG=trace hoonc hoon/apps/tests/kernel.hoon hoon
-	mv out.jam assets/jettest.jam
+	RUST_LOG=trace hoonc hoon/apps/jojo.hoon hoon
+	mv out.jam assets/jojo.jam

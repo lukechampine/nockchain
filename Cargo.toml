@@ -7,7 +7,7 @@ members = [
     "crates/nockchain-bitcoin-sync",
     "crates/nockchain-libp2p-io",
     "crates/nockchain",
-    "crates/jettest",
+    "crates/jojo",
     "crates/nockvm/rust/ibig",
     "crates/nockvm/rust/murmur3",
     "crates/nockvm/rust/nockvm_macros",
@@ -172,6 +172,9 @@ tokio = { version = "1.32", features = [
     "signal",
 ] }
 tokio-util = "0.7.11"
+tokio-stream = "0.1"
+flume = "0.11"
+reedline = "0.40"
 tracing = "0.1.41"
 tracing-core = "0.1"
 tracing-subscriber = { version = "0.3.18", features = [
