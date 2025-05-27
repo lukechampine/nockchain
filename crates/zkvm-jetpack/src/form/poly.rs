@@ -17,6 +17,25 @@ pub trait Element: Clone {
     fn one() -> Self;
 }
 
+impl Element for Felt {
+    #[inline(always)]
+    fn is_zero(&self) -> bool {
+        self.is_zero()
+    }
+    #[inline(always)]
+    fn zero() -> Self {
+        Felt::zero()
+    }
+    #[inline(always)]
+    fn len() -> usize {
+        3
+    }
+    #[inline(always)]
+    fn one() -> Self {
+        Felt::one()
+    }
+}
+
 impl Element for Belt {
     #[inline(always)]
     fn is_zero(&self) -> bool {
@@ -125,7 +144,7 @@ where
 
 // Wrapper types for Polys to convert from Cell. Only called from top level jet wrapper or in tests.
 // Note that form/math functions will always use slice primitives like &[Felt] and &mut [Felt]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[repr(transparent)]
 pub struct PolyVec<T>(pub Vec<T>);
 
@@ -220,6 +239,18 @@ impl<'a, T> From<PolySliceMut<'a, T>> for PolySlice<'a, T> {
 impl<'a, T> From<&'a PolySliceMut<'_, T>> for PolySlice<'a, T> {
     fn from(p: &'a PolySliceMut<'_, T>) -> Self {
         Self(p.0)
+    }
+}
+
+impl<'a, T> From<&'a PolyVec<T>> for PolySlice<'a, T> {
+    fn from(p: &'a PolyVec<T>) -> Self {
+        Self(&p.0)
+    }
+}
+
+impl<'a, T> From<&'a mut PolyVec<T>> for PolySliceMut<'a, T> {
+    fn from(p: &'a mut PolyVec<T>) -> Self {
+        Self(&mut p.0)
     }
 }
 
