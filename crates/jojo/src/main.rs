@@ -67,7 +67,7 @@ impl Wire for JojoWire {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum Mode {
-    Jojo(Jojo),
+    Jettest(Jettest),
     #[command(subcommand)]
     Eval(Eval),
     Shell,
@@ -100,7 +100,7 @@ impl Eval {
                 let mut slab = NounSlab::new();
                 let hoon =
                     unsafe { IndirectAtom::new_raw_bytes(&mut slab, hoon.len(), hoon.as_ptr()) };
-                let poke = T(&mut slab, &[D(tas!(b"raw")), hoon.as_noun()]);
+                let poke = T(&mut slab, &[D(tas!(b"raw")), hoon.as_noun(), D(0)]);
                 slab.set_root(poke);
                 on_kernel(slab, cli).await
             }
@@ -117,14 +117,19 @@ async fn with_jam(func: String, path: String, axis: u64, cli: Cli) -> Result<()>
     let func = unsafe { IndirectAtom::new_raw_bytes(&mut slab, func.len(), func.as_ptr()) };
     let poke = T(
         &mut slab,
-        &[D(tas!(b"sam")), func.as_noun(), slot(noun, axis).unwrap()],
+        &[
+            D(tas!(b"sam")),
+            func.as_noun(),
+            D(0),
+            slot(noun, axis).unwrap(),
+        ],
     );
     slab.set_root(poke);
     on_kernel(slab, cli).await
 }
 
 #[derive(Parser, Debug, Clone)]
-pub struct Jojo {
+pub struct Jettest {
     #[arg(short, long, default_value = ".")]
     jamdir: String,
     #[arg(short, long)]
@@ -137,7 +142,7 @@ pub struct Jojo {
     cold_jam: Option<String>,
 }
 
-impl Jojo {
+impl Jettest {
     async fn run(self, cli: Cli) -> Result<()> {
         let Self {
             jamdir,
@@ -357,7 +362,7 @@ async fn main() -> Result<()> {
     boot::init_default_tracing(&cli.nockapp_cli);
 
     match cli.mode {
-        Mode::Jojo(j) => j.run(cli.nockapp_cli).await,
+        Mode::Jettest(j) => j.run(cli.nockapp_cli).await,
         Mode::Eval(e) => e.run(cli.nockapp_cli).await,
         Mode::Shell => Shell::default().run(cli.nockapp_cli).await,
     }

@@ -5,19 +5,20 @@ pub enum Node {
 }
 
 impl Node {
-    pub fn fold<T, E>(
+    pub fn fold<T, E, C>(
         self,
-        fold_leaf: &mut impl FnMut(String) -> Result<T, E>,
-        fold_branch: &mut impl FnMut(Vec<T>) -> Result<T, E>,
+        c: &mut C,
+        fold_leaf: &mut impl FnMut(String, &mut C) -> Result<T, E>,
+        fold_branch: &mut impl FnMut(Vec<T>, &mut C) -> Result<T, E>,
     ) -> Result<T, E> {
         match self {
-            Self::Leaf(l) => fold_leaf(l),
+            Self::Leaf(l) => fold_leaf(l, c),
             Self::Branch(b) => {
                 let b = b
                     .into_iter()
-                    .map(|v| v.fold(fold_leaf, fold_branch))
+                    .map(|v| v.fold(c, fold_leaf, fold_branch))
                     .collect::<Result<Vec<T>, E>>()?;
-                fold_branch(b)
+                fold_branch(b, c)
             }
         }
     }
@@ -89,8 +90,10 @@ impl Parser {
     }
 }
 
-pub fn parse_tree(input: &str) -> Option<Node> {
-    Parser::new(input).parse()
+pub fn parse_tree(input: &str) -> Option<(Node, &str)> {
+    let mut parser = Parser::new(input);
+    let parsed = parser.parse()?;
+    Some((parsed, input.split_at(parser.pos).1))
 }
 
 #[cfg(test)]
@@ -99,24 +102,27 @@ mod tests {
 
     #[test]
     fn simple() {
-        assert_eq!(parse_tree("a").unwrap(), Node::Leaf("a".into()));
+        assert_eq!(parse_tree("a").unwrap(), (Node::Leaf("a".into()), ""));
         assert_eq!(
             parse_tree("[a b c]").unwrap(),
-            Node::Branch(vec![
-                Node::Leaf("a".into()),
-                Node::Leaf("b".into()),
-                Node::Leaf("c".into()),
-            ])
+            (
+                Node::Branch(vec![
+                    Node::Leaf("a".into()),
+                    Node::Leaf("b".into()),
+                    Node::Leaf("c".into()),
+                ]),
+                ""
+            )
         );
         assert_eq!(
-            parse_tree("[[a b] c]").unwrap(),
-            Node::Branch(vec![
+            parse_tree("[[a b] c] asd").unwrap(),
+            (Node::Branch(vec![
                 Node::Branch(vec![Node::Leaf("a".into()), Node::Leaf("b".into())]),
                 Node::Leaf("c".into()),
-            ])
+            ]), " asd")
         );
         assert_eq!(
-            parse_tree("[[a b c] d]").unwrap(),
+            parse_tree("[[a b c] d]").unwrap().0,
             Node::Branch(vec![
                 Node::Branch(vec![
                     Node::Leaf("a".into()),
@@ -127,7 +133,7 @@ mod tests {
             ])
         );
         assert_eq!(
-            parse_tree("[[a [b c]] d]").unwrap(),
+            parse_tree("[[a [b c]] d]").unwrap().0,
             Node::Branch(vec![
                 Node::Branch(vec![
                     Node::Leaf("a".into()),

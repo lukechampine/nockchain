@@ -60,6 +60,7 @@ impl ShellCommand {
         let mut jam_out = None;
         let mut cue_inp = None;
         let mut list_vars = false;
+        let mut file_hoon = false;
 
         let hoon = if line.starts_with('/') {
             line = line.split_once('/').unwrap().1;
@@ -67,25 +68,15 @@ impl ShellCommand {
             loop {
                 let (mut cmd, mut rest) = line.split_once(' ').unwrap_or((line, ""));
 
-                let mut parse_vars = || {
-                    let brack = rest.rfind(']');
-                    let (cmd, mut rest) = brack
-                        .map(|v| rest.split_at(v + 1))
-                        .or_else(|| rest.split_once(' '))
-                        .unwrap_or((rest, ""));
-
-                    rest = rest.trim_ascii_start();
-
-                    if cmd.is_empty() {
-                        return Err(anyhow!("Variable is not specified"));
-                    }
-
-                    let Some(tree) = parse_tree(cmd) else {
-                        return Err(anyhow!("Malformed var: {cmd}"));
+                fn parse_vars<'a>(rest: &mut &'a str) -> Result<(Option<Node>, &'a str)> {
+                    let Some((tree, tail)) = parse_tree(rest) else {
+                        return Err(anyhow!("Malformed command: {rest}"));
                     };
 
-                    Ok((Some(tree), cmd, rest))
-                };
+                    *rest = tail.trim_ascii_start();
+
+                    Ok((Some(tree), rest))
+                }
 
                 match cmd {
                     "?" | "help" => {
@@ -94,9 +85,11 @@ impl ShellCommand {
 
 /?, /help - display this message.
 /. sam func - evaluate `func` with the given sample `sam`. Given sample can be constructed from variable assignments (using /.), and can be a cell, e.g. [a b].
+// sam path - load `path` and evaluate its hoon with sample `sam`. Given sample can be constructed from variable assignments.
 /: sub hoon - evaluate `hoon` with subject `sub`. Subject can be constructed from variable assignments.
 /= var hoon - evaluage `hoon` and assign output to `var`.
 /+ v s hoon - evaluate `hoon` on subject `s`, and assign output to `v`. Subject can be constructed from variable assignments.
+/| v s func - evaluate `func` with the given sample `s` and assign output to `v`.
 /p sam      - print given sample `sam`. Note: if single variable is provided, it is pretty-printed, but mutliple variables are printed as raw nouns.
 /v          - list defined variables.
 /c var path - cue a jamfile at `path` and assign it to `var`.
@@ -106,8 +99,12 @@ hoon - evaluate `hoon` and print the result out to screen.
                             "
                         ))
                     }
-                    "." => (in_sample, _, line) = parse_vars()?,
-                    ":" => (in_subject, _, line) = parse_vars()?,
+                    "." => (in_sample, line) = parse_vars(&mut rest)?,
+                    "/" => (in_sample, line) = {
+                        file_hoon = true;
+                        parse_vars(&mut rest)?
+                    },
+                    ":" => (in_subject, line) = parse_vars(&mut rest)?,
                     "=" => {
                         (cmd, line) = rest.split_once(' ').unwrap_or((rest, ""));
                         if cmd.is_empty() {
@@ -116,11 +113,23 @@ hoon - evaluate `hoon` and print the result out to screen.
                         out_sample = Some(cmd.to_string());
                     }
                     "+" => {
-                        (in_sample, _, _) = parse_vars()?;
-                        (in_subject, _, line) = parse_vars()?;
+                        (cmd, rest) = rest.split_once(' ').unwrap_or((rest, ""));
+                        if cmd.is_empty() {
+                            return Err(anyhow!("Sample is not specified"));
+                        }
+                        out_sample = Some(cmd.to_string());
+                        (in_subject, line) = parse_vars(&mut rest)?;
+                    }
+                    "|" => {
+                        (cmd, rest) = rest.split_once(' ').unwrap_or((rest, ""));
+                        if cmd.is_empty() {
+                            return Err(anyhow!("Sample is not specified"));
+                        }
+                        out_sample = Some(cmd.to_string());
+                        (in_sample, line) = parse_vars(&mut rest)?;
                     }
                     "p" => {
-                        (in_sample, _, _) = parse_vars()?;
+                        (in_sample, _) = parse_vars(&mut rest)?;
                         break None;
                     }
                     "v" => {
@@ -142,7 +151,7 @@ hoon - evaluate `hoon` and print the result out to screen.
                         cue_inp = Some((path.to_string(), 6));
                     }
                     "j" => {
-                        (in_sample, _, line) = parse_vars()?;
+                        (in_sample, line) = parse_vars(&mut rest)?;
                         jam_out = Some(line.to_string());
                         break None;
                     }
@@ -156,12 +165,14 @@ hoon - evaluate `hoon` and print the result out to screen.
         };
 
         let hoon = hoon.map(|hoon| {
-            if !hoon.starts_with(char::is_alphabetic) || !hoon.contains(' ') {
-                hoon.to_string()
+            if file_hoon {
+                std::fs::read_to_string(hoon)
+            } else if !hoon.starts_with(char::is_alphabetic) || !hoon.contains(' ') {
+                Ok(hoon.to_string())
             } else {
-                format!("({hoon})")
+                Ok(format!("({hoon})"))
             }
-        });
+        }).transpose()?;
 
         Ok(Self {
             hoon,
@@ -208,26 +219,38 @@ impl Shell {
 
         for (vas, sam) in vases.iter_mut().zip([in_sample, in_subject]) {
             if let Some(tree) = sam {
-                let pull_noun = |sample: String| {
+                let pull_noun = |slab: &mut NounSlab, sample: String| {
                     self.samples
                         .get(&sample)
                         .map(|(vased, v)| (vased, unsafe { *v.root() }))
+                        .map(|(vased, v)| {
+                            (vased, unsafe {
+                                slab.copy_into(v);
+                                *slab.root()
+                            })
+                        })
                         .ok_or_else(|| anyhow!("{sample} is undefined"))
                 };
 
                 if let Node::Leaf(sample) = &tree {
-                    let (vased, mut noun) = pull_noun(sample.clone())?;
+                    let (vased, mut noun) = pull_noun(&mut slab, sample.clone())?;
                     if !vased {
                         noun = T(&mut slab, &[D(tas!(b"noun")), noun]);
                     }
                     *vas = Some(noun);
                 } else {
                     let noun = tree.fold(
-                        &mut |sample: String| {
-                            pull_noun(sample)
-                                .map(|(vased, v)| if *vased { slot(v, 3).unwrap() } else { v })
+                        &mut slab,
+                        &mut |sample: String, slab| {
+                            pull_noun(slab, sample).map(|(vased, v)| {
+                                if *vased {
+                                    slot(v, 3).unwrap()
+                                } else {
+                                    v
+                                }
+                            })
                         },
-                        &mut |nouns: Vec<Noun>| Ok(T(&mut slab, &nouns[..])),
+                        &mut |nouns: Vec<Noun>, slab| Ok(T(slab, &nouns[..])),
                     )?;
                     *vas = Some(T(&mut slab, &[D(tas!(b"noun")), noun]));
                 }
@@ -319,13 +342,20 @@ impl Shell {
                     }
                 }
                 Command::Cue(path, axis) => {
-                    let mut slab = NounSlab::new();
-                    let bytes = tokio::fs::read(path).await?;
-                    let noun = slab.cue_into(bytes.into())?;
-                    if let Ok(noun) = slot(noun, axis as u64) {
-                        self.process_out(false, noun);
-                    } else {
-                        println!("Unable to cue - invalid axis");
+                    if let Err(e) = async {
+                        let mut slab = NounSlab::new();
+                        let bytes = tokio::fs::read(&path).await?;
+                        let noun = slab.cue_into(bytes.into())?;
+                        if let Ok(noun) = slot(noun, axis as u64) {
+                            self.process_out(false, noun);
+                        } else {
+                            println!("Unable to cue - invalid axis");
+                        }
+                        anyhow::Ok(())
+                    }
+                    .await
+                    {
+                        println!("Unable to cue at path {path}: {e}");
                     }
                 }
                 Command::ListVars(vars) => {
