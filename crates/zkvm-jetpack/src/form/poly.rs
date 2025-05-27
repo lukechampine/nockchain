@@ -1,6 +1,10 @@
 #![allow(clippy::len_without_is_empty)]
 
+use core::ops::*;
 use std::slice::Iter;
+
+use super::fext::fpow_;
+use super::{bpow, FieldError};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Default)]
 #[repr(transparent)]
@@ -9,6 +13,42 @@ pub struct Belt(pub u64);
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Default)]
 #[repr(transparent)]
 pub struct Felt(pub [Belt; 3]);
+
+pub trait ElementEx:
+    Element + Copy + Mul<Output = Self> + Add<Output = Self> + Sub<Output = Self>
+{
+    fn from_u64(v: u64) -> Self;
+    fn epow(&self, p: u64) -> Self;
+    fn ordered_root(order: u64) -> Result<Self, FieldError>;
+}
+
+impl ElementEx for Belt {
+    fn from_u64(v: u64) -> Self {
+        Self(v)
+    }
+
+    fn epow(&self, p: u64) -> Self {
+        Self(bpow(self.0, p))
+    }
+
+    fn ordered_root(order: u64) -> Result<Self, FieldError> {
+        Belt(order).ordered_root()
+    }
+}
+
+impl ElementEx for Felt {
+    fn from_u64(v: u64) -> Self {
+        Self::lift(Belt(v))
+    }
+
+    fn epow(&self, p: u64) -> Self {
+        fpow_(self, p)
+    }
+
+    fn ordered_root(order: u64) -> Result<Self, FieldError> {
+        Felt::ordered_root(order)
+    }
+}
 
 pub trait Element: Clone {
     fn is_zero(&self) -> bool;

@@ -1,6 +1,6 @@
 use std::vec;
 
-use crate::form::math::{bpow, FieldError};
+use crate::form::math::{poly::*, FieldError};
 use crate::form::poly::*;
 
 pub fn bpadd(a: &[Belt], b: &[Belt], res: &mut [Belt]) {
@@ -209,54 +209,11 @@ fn bitreverse(mut n: u32, l: u32) -> u32 {
 
 #[inline(always)]
 pub fn bp_fft(bp: &[Belt]) -> Result<Vec<Belt>, FieldError> {
-    let order: Belt = Belt(bp.len() as u64);
-    let root = order.ordered_root()?;
-    Ok(bp_ntt(bp, &root))
+    p_fft(bp.to_vec())
 }
 
 pub fn bp_ntt(bp: &[Belt], root: &Belt) -> Vec<Belt> {
-    let n = bp.len() as u32;
-
-    if n == 1 {
-        return vec![bp[0]];
-    }
-
-    debug_assert!(n.is_power_of_two());
-
-    let log_2_of_n = n.ilog2();
-
-    let mut x: Vec<Belt> = vec![Belt(0); n as usize];
-    x.copy_from_slice(bp);
-
-    for k in 0..n {
-        let rk = bitreverse(k, log_2_of_n);
-        if k < rk {
-            x.swap(rk as usize, k as usize);
-        }
-    }
-
-    let mut m = 1;
-    for _ in 0..log_2_of_n {
-        let w_m: Belt = bpow(root.0, (n / (2 * m)) as u64).into();
-
-        let mut k = 0;
-        while k < n {
-            let mut w = Belt(1);
-
-            for j in 0..m {
-                let u: Belt = x[(k + j) as usize];
-                let v: Belt = x[(k + j + m) as usize] * w;
-                x[(k + j) as usize] = u + v;
-                x[(k + j + m) as usize] = u - v;
-                w = w * w_m;
-            }
-
-            k += 2 * m;
-        }
-
-        m *= 2;
-    }
-    x
+    p_ntt(bp.to_vec(), root)
 }
 
 #[inline(always)]

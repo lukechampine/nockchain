@@ -5,9 +5,10 @@ use crate::form::bpoly::{bp_hadamard, bpscal};
 use crate::form::fext::{fadd, fadd_, fdiv_, finv_, fmul_, fneg, fneg_, fpow_};
 use crate::form::mary::MarySlice;
 use crate::form::math::bpoly::bpadd;
+use crate::form::math::poly::p_ntt;
 use crate::form::math::tip5;
 use crate::form::{
-    bneg, bpow, Element, FPolySlice, FPolySliceMut, FPolyVec, Felt, PolySlice, PolySliceMut,
+    binv, bneg, bpow, Element, FPolySlice, FPolySliceMut, FPolyVec, Felt, PolySlice, PolySliceMut,
     PolyVec,
 };
 use crate::form::{poly::Poly, BPolySlice, Belt};
@@ -156,7 +157,7 @@ sam_jet! {
     hash_belts_list_jet => hash_belts_list,
     hash_noun_varlen_jet => hash_noun_varlen,
     hash_varlen_jet => hash_varlen,
-    hash_hashable_jet => hash_hashable,
+    hash_hashable_jet => hash_hashable,// 'jam 'create_jam_dir,
     hash_ten_cell_jet => hash_ten_cell,
     leaf_sequence_jet => leaf_sequence,
     mp_substitute_mega_jet => mp_substitute_mega 'jam_errs 'create_jam_dir,// 'log 'punt_errs 'jam 'run_once 'create_jam_dir,
@@ -1562,7 +1563,7 @@ pub fn fpdiv<'a>(
     // (fpmul (pinv-mod-x-to +(dq) rg) rf)
     let pinned = pinv_mod_x_to(stack, dq + 1, (&rg).into());
     //println!("pinved={}", vmug(stack, &pinned.0));
-    let mulled = fpmul(stack, pinned, (&rf).into());
+    let mulled = fpmul(stack, pinned, rf);
     //println!("mulled={}", vmug(stack, &mulled.0));
     let mut scagged = PolyVec(scag_ref(dq + 1, &mulled.0).to_vec());
     //println!("scagged={}", vmug(stack, &scagged.0));
@@ -1639,13 +1640,12 @@ fn hensel_lift_inverse<'a>(stack: &mut NockStack, p: FPolySlice, level: usize) -
         let bex_i = 1 << i;
         //println!("bexed {bex_i}");
         // =/  s  (~(slag fop (fpmul p inv)) bex-i)
-        let mut s = fpmul(stack, copy_slice(p), (&inv).into());
-        let s = PolySliceMut(slag_mut(bex_i, &mut s.0));
+        let s = fpmul(stack, copy_slice(p), inv.clone());
+        let s = PolyVec(slag_vec(bex_i, s.0));
         //println!("s {}", vmug(stack, s.0));
         // =/  t  (~(scag fop (fpmul (fpscal (lift (bneg 1)) inv) s)) bex-i)
-        let invc = copy_slice((&inv).into());
-        let t = fpscal(Felt::lift(Belt(bneg(1))), invc);
-        let mut t = fpmul(stack, t, (&s).into());
+        let t = fpscal(Felt::lift(Belt(bneg(1))), inv.clone());
+        let mut t = fpmul(stack, t, s);
         //println!("t {}", vmug(stack, scag_ref(bex_i, &t.0)));
         //println!("l {bex_i}");
         // $(i +(i), inv (fpadd inv (pmul-by-x-to bex-i t)))
@@ -1682,7 +1682,7 @@ fn pmul_by_x_to<'a>(stack: &mut NockStack, l: usize, p: FPolySlice) -> FPolyVec 
 }
 
 // ::  +fpmul-naive: high school polynomial multiplication
-fn fpmul_naive<'a>(fq: FPolyVec, fp: FPolySlice) -> FPolyVec {
+fn fpmul_naive<'a>(fq: FPolyVec, fp: FPolyVec) -> FPolyVec {
     // ~/  %fpmul-naive
     // |=  [fp=fpoly fq=fpoly]
     // ^-  fpoly
@@ -1702,7 +1702,7 @@ fn fpmul_naive<'a>(fq: FPolyVec, fp: FPolySlice) -> FPolyVec {
     //   (reap (dec (lent q)) (lift 0))
     let extra = fq.0.len() - 1;
     let p_len = fp.len();
-    let mut v = copy_slice_extend_zero(fp, fp.0.len() + extra, Felt::zero());
+    let mut v = zeroextend_slice(fp, p_len + extra, Felt::zero());
     v.0.copy_within(0..p_len, extra);
     v.0[..extra].iter_mut().for_each(|v| *v = Felt::zero());
     let fp = ();
@@ -1798,23 +1798,40 @@ fn fp_ntt<'a>(fp: FPolyVec, root: Felt) -> FPolyVec {
 }
 
 // ::  +fp-fft: Discrete Fourier Transform (DFT) with Fast Fourier Transform (FFT) algorithm
-fn fp_fft<'a>(stack: &mut NockStack, p: FPolySliceMut) -> FPolySliceMut<'a> {
+fn fp_fft(p: FPolyVec) -> core::result::Result<FPolyVec, JetErr> {
     // ~/  %fp-fft
     // |=  p=fpoly
     // ^-  fpoly
     // ~+
     // ~|  "fft: must have power-of-2-many coefficients."
     // ?>  =(0 (dis len.p (dec len.p)))
+    assert_eq!(0, p.0.len() & (p.0.len() - 1), "{:x} {:x}", p.0.len(), p.0.len() - 1);
+    let root = Felt::ordered_root(p.0.len() as u64)?;
+    Ok(PolyVec(p_ntt(p.0, &root)))
+}
+
+// ::  +fp-ifft: Inverse DFT with FFT algorithm
+fn fp_ifft<'a>(p: FPolyVec) -> core::result::Result<FPolyVec, JetErr> {
+    // ~/  %ifft
+    // |=  p=fpoly
+    // ^-  fpoly
+    // ~+
+    // ~|  "ifft: must have power-of-2-many coefficients."
+    // ?>  =((dis len.p (dec len.p)) 0)
     assert_eq!(0, p.0.len() & (p.0.len() - 1));
-    // (fp-ntt p (lift (ordered-root len.p)))
-    /*let or = Belt(p.0.len()).ordered_root().unwrap();
-    let or = Felt::lift(or);
-    fp_ntt(stack, p, or)*/
-    todo!()
+    // %+  fpscal  (lift (binv len.p))
+    // (fp-ntt p (lift (binv (ordered-root len.p))))
+    let binv_len = Belt(binv(p.0.len() as _));
+    let Ok(or) = Belt(p.0.len() as _).ordered_root() else {
+        return jet_err();
+    };
+    let root = Felt::lift(Belt(binv(or.0)));
+    let ntt = p_ntt(p.0, &root);
+    Ok(fpscal(Felt::lift(binv_len), PolyVec(ntt)))
 }
 
 // ::  +fpmul-fast: polynomial multiplication with fft
-fn fpmul_fast<'a>(fp: FPolyVec, fq: FPolySlice) -> FPolyVec {
+fn fpmul_fast<'a>(fp: FPolyVec, fq: FPolyVec) -> FPolyVec {
     // ~/  %fpmul-fast
     // |=  [fp=fpoly fq=fpoly]
     // ^-  fpoly
@@ -1842,14 +1859,20 @@ fn fpmul_fast<'a>(fp: FPolyVec, fq: FPolySlice) -> FPolyVec {
     // %-  fp-ifft
     // %+  %~  zip  fop
     //     (fp-fft (~(zero-extend fop fp) (sub deg-prod deg-p)))
+    let a = zeroextend_slice(fp, deg_prod, Felt::zero());
+    let mut a = fp_fft(a).unwrap();
     //   (fp-fft (~(zero-extend fop fq) (sub deg-prod deg-q)))
+    let b = zeroextend_slice(fq, deg_prod, Felt::zero());
+    let mut b = fp_fft(b).unwrap();
     // fmul
-    // TODO: impl fpmul-fast
-    fpmul_naive(fp, fq)
+    a.0.truncate(b.0.len());
+    b.0.truncate(a.0.len());
+    a.0.iter_mut().zip(b.0.into_iter()).for_each(|(a, b)| *a = fmul_(a, &b));
+    fp_ifft(a).unwrap()
 }
 
 // ::  +fpmul: polynomial multiplication
-pub fn fpmul<'a>(stack: &mut NockStack, mut fp: FPolyVec, fq: FPolySlice) -> FPolyVec {
+pub fn fpmul<'a>(stack: &mut NockStack, fp: FPolyVec, fq: FPolyVec) -> FPolyVec {
     jam_to(stack, &fp.0, "fpmul-fp");
     jam_to(stack, &fq.0, "fpmul-fq");
     // ~/  %fpmul
@@ -1861,8 +1884,8 @@ pub fn fpmul<'a>(stack: &mut NockStack, mut fp: FPolyVec, fq: FPolySlice) -> FPo
     // =/  p  ~(to-poly fop fp)
     // =/  q  ~(to-poly fop fq)
     // ?:  (lth (add (fdegree p) (fdegree q)) 8)
-    let degree = fdegree((&fp).into()) + fdegree(fq);
-    let ret = if degree < 8 || true {
+    let degree = fdegree((&fp).into()) + fdegree((&fq).into());
+    let ret = if degree < 8 {
         //   (fpmul-naive fp fq)
         fpmul_naive(fp, fq)
     } else {
