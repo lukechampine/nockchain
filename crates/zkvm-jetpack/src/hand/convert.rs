@@ -188,6 +188,15 @@ impl TryFrom<Noun> for FPolySlice<'_> {
     }
 }
 
+impl TryFrom<Noun> for FPolyVec {
+    type Error = JetErr;
+
+    #[inline(always)]
+    fn try_from(n: Noun) -> std::result::Result<Self, Self::Error> {
+        FPolySlice::try_from(n).map(|v| PolyVec(v.0.to_vec()))
+    }
+}
+
 impl TryFrom<&Noun> for FPolySlice<'_> {
     type Error = JetErr;
 
@@ -198,6 +207,15 @@ impl TryFrom<&Noun> for FPolySlice<'_> {
         } else {
             FPolySlice::try_from(n.as_cell()?)
         }
+    }
+}
+
+impl TryFrom<&Noun> for FPolyVec {
+    type Error = JetErr;
+
+    #[inline(always)]
+    fn try_from(n: &Noun) -> std::result::Result<Self, Self::Error> {
+        FPolySlice::try_from(n).map(|v| PolyVec(v.0.to_vec()))
     }
 }
 

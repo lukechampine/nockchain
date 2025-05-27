@@ -164,6 +164,10 @@ sam_jet! {
     mp_substitute_ultra_jet => mp_substitute_ultra, // 'punt_errs 'run_once 'log 'jam 'create_jam_dir,
     compute_composition_poly_jet => compute_composition_poly,// 'punt_errs 'run_once 'log 'jam 'create_jam_dir,
     compute_deep_jet => compute_deep,// 'jam 'create_jam_dir,
+    fp_fft_jet => fp_fft_sam,
+    fp_ifft_jet => fp_ifft_sam,
+    fp_ntt_jet => fp_ntt_sam,
+    do_init_mary_jet => do_init_mary,// 'jam 'create_jam_dir,
     // bpdiv_jet => bpdiv 'jam 'create_jam_dir,
 }
 
@@ -1283,8 +1287,8 @@ fn do_init_mary(stack: &mut NockStack, inp: Noun) -> Result {
         // :-  (lent poly)
         let poly_len = lent(poly)?;
         // =/  high-bit  (lsh [0 (mul (bex 6) (mul step (lent poly)))] 1)
-        let step = (1 << 6) * step * poly_len;
-        let high_bit = bits::lsh(stack, 0, step, D(1).as_atom()?)?.as_atom()?;
+        let bstep = (1 << 6) * step * poly_len;
+        let high_bit = bits::lsh(stack, 0, bstep, D(1).as_atom()?)?.as_atom()?;
         // (add (rep [6 step] poly) high-bit)
         let repped = bits::rep(stack, 6, step, poly)?;
         let added = math::add(stack, repped, high_bit);
@@ -1751,50 +1755,37 @@ fn fpmul_naive<'a>(fq: FPolyVec, fp: FPolyVec) -> FPolyVec {
     }
 }
 
-// ::  +fp-ntt: number theoretic transform for fpolys based on anatomy of a stark
-fn fp_ntt<'a>(fp: FPolyVec, root: Felt) -> FPolyVec {
-    // ~/  %fp-ntt
-    // |=  [fp=fpoly root=felt]
-    // ^-  fpoly
-    // ~+
-    // ?:  =(len.fp 1)
-    if fp.len() == 1 {
-        // fp
-        //return fp;
-    }
-    // =/  half  (div len.fp 2)
-    let half = fp.len() / 2;
+fn fp_ntt_sam(stack: &mut NockStack, sam: Noun) -> Result {
+    let [fp, root] = pull_args(sam)?;
 
-    // ?>  =((fpow root len.fp) (lift 1))
-    //assert_eq!(fpow_(&root, fp.len()), Felt::lift(1));
-    // ?<  =((fpow root half) (lift 1))
-    //assert_ne!(fpow_(&root, half), Felt::lift(1));
+    let Ok(p_poly) = FPolyVec::try_from(fp) else {
+        return jet_err();
+    };
 
-    // =/  odds
-    //   %+  fp-ntt
-    //     %-  init-fpoly
-    //     %+  murn  (range len.fp)
-    //     |=  i=@
-    //     ?:  =(0 (mod i 2))
-    //       ~
-    //     `(~(snag fop fp) i)
-    //   (fmul root root)
-    // =/  evens
-    //   %+  fp-ntt
-    //     %-  init-fpoly
-    //     %+  murn  (range len.fp)
-    //     |=  i=@
-    //     ?:  =(1 (mod i 2))
-    //       ~
-    //     `(~(snag fop fp) i)
-    //   (fmul root root)
-    // %-  init-fpoly
-    // %+  turn  (range len.fp)
-    // |=  i=@
-    // %+  fadd  (~(snag fop evens) (mod i half))
-    // %+  fmul  (fpow root i)
-    // (~(snag fop odds) (mod i half))
-    todo!()
+    let returned_fpoly = p_ntt(p_poly.0, root.as_felt()?);
+    let (res_atom, res_poly): (IndirectAtom, &mut [Felt]) =
+        new_handle_mut_slice(stack, Some(returned_fpoly.len() as usize));
+
+    res_poly.copy_from_slice(&returned_fpoly);
+
+    let res_cell: Noun = finalize_poly(stack, Some(res_poly.len()), res_atom);
+
+    Ok(res_cell)
+}
+
+fn fp_fft_sam(stack: &mut NockStack, sam: Noun) -> Result {
+    let Ok(p_poly) = FPolyVec::try_from(sam) else {
+        return jet_err();
+    };
+    let returned_fpoly = fp_fft(p_poly)?;
+    let (res_atom, res_poly): (IndirectAtom, &mut [Felt]) =
+        new_handle_mut_slice(stack, Some(returned_fpoly.len() as usize));
+
+    res_poly.copy_from_slice(&returned_fpoly.0);
+
+    let res_cell: Noun = finalize_poly(stack, Some(res_poly.len()), res_atom);
+
+    Ok(res_cell)
 }
 
 // ::  +fp-fft: Discrete Fourier Transform (DFT) with Fast Fourier Transform (FFT) algorithm
@@ -1805,9 +1796,24 @@ fn fp_fft(p: FPolyVec) -> core::result::Result<FPolyVec, JetErr> {
     // ~+
     // ~|  "fft: must have power-of-2-many coefficients."
     // ?>  =(0 (dis len.p (dec len.p)))
-    assert_eq!(0, p.0.len() & (p.0.len() - 1), "{:x} {:x}", p.0.len(), p.0.len() - 1);
+    assert_eq!(0, p.0.len() & (p.0.len() - 1));
     let root = Felt::ordered_root(p.0.len() as u64)?;
     Ok(PolyVec(p_ntt(p.0, &root)))
+}
+
+fn fp_ifft_sam(stack: &mut NockStack, sam: Noun) -> Result {
+    let Ok(p_poly) = FPolyVec::try_from(sam) else {
+        return jet_err();
+    };
+    let returned_fpoly = fp_ifft(p_poly)?;
+    let (res_atom, res_poly): (IndirectAtom, &mut [Felt]) =
+        new_handle_mut_slice(stack, Some(returned_fpoly.len() as usize));
+
+    res_poly.copy_from_slice(&returned_fpoly.0);
+
+    let res_cell: Noun = finalize_poly(stack, Some(res_poly.len()), res_atom);
+
+    Ok(res_cell)
 }
 
 // ::  +fp-ifft: Inverse DFT with FFT algorithm
