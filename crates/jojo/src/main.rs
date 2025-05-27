@@ -344,6 +344,11 @@ async fn on_kernel(slab: NounSlab, cli: Cli) -> Result<()> {
             drop(effect);
             continue;
         };
+        let eff = effect_cell.head().as_direct()?;
+        if eff.data() != tas!(b"jojo") {
+            return Err(anyhow::anyhow!("Unknown effect type: {eff:?}"));
+        }
+        let effect_cell = effect_cell.tail().as_cell()?;
         let raw = effect_cell.head().as_cell()?;
         let pretty = effect_cell.tail().as_atom()?;
         let pretty = pretty.as_ne_bytes();
