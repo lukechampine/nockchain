@@ -100,10 +100,12 @@ hoon - evaluate `hoon` and print the result out to screen.
                         ))
                     }
                     "." => (in_sample, line) = parse_vars(&mut rest)?,
-                    "/" => (in_sample, line) = {
-                        file_hoon = true;
-                        parse_vars(&mut rest)?
-                    },
+                    "/" => {
+                        (in_sample, line) = {
+                            file_hoon = true;
+                            parse_vars(&mut rest)?
+                        }
+                    }
                     ":" => (in_subject, line) = parse_vars(&mut rest)?,
                     "=" => {
                         (cmd, line) = rest.split_once(' ').unwrap_or((rest, ""));
@@ -164,15 +166,17 @@ hoon - evaluate `hoon` and print the result out to screen.
             Some(line)
         };
 
-        let hoon = hoon.map(|hoon| {
-            if file_hoon {
-                std::fs::read_to_string(hoon)
-            } else if !hoon.starts_with(char::is_alphabetic) || !hoon.contains(' ') {
-                Ok(hoon.to_string())
-            } else {
-                Ok(format!("({hoon})"))
-            }
-        }).transpose()?;
+        let hoon = hoon
+            .map(|hoon| {
+                if file_hoon {
+                    std::fs::read_to_string(hoon)
+                } else if !hoon.starts_with(char::is_alphabetic) || !hoon.contains(' ') {
+                    Ok(hoon.to_string())
+                } else {
+                    Ok(format!("({hoon})"))
+                }
+            })
+            .transpose()?;
 
         Ok(Self {
             hoon,
@@ -211,6 +215,7 @@ impl Shell {
             list_vars,
         } = ShellCommand::parse(line)?;
 
+        let prt = D(out_sample.is_some() as u64);
         self.save_state = out_sample;
 
         let mut slab = NounSlab::new();
@@ -285,13 +290,16 @@ impl Shell {
                 let sam = slot(sam, 3).unwrap();
                 slab.copy_into(sam);
                 let sam = unsafe { *slab.root() };
-                T(&mut slab, &[D(tas!(b"sam")), hoon, vased_subject, sam])
+                T(
+                    &mut slab,
+                    &[D(tas!(b"sam")), prt, hoon, vased_subject, sam],
+                )
             }
-            (Some(hoon), None) => T(&mut slab, &[D(tas!(b"raw")), hoon, vased_subject]),
+            (Some(hoon), None) => T(&mut slab, &[D(tas!(b"raw")), prt, hoon, vased_subject]),
             (None, Some(sam)) => {
                 slab.copy_into(sam);
                 let sam = unsafe { *slab.root() };
-                T(&mut slab, &[D(tas!(b"prt")), sam])
+                T(&mut slab, &[D(tas!(b"prt")), prt, sam])
             }
             _ => return Err(anyhow!("Invalid command")),
         };
@@ -369,53 +377,54 @@ impl Shell {
                     let slab = effects.recv_async().await?.0;
                     let effect = unsafe { slab.root() };
 
-                    let handle_eval = |shell: &mut Shell,
-                                       effect: Noun|
-                     -> core::result::Result<(), JetErr> {
-                        let cell = effect.as_cell()?;
+                    let handle_eval =
+                        |shell: &mut Shell, effect: Noun| -> core::result::Result<(), JetErr> {
+                            let cell = effect.as_cell()?;
 
-                        match cell.head().as_either_atom_cell() {
-                            Either::Left(a) => {
-                                match std::str::from_utf8(a.as_ne_bytes())
-                                    .map(|v| v.trim_end_matches('\0'))
-                                {
-                                    Ok("poke") => {
-                                        println!("Error running command");
+                            match cell.head().as_either_atom_cell() {
+                                Either::Left(a) => {
+                                    match std::str::from_utf8(a.as_ne_bytes())
+                                        .map(|v| v.trim_end_matches('\0'))
+                                    {
+                                        Ok("poke") => {
+                                            println!("Error running command");
+                                        }
+                                        _ => println!("Unrecognized result"),
                                     }
-                                    _ => println!("Unrecognized result"),
                                 }
-                            }
-                            Either::Right(cell) => {
-                                let res = cell.tail();
-                                match cell
-                                    .head()
-                                    .as_atom()
-                                    .map(|a| a.to_le_bytes())
-                                    .as_deref()
-                                    .ok()
-                                    .and_then(|v| std::str::from_utf8(v).ok())
-                                    .map(|v| v.trim_end_matches('\0'))
-                                {
-                                    Some("jojo") => {
-                                        let vase = slot(res, 2).unwrap();
-                                        if shell.process_out(true, vase) {
-                                            let pretty = slot(res, 3).unwrap().as_atom().unwrap();
-                                            let pretty = pretty.as_ne_bytes();
-                                            let pretty = std::str::from_utf8(pretty)
-                                                .unwrap()
-                                                .trim_end_matches('\0');
-                                            println!("{pretty}");
+                                Either::Right(cell) => {
+                                    let res = cell.tail();
+                                    match cell
+                                        .head()
+                                        .as_atom()
+                                        .map(|a| a.to_le_bytes())
+                                        .as_deref()
+                                        .ok()
+                                        .and_then(|v| std::str::from_utf8(v).ok())
+                                        .map(|v| v.trim_end_matches('\0'))
+                                    {
+                                        Some("jojo") => {
+                                            let vase = slot(res, 2).unwrap();
+                                            if shell.process_out(true, vase) {
+                                                if let Ok(c) = slot(res, 3).unwrap().as_cell() {
+                                                    let pretty = c.tail().as_atom().unwrap();
+                                                    let pretty = pretty.as_ne_bytes();
+                                                    let pretty = std::str::from_utf8(pretty)
+                                                        .unwrap()
+                                                        .trim_end_matches('\0');
+                                                    println!("{pretty}");
+                                                }
+                                            }
+                                        }
+                                        v => {
+                                            println!("Unrecognized result {v:?}");
                                         }
                                     }
-                                    v => {
-                                        println!("Unrecognized result {v:?}");
-                                    }
                                 }
                             }
-                        }
 
-                        Ok(())
-                    };
+                            Ok(())
+                        };
 
                     handle_eval(&mut self, *effect).unwrap();
                 }

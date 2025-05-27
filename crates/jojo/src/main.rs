@@ -100,7 +100,7 @@ impl Eval {
                 let mut slab = NounSlab::new();
                 let hoon =
                     unsafe { IndirectAtom::new_raw_bytes(&mut slab, hoon.len(), hoon.as_ptr()) };
-                let poke = T(&mut slab, &[D(tas!(b"raw")), hoon.as_noun(), D(0)]);
+                let poke = T(&mut slab, &[D(tas!(b"raw")), D(0), hoon.as_noun(), D(0)]);
                 slab.set_root(poke);
                 on_kernel(slab, cli).await
             }
@@ -119,6 +119,7 @@ async fn with_jam(func: String, path: String, axis: u64, cli: Cli) -> Result<()>
         &mut slab,
         &[
             D(tas!(b"sam")),
+            D(0),
             func.as_noun(),
             D(0),
             slot(noun, axis).unwrap(),
@@ -350,11 +351,16 @@ async fn on_kernel(slab: NounSlab, cli: Cli) -> Result<()> {
         }
         let effect_cell = effect_cell.tail().as_cell()?;
         let raw = effect_cell.head().as_cell()?;
-        let pretty = effect_cell.tail().as_atom()?;
-        let pretty = pretty.as_ne_bytes();
-        let pretty = std::str::from_utf8(pretty)?.trim_end_matches('\0');
         println!("Raw {raw:?}");
-        println!("Pretty {pretty}");
+        match effect_cell.tail().as_either_atom_cell() {
+            Either::Left(_) => (),
+            Either::Right(c) => {
+                let pretty = c.tail().as_atom()?;
+                let pretty = pretty.as_ne_bytes();
+                let pretty = std::str::from_utf8(pretty)?.trim_end_matches('\0');
+                println!("Pretty {pretty}");
+            }
+        }
     }
 
     Ok(())

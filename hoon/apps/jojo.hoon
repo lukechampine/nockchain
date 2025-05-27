@@ -3,13 +3,13 @@
 =<  ((moat |) inner)  :: wrapped kernel
 =>
   |%
-  +$  effect  [%jojo res=vase print=@t]
+  +$  effect  [%jojo res=vase pret=(unit @t)]
   +$  kernel-state  [%state version=%1]
   +$  cause
     :: $+  cause
-    $%  [%raw hoon=@t]
-        [%sam function-name=@t sample=*]
-        [%prt val=vase]
+    $%  [%raw pret=bean hoon=@t subject=(unit *)]
+        [%sam pret=bean function-name=@t subject=(unit *) sample=*]
+        [%prt pret=bean val=vase]
     ==
   --
 |%
@@ -38,21 +38,27 @@
     =/  cause  u.cause
     =/  res
       ?-  -.cause
-        %sam  (do-sam function-name.cause sample.cause)
-        %raw  (do-raw hoon.cause)
-        %prt  val.cause
+        %sam  (do-sam function-name.cause sample.cause subject.cause)
+        %raw  (do-raw hoon.cause subject.cause)
+        %prt  `vase`[%noun +:val.cause] :: pretty printing with external vases may be long...
       ==
-    =/  print  (crip (noah res))
+    =/  print
+      ?.  pret.cause  ~
+      [~ (crip (noah res))]
     :_  k
       [%jojo res print]~
     ++  do-sam
-        |=  [function-name=@t sample=*]
-        =/  vas  (slap !>(z) (ream function-name))
+        |=  [function-name=@t sample=* subject=(unit *)]
+        =/  vas  ?~  subject
+          (slap !>(z) (ream function-name))
+          (slap !>(u.subject) (ream function-name))
         =/  res  (slym vas sample)
         res
     ++  do-raw
-        |=  hoon=@t
-        =/  res  (slap !>(z) (ream hoon))
+        |=  [hoon=@t subject=(unit *)]
+        =/  res  ?~  subject
+          (slap !>(z) (ream hoon))
+          (slap !>(u.subject) (ream hoon))
         res
     --
   --
