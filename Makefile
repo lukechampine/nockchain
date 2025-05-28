@@ -80,11 +80,11 @@ nuke-testnet:
 	rm -rf test-*
 
 .PHONY: build-hoon-fresh
-build-hoon-fresh: nuke-assets nuke-choo-data install-choo ensure-dirs build-trivial $(HOON_TARGETS)
+build-hoon-fresh: nuke-assets nuke-hoonc-data install-hoonc ensure-dirs build-trivial $(HOON_TARGETS)
 	$(call show_env_vars)
 
 .PHONY: build-hoon-new
-build-hoon-all: ensure-dirs update-choo build-trivial $(HOON_TARGETS)
+build-hoon-all: ensure-dirs update-hoonc build-trivial $(HOON_TARGETS)
 	$(call show_env_vars)
 
 .PHONY: build-hoon
