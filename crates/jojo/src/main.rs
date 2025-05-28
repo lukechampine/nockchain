@@ -161,7 +161,7 @@ impl Jettest {
         let p = Path::new(&jamdir);
         let subject = load_jam(&mut stack, p.join("subject.jam"))?;
         let formula = load_jam(&mut stack, p.join("formula.jam"))?;
-        let jetpath = load_jam(&mut stack, p.join("jetpath.jam"))?;
+        let jetpath = load_jam(&mut stack, p.join("jetpath.jam"));
         let cold = load_jam(
             &mut stack,
             if let Some(p) = cold_jam.as_deref() {
@@ -199,13 +199,14 @@ impl Jettest {
 
         let mut context = create_context(stack, &hot_state, cold, cli.trace_opts.clone().into());
 
-        let jetcord = path_to_cord(&mut context.stack, jetpath);
-        let jetcord = std::str::from_utf8(jetcord.as_ne_bytes()).unwrap_or("");
-        debug!("Formula in question: {jetcord}");
-        let jetpath = jetpath.as_cell()?;
-
         let mut jet_res = None;
         if jet_run {
+            let jetpath = jetpath?;
+            let jetcord = path_to_cord(&mut context.stack, jetpath);
+            let jetcord = std::str::from_utf8(jetcord.as_ne_bytes()).unwrap_or("");
+            debug!("Formula in question: {jetcord}");
+            let jetpath = jetpath.as_cell()?;
+
             for (path, _, jet) in hot_state {
                 let mut a_path = D(0);
                 for i in path {
@@ -259,6 +260,7 @@ impl Jettest {
                 }
                 Err(IntError::Deterministic(a, e)) => {
                     eprintln!("ERROR INTERPRETING:");
+                    println!("{a:?} | {e:?}");
                     let goof = goof(&mut context, a, e);
                     print_goof(
                         &mut context.stack,
