@@ -830,6 +830,21 @@ pub const EXTRA_JETS: &[HotEntry] = &[
         1,
         do_init_mary_jet,
     ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ave"),
+            Left(b"zero-extend"),
+        ],
+        1,
+        zero_extend_jet,
+    ),
     /*(
         &[
             K_138,

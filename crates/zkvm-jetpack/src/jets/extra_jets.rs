@@ -7,6 +7,7 @@ use crate::form::mary::MarySlice;
 use crate::form::math::bpoly::bpadd;
 use crate::form::math::poly::p_ntt;
 use crate::form::math::tip5;
+use crate::form::mega::{MegaTyp, brek};
 use crate::form::{
     binv, bneg, bpow, Element, FPolySlice, FPolySliceMut, FPolyVec, Felt, PolySlice, PolySliceMut,
     PolyVec,
@@ -1135,81 +1136,6 @@ fn noun_bpoly(stack: &mut NockStack, val: Noun) -> Result {
 
 fn zero_bpoly(stack: &mut NockStack) -> Result {
     noun_bpoly(stack, D(0))
-}
-
-// +$  mega-typ  ?(%var %rnd %dyn %con %com)
-#[repr(u64)]
-#[derive(Clone, Copy, Debug)]
-enum MegaTyp {
-    Con = 0,
-    Var = 1,
-    Rnd = 2,
-    Dyn = 3,
-    Com = 4,
-}
-
-impl MegaTyp {
-    fn to_tas(self) -> u64 {
-        match self {
-            Self::Con => tas!(b"con"),
-            Self::Var => tas!(b"var"),
-            Self::Rnd => tas!(b"rnd"),
-            Self::Dyn => tas!(b"dyn"),
-            Self::Com => tas!(b"com"),
-        }
-    }
-}
-
-impl TryFrom<u64> for MegaTyp {
-    type Error = ();
-
-    fn try_from(value: u64) -> std::result::Result<Self, Self::Error> {
-        if value <= 4 {
-            Ok(unsafe { core::mem::transmute(value) })
-        } else {
-            Err(())
-        }
-    }
-}
-
-// ::  bit length of type
-// ++  typ-len  3
-const TYP_LEN: usize = 3;
-// ::  bit length of index
-// ++  idx-len  10
-const IDX_LEN: usize = 10;
-// ::  bit length of exponent
-// ++  exp-len  30
-const EXP_LEN: usize = 30;
-
-fn mega_typ(term: Noun) -> core::result::Result<MegaTyp, JetErr> {
-    // ^-  mega-typ
-    // ?+  (cut 0 [0 typ-len] term)  !!
-    cut_direct(0, 0, TYP_LEN, term.as_direct()?)?
-        .data()
-        .try_into()
-        .map_err(|_| jet_err().unwrap())
-}
-
-fn mega_idx(term: Noun) -> core::result::Result<usize, JetErr> {
-    // ^-  @ud
-    // (cut 0 [typ-len idx-len] term)
-    Ok(cut_direct(0, TYP_LEN, IDX_LEN, term.as_direct()?)?.data() as _)
-}
-
-fn mega_exp(term: Noun) -> core::result::Result<u64, JetErr> {
-    // ^-  @ud
-    // (cut 0 [(add typ-len idx-len) exp-len] term)
-    Ok(cut_direct(0, TYP_LEN + IDX_LEN, EXP_LEN, term.as_direct()?)?.data())
-}
-
-fn brek(ter: Noun) -> core::result::Result<(MegaTyp, usize, u64), JetErr> {
-    //  |=  ter=mega-term
-    //  ^-  [mega-typ @ @ud]
-    //  :+  ~(typ mega ter)
-    //    ~(idx mega ter)
-    //  ~(exp mega ter)
-    Ok((mega_typ(ter)?, mega_idx(ter)?, mega_exp(ter)?))
 }
 
 fn snag_bop(stack: &mut NockStack, k: Noun, i: usize) -> core::result::Result<u64, JetErr> {
@@ -2434,7 +2360,7 @@ pub fn mp_substitute_mega(stack: &mut NockStack, inp: Noun) -> Result {
 
                 // =/  [typ=mega-typ:mp-to-mega idx=@ exp=@ud]
                 //   (brek:mp-to-mega ter)
-                let (typ, idx, exp) = brek(D(ter))?;
+                let (typ, idx, exp) = brek(Belt(ter));
 
                 // ?-  typ
                 acc = match typ {
