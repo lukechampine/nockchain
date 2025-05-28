@@ -138,6 +138,13 @@ macro_rules! jet_option {
 ///
 /// This is so that we can have callable implementations for composing jets.
 macro_rules! sam_jet {
+    ($name:ident => $imp:ident 'raw $($l:lifetime)*$(,)?) => {
+        pub fn $name(context: &mut Context, subject: Noun) -> Result {
+            jet_option!($imp => $($l)*: {
+                $imp(context, subject)
+            })
+        }
+    };
     ($name:ident => $imp:ident $($l:lifetime)*$(,)?) => {
         pub fn $name(context: &mut Context, subject: Noun) -> Result {
             jet_option!($imp => $($l)*: {
@@ -169,6 +176,7 @@ sam_jet! {
     fp_ntt_jet => fp_ntt_sam,
     do_init_mary_jet => do_init_mary,// 'jam 'create_jam_dir,
     // bpdiv_jet => bpdiv 'jam 'create_jam_dir,
+    zero_extend_jet => zero_extend 'raw,// 'jam 'create_jam_dir,
 }
 
 /*
@@ -222,6 +230,52 @@ pub fn change_step(stack: &mut NockStack, new_step: Noun, ma: Noun) -> Result {
             data.as_noun(),
         ],
     ))
+}
+
+pub fn zero_extend(context: &mut Context, subject: Noun) -> Result {
+    let parent_core = slot(subject, 7)?;
+    let ma = slot(parent_core, 6)?;
+
+    // |=  n=@
+    // ^-  mary
+    let n = slot(subject, 6)?.as_direct()?.data();
+
+    let [step, len, dat] = pull_args(ma)?;
+    let step = step.as_direct()?.data();
+    let len = len.as_direct()?.data();
+    let dat = dat.as_atom()?;
+    let dat = dat.as_ne_bytes();
+
+    assert!(
+        dat.len() == (step * len * 8) as usize ||
+        dat.len() == (step * len + 1) as usize * 8,
+        "Invalid mary atom: have step={step}, len={len}, but data length={} (bytes)",
+        dat.len()
+    );
+
+    let dat_len = (step * len) as usize;
+    let dat = unsafe { core::slice::from_raw_parts(dat.as_ptr() as *const u64, dat_len) };
+
+    // :-  step.ma
+    // :-  (add len.array.ma n)
+    let new_alloc_len = (step * (len + n) + 1) as usize;
+    // =/  i  0
+    // =/  dat  dat.array.ma
+    // |-
+    // ?:  =(i n)
+    //   dat
+    // %_  $
+    //   dat  dat.array:(~(snoc ave [step.ma (add len.array.ma i) dat]) (~(lift-elt mary-utils step.ma) 0))
+    //   i    +(i)
+    // ==
+    let (out, buf) = unsafe { IndirectAtom::new_raw_mut(&mut context.stack, new_alloc_len) };
+    let buf = unsafe { core::slice::from_raw_parts_mut(buf, new_alloc_len) };
+    let (a, b) = buf.split_at_mut(dat.len());
+    a.copy_from_slice(dat);
+    b[..(n as usize)].iter_mut().for_each(|v| *v = 0);
+    b[n as usize] = 1;
+
+    Ok(T(&mut context.stack, &[D(step), D(len + n), out.as_noun()]))
 }
 
 pub fn transpose_jet(context: &mut Context, subject: Noun) -> Result {
@@ -1873,7 +1927,9 @@ fn fpmul_fast<'a>(fp: FPolyVec, fq: FPolyVec) -> FPolyVec {
     // fmul
     a.0.truncate(b.0.len());
     b.0.truncate(a.0.len());
-    a.0.iter_mut().zip(b.0.into_iter()).for_each(|(a, b)| *a = fmul_(a, &b));
+    a.0.iter_mut()
+        .zip(b.0.into_iter())
+        .for_each(|(a, b)| *a = fmul_(a, &b));
     fp_ifft(a).unwrap()
 }
 
