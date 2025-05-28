@@ -29,10 +29,7 @@
 
         code = pkgs.callPackage ./nix/. { inherit pkgs system lib craneLib; };
       in rec {
-        packages = {
-          hoonc = code.hoonc;
-          nockchain = code.nockchain;
-          nockchain-wallet = code.nockchain-wallet;
+        packages = code // {
           all = pkgs.symlinkJoin {
             name = "all";
             paths = with code; [ hoonc nockchain nockchain-wallet ];

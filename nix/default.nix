@@ -36,9 +36,17 @@ let
     nativeBuildInputs = [ hoonc.hoonc ];
     preBuild = "mkdir -p assets && cp ${jam-pkg.wallet-jam.out} './assets/wal.jam'";
   });
+
+  metrics-exporter-base = craneLib.buildPackage (
+  individualCrateArgs // {
+    pname = "nockchain-metrics-exporter";
+    cargoExtraArgs = "-p nockchain-metrics-exporter";
+    nativeBuildInputs = [ ];
+  });
 in
 {
   hoonc = hoonc.hoonc;
   nockchain = nockchain-base;
   nockchain-wallet = wallet-base;
+  nockchain-metrics-exporter = metrics-exporter-base;
 }
