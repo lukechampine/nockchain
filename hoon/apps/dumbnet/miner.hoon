@@ -27,8 +27,10 @@
   ++  poke
     |=  [wir=wire eny=@ our=@ux now=@da dat=*]
     ^-  [(list effect) k=kernel-state]
+    ~&  "poked miner"
     =/  cause  ((soft cause) dat)
     ?~  cause
+      ~&  "cause {<dat>}"
       ~>  %slog.[0 [%leaf "error: bad cause"]]
       `k
     =/  cause  u.cause

@@ -139,6 +139,7 @@
     |^
     =/  cause  ((soft cause:dk) dat)
     ?~  cause
+      ~&  "Can't cast cause: {<dat>}"
       ~>  %slog.[0 [%leaf "error: badly formatted cause, should never occur."]]
       ~&  ;;([thing=@t ver=@ type=@t] [-.dat +<.dat +>-.dat])
       =/  peer-id  (get-peer-id wir)
@@ -746,8 +747,10 @@
           ::  we do not request blocks by id so we can only request height 0
           ::  blocks and throw out ones we aren't expecting
           ~>  %slog.[0 leaf+"Requesting genesis block"]
+          =/  pgn  *page-number:t
+          ~&  "genesis {<pgn>}"
           :_  k
-          [%request %block %by-height *page-number:t]~
+          [%request %block %by-height pgn]~
         :: yes, so get height N of heaviest block and request the block
         :: of height N+1
         =/  height=page-number:t
@@ -765,12 +768,18 @@
           ~&  "mined for wrong (old) block commitment"  `k
         ?.  =(nonce.command next-nonce.m.k)
           ~&  "mined wrong (old) nonce"  `k
-        ?:  %+  check-target:mine  dig.command
-            (~(got z-by targets.c.k) parent.candidate-block.m.k)
+        ?:  ?:  =(*page-number:t candidate-block.m.k)
+              %+  check-target:mine  dig.command
+                (~(got z-by targets.c.k) parent.candidate-block.m.k)
+              :: If this is the genesis block, we need to check its validity this way
+              %+  check-target:mine  (proof-to-pow:zeke prf.command)
+                  target.candidate-block.m.k
+          ~&  "lucky proof! calling heard block"
           =.  m.k  (set-pow:min prf.command)
           =.  m.k  set-digest:min
           (heard-block /poke/miner now candidate-block.m.k eny)
         :: mine the next nonce
+        ~&  "unlucky :( calling do-mine"
         (do-mine (atom-to-digest:tip5:zeke dig.command))
       ::
       ++  do-set-mining-key
@@ -822,25 +831,25 @@
         ^-  [(list effect:dk) kernel-state:dk]
         ?>  ?=([%enable-mining *] command)
         ?.  p.command
-          ::~&  >  'generation of candidate blocks disabled'
+          ~&  >  'generation of candidate blocks disabled'
           =.  m.k  (set-mining:min p.command)
           `k
         ?:  =(*(z-set lock:t) pubkeys.m.k)
-          ::  ~&  >
-          ::      """
-          ::      generation of candidate blocks has not been enabled because mining pubkey
-          ::      is empty. set it with %set-mining-key then run %enable-mining again
-          ::      """
+          ~&  >
+              """
+              generation of candidate blocks has not been enabled because mining pubkey
+              is empty. set it with %set-mining-key then run %enable-mining again
+              """
           `k
-        ?:  =(~ heaviest-block.c.k)
-          ::~&  >
-          ::    """
-          ::    generation of candidate blocks enabled. candidate block will be generated
-          ::    once a genesis block has been received.
-          ::    """
-          =.  m.k  (set-mining:min p.command)
-          `k
-        ::~&  >  'generation of candidate blocks enabled.'
+        :: ?:  =(~ heaviest-block.c.k)
+        ::   ~&  >
+        ::       """
+        ::       generation of candidate blocks enabled. candidate block will be generated
+        ::       once a genesis block has been received.
+        ::       """
+        ::   =.  m.k  (set-mining:min p.command)
+        ::   `k
+        ~&  >  'generation of candidate blocks enabled.'
         =.  m.k  (set-mining:min p.command)
         =.  m.k  (heard-new-block:min c.k p.k now)
         (do-mine (hash-noun-varlen:tip5:zeke [%nonce eny]))
