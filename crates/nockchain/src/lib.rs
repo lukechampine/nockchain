@@ -578,6 +578,7 @@ pub async fn init_with_kernel(
         cli.as_ref()
             .map(|v| v.nockapp_cli.trace_opts.clone())
             .unwrap_or_default(),
+        cli.as_ref().map(|v| v.fakenet).unwrap_or(false)
     );
     nockapp.add_io_driver(mining_driver).await;
 

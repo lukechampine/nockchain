@@ -1,4 +1,5 @@
 use std::str::FromStr;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use kernels::miner::KERNEL;
 use nockapp::kernel::boot::TraceOpts;
@@ -11,10 +12,10 @@ use nockapp::noun::slab::NounSlab;
 use nockapp::noun::{AtomExt, NounExt};
 use nockvm::noun::{Atom, FullDebugCell, D, T};
 use nockvm_macros::tas;
-use tempfile::tempdir;
-use tracing::{debug, instrument, trace, warn};
-use tokio::sync::Notify;
 use std::sync::Arc;
+use tempfile::tempdir;
+use tokio::sync::Notify;
+use tracing::{debug, instrument, trace, warn};
 
 pub enum MiningWire {
     Mined,
@@ -79,6 +80,7 @@ pub fn create_mining_driver(
     mine: bool,
     init_complete_tx: Option<tokio::sync::oneshot::Sender<()>>,
     trc: TraceOpts,
+    fakenet: bool,
 ) -> IODriverFn {
     Box::new(move |mut handle| {
         Box::pin(async move {
@@ -118,6 +120,11 @@ pub fn create_mining_driver(
             let mut next_attempt: Option<NounSlab> = None;
             let mut current_attempt: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
             let mut cur_notify: Option<Arc<Notify>> = None;
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time went backwards");
+            let run_id = now.as_secs().to_string();
+            let mut run_cnt = 0;
 
             loop {
                 tokio::select! {
@@ -144,7 +151,8 @@ pub fn create_mining_driver(
                                 let (cur_handle, attempt_handle) = handle.dup();
                                 handle = cur_handle;
                                 let notif = Arc::new(Notify::new());
-                                current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle, notif.clone(), trc.clone()));
+                                current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle, notif.clone(), trc.clone(), run_id.clone(), fakenet, run_cnt));
+                                run_cnt += 1;
                                 cur_notify = Some(notif);
                             }
                         }
@@ -160,7 +168,8 @@ pub fn create_mining_driver(
                         let (cur_handle, attempt_handle) = handle.dup();
                         handle = cur_handle;
                         let notif = Arc::new(Notify::new());
-                        current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle, notif.clone(), trc.clone()));
+                        current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle, notif.clone(), trc.clone(), run_id.clone(), fakenet, run_cnt));
+                        run_cnt += 1;
                         cur_notify = Some(notif);
 
                     }
@@ -170,7 +179,15 @@ pub fn create_mining_driver(
     })
 }
 
-pub async fn mining_attempt(candidate: NounSlab, handle: NockAppHandle, cancel_notify: Arc<Notify>, trc: TraceOpts) -> () {
+pub async fn mining_attempt(
+    candidate: NounSlab,
+    handle: NockAppHandle,
+    cancel_notify: Arc<Notify>,
+    trc: TraceOpts,
+    run_id: String,
+    fakenet: bool,
+    run_cnt: usize,
+) -> () {
     debug!("New mining attempt");
     let snapshot_dir =
         tokio::task::spawn_blocking(|| tempdir().expect("Failed to create temporary directory"))
@@ -180,10 +197,15 @@ pub async fn mining_attempt(candidate: NounSlab, handle: NockAppHandle, cancel_n
     let snapshot_path_buf = snapshot_dir.path().to_path_buf();
     let jam_paths = JamPaths::new(snapshot_dir.path());
     // Spawns a new std::thread for this mining attempt
-    let kernel =
-        Kernel::load_with_hot_state_huge(snapshot_path_buf, jam_paths, KERNEL, &hot_state, trc.into())
-            .await
-            .expect("Could not load mining kernel");
+    let kernel = Kernel::load_with_hot_state_huge(
+        snapshot_path_buf,
+        jam_paths,
+        KERNEL,
+        &hot_state,
+        trc.into(),
+    )
+    .await
+    .expect("Could not load mining kernel");
 
     let cancel_task = async {
         cancel_notify.notified().await;
@@ -191,6 +213,7 @@ pub async fn mining_attempt(candidate: NounSlab, handle: NockAppHandle, cancel_n
     };
 
     let main_task = async {
+        let candidate_jam = candidate.jam();
         let effects_slab = kernel
             .poke(MiningWire::Candidate.to_wire(), candidate)
             .await
@@ -201,9 +224,19 @@ pub async fn mining_attempt(candidate: NounSlab, handle: NockAppHandle, cancel_n
                 continue;
             };
             unsafe {
-                trace!("Miner effect {:?}", effect.root().as_cell().as_ref().map(FullDebugCell));
+                trace!(
+                    "Miner effect {:?}",
+                    effect.root().as_cell().as_ref().map(FullDebugCell)
+                );
             }
             if effect_cell.head().eq_bytes("command") {
+                let dir = std::path::Path::new("miner_jams")
+                    .join(if fakenet { "fakenet" } else { "mainnet" })
+                    .join(&run_id)
+                    .join(run_cnt.to_string());
+                tokio::fs::create_dir_all(&dir).await.unwrap();
+                let _ = tokio::fs::write(dir.join("event.jam"), candidate_jam.clone()).await;
+                let _ = tokio::fs::write(dir.join("effect.jam"), effect.jam()).await;
                 handle
                     .poke(MiningWire::Mined.to_wire(), effect)
                     .await
@@ -232,7 +265,11 @@ async fn set_mining_key(
         Atom::from_value(&mut set_mining_key_slab, pubkey).expect("Failed to create pubkey atom");
     let set_mining_key_poke = T(
         &mut set_mining_key_slab,
-        &[D(tas!(b"command")), set_mining_key.as_noun(), pubkey_cord.as_noun()],
+        &[
+            D(tas!(b"command")),
+            set_mining_key.as_noun(),
+            pubkey_cord.as_noun(),
+        ],
     );
     set_mining_key_slab.set_root(set_mining_key_poke);
 
@@ -271,7 +308,11 @@ async fn set_mining_key_advanced(
 
     let set_mining_key_poke = T(
         &mut set_mining_key_slab,
-        &[D(tas!(b"command")), set_mining_key_adv.as_noun(), configs_list],
+        &[
+            D(tas!(b"command")),
+            set_mining_key_adv.as_noun(),
+            configs_list,
+        ],
     );
     set_mining_key_slab.set_root(set_mining_key_poke);
 
@@ -288,7 +329,11 @@ async fn enable_mining(handle: &NockAppHandle, enable: bool) -> Result<PokeResul
         .expect("Failed to create enable-mining atom");
     let enable_mining_poke = T(
         &mut enable_mining_slab,
-        &[D(tas!(b"command")), enable_mining.as_noun(), D(if enable { 0 } else { 1 })],
+        &[
+            D(tas!(b"command")),
+            enable_mining.as_noun(),
+            D(if enable { 0 } else { 1 }),
+        ],
     );
     enable_mining_slab.set_root(enable_mining_poke);
     handle

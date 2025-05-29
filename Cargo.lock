@@ -3772,6 +3772,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "nockchain-jettest"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitvec",
+ "clap",
+ "either",
+ "equix",
+ "flume",
+ "futures",
+ "hoonc",
+ "itertools 0.14.0",
+ "kernels",
+ "nockapp",
+ "nockvm",
+ "nockvm_macros",
+ "reedline",
+ "tempfile",
+ "termcolor",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "tracing-test",
+ "vergen",
+ "zkvm-jetpack",
+]
+
+[[package]]
 name = "nockchain-libp2p-io"
 version = "0.1.0"
 dependencies = [
