@@ -273,8 +273,8 @@ pub fn zero_extend(context: &mut Context, subject: Noun) -> Result {
     let buf = unsafe { core::slice::from_raw_parts_mut(buf, new_alloc_len) };
     let (a, b) = buf.split_at_mut(dat.len());
     a.copy_from_slice(dat);
-    b[..(n as usize)].iter_mut().for_each(|v| *v = 0);
-    b[n as usize] = 1;
+    b[..((step * n) as usize)].iter_mut().for_each(|v| *v = 0);
+    b[(step * n) as usize] = 1;
 
     Ok(T(&mut context.stack, &[D(step), D(len + n), out.as_noun()]))
 }
