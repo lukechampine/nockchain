@@ -55,16 +55,18 @@ unsafe impl Sync for SendSlab {}
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum Mode {
-    Permute(Permute),
+    Test(Test),
 }
 
 #[derive(Parser, Debug, Clone)]
-pub struct Permute {
+pub struct Test {
     #[arg(short, long)]
     src_event: String,
     #[arg(short, long, help = "effect to compare jetted results against")]
     effect: Option<String>,
-    #[arg(short, long, help = "maximum number of jets to disable")]
+    #[arg(short, long, help = "permute through jet combinations")]
+    permute: bool,
+    #[arg(short, long, help = "maximum number of jets to disable when permuting", requires = "permute")]
     max_disable: Option<usize>,
 }
 
@@ -76,13 +78,20 @@ fn hash_slab(s: &NounSlab) -> (usize, u64) {
     (l, m.data())
 }
 
-impl Permute {
+impl Test {
     async fn run(self, cli: Cli) -> Result<()> {
         let Self {
             src_event,
             effect,
+            permute,
             max_disable,
         } = self;
+
+        let max_disable = if permute {
+            max_disable
+        } else {
+            Some(0)
+        };
 
         let hot_state = produce_prover_hot_state();
         let hot_state = [URBIT_HOT_STATE, &hot_state].concat();
@@ -121,7 +130,7 @@ impl Permute {
                 let res_hash = hash_slab(&res);
 
                 println!(
-                    "{} - Res effect {res_hash:?} in {:02}s",
+                    "{} - Res effect {res_hash:?} in {:.02}s",
                     if res_hash == src_effect_hash {
                         "OK "
                     } else {
@@ -222,6 +231,6 @@ async fn main() -> Result<()> {
     boot::init_default_tracing(&cli.nockapp_cli);
 
     match cli.mode {
-        Mode::Permute(p) => p.run(cli.nockapp_cli).await,
+        Mode::Test(p) => p.run(cli.nockapp_cli).await,
     }
 }
