@@ -126,6 +126,13 @@ pub fn bpmul_(left: &[Belt], right: &[Belt]) -> Vec<Belt> {
 }
 
 #[inline(always)]
+pub fn bpscal_inplace(scalar: Belt, b: &mut [Belt]) {
+    for bp in b.iter_mut() {
+        *bp = scalar * *bp;
+    }
+}
+
+#[inline(always)]
 pub fn bpscal(scalar: Belt, b: &[Belt], res: &mut [Belt]) {
     for (res, bp) in res.iter_mut().zip(b.iter()) {
         *res = scalar * *bp;
@@ -137,6 +144,22 @@ pub fn bpscal_(scalar: Belt, b: &[Belt]) -> Vec<Belt> {
     let mut res = vec![Belt(0); b.len()];
     bpscal(scalar, b, res.as_mut_slice());
     res
+}
+
+#[inline(always)]
+pub fn bp_hadamard_inplace(a: &mut [Belt], b: &[Belt]) {
+    assert_eq!(
+        a.len(),
+        b.len(),
+        "Unequal lengths: {}, {}",
+        a.len(),
+        b.len()
+    );
+    a.iter_mut()
+        .zip(b.iter())
+        .for_each(|(a_i, b_i)| {
+            *a_i = *a_i * *b_i;
+        });
 }
 
 #[inline(always)]
@@ -244,6 +267,33 @@ pub fn bpoly_zero_extend(a: &[Belt], res: &mut [Belt]) {
     res[a_len..res_len].fill(Belt::zero());
 }
 
+#[inline(always)]
+pub fn bpdvr_vec(a: &[Belt], b: &[Belt]) -> (Vec<Belt>, Vec<Belt>) {
+    let deg_a = a.degree();
+    let deg_b = b.degree();
+    let deg_q = deg_a.saturating_sub(deg_b);
+    let len_q = deg_q + 1;
+    let len_r = deg_b + 1;
+
+    let mut q = vec![Belt(0); len_q as usize];
+    let mut r = vec![Belt(0); len_r as usize];
+
+    bpdvr(
+        a,
+        b,
+        q.as_mut_slice(),
+        r.as_mut_slice(),
+    );
+
+    (q, r)
+}
+
+#[inline(always)]
+pub fn bpdiv(a: &[Belt], b: &[Belt]) -> Vec<Belt> {
+    bpdvr_vec(a, b).0
+}
+
+// TODO: make res return itself as Vec
 #[inline(always)]
 pub fn bpdvr(a: &[Belt], b: &[Belt], q: &mut [Belt], res: &mut [Belt]) {
     if a.is_zero() {
