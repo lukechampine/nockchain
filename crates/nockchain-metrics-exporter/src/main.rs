@@ -352,6 +352,7 @@ async fn main() -> Result<(), NockAppError> {
     let mut exporter = RetryExporter::new(cli.socket);
     let mut interval = interval(Duration::from_secs(cli.refresh_interval as u64));
     interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let mut error_cnt = 0;
 
     loop {
         let Some(e) = exporter.acquire().await else {
@@ -362,7 +363,15 @@ async fn main() -> Result<(), NockAppError> {
             Err(NockAppError::Timeout) => {
                 exporter.disconnect();
             }
-            v => v?,
+            Err(e) => {
+                debug!("Exporter error: {e:?}");
+                error_cnt += 1;
+                if error_cnt > 5 {
+                    error_cnt = 1;
+                    exporter.disconnect();
+                }
+            }
+            _ => error_cnt = 0,
         }
 
         interval.tick().await;
