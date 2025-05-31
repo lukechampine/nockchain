@@ -3,11 +3,21 @@
 /=  mine  /common/pow
 /=  dumb-transact  /common/tx-engine
 /=  *  /common/zoon
+::
 ::  this library is where _every_ update to the consensus state
 ::  occurs, no matter how minor.
 |_  [c=consensus-state:dk =blockchain-constants:dumb-transact]
 +*  t  ~(. dumb-transact blockchain-constants)
-+|  %genesis
+::
+::
+::  checkpointed digests for chain stability
+++  checkpointed-digests
+  ^-  (z-map page-number:t hash:t)
+  %-  ~(gas z-by *(z-map page-number:t hash:t))
+  :~  [%720 (from-b58:hash:t 'C4vJRnFNHCLHKHVRJGiYeoiYXS7CyTGrVk2ibEv95HQiZoxRvtr5SRQ')]
+      [%144 (from-b58:hash:t '3rbqdep8HLqwwkW4YvZazVPYZpbqsFbqHCfEKGt13GVUUzA9ToDCsxT')]
+      [%0 (from-b58:hash:t '7pR2bvzoMvfFcxXaHv4ERm8AgEnExcZLuEsjNgLkJziBkqBLidLg39Y')]
+  ==
 ::
 ::  +set-genesis-seal: set .genesis-seal
 ++  set-genesis-seal
@@ -26,7 +36,6 @@
   ~>  %slog.[0 leaf+"received btc block hash, waiting to hear nockchain genesis block!"]
   c(btc-data `btc-hash)
 ::
-+|  %checks-and-computes
 ++  inputs-in-heaviest-balance
   |=  raw=raw-tx:t
   ^-  ?
@@ -133,7 +142,6 @@
   ^-  ?
   (lte (compute-size:page:t pag raw-txs.p) max-block-size:t)
 ::
-+|  %page-handling
 ++  add-page
   |=  [pag=page:t acc=tx-acc:t now=@da]
   ^-  consensus-state:dk
@@ -255,6 +263,12 @@
   ::  check height
   ?.  =(height.pag +(height.par))
     [%.n %page-height-invalid]
+  ::
+  ::  check if digest matches checkpointed history
+  ?.  ?|  ?!((~(has z-by checkpointed-digests) height.pag))
+          =(digest.pag (~(got z-by checkpointed-digests) height.pag))
+      ==
+    [%.n %checkpoint-match-failed]
   ::
   =/  check-heaviness=?
     .=  accumulated-work.pag
@@ -388,13 +402,17 @@
   =/  block  (~(get z-by blocks.c) bid)
   ?~  block
     ~
-  =/  pag=page:t  (to-page:local-page:t u.block)
-  =/  height=page-number:t  height.pag
-  =/  ids=(list block-id:t)  [bid ~]
+  =/  height=page-number:t
+    ?~  heaviest-block.c  0
+    =/  heaviest-block  (~(got z-by blocks.c) u.heaviest-block.c)
+    (min height.heaviest-block height.u.block)
+  =/  bid-at-height=(unit block-id:t)  (~(get z-by heaviest-chain.d) height)
+  ?~  bid-at-height  ~
+  =/  ids=(list block-id:t)  [u.bid-at-height ~]
   =/  count  1
   |-
-  ?:  =(height *page-number:t)  `[height (flop ids)]
-  ?:  =(24 count)  `[height (flop ids)]
+  ?:  =(height *page-number:t)  `[height (flop ids)] :: genesis block
+  ?:  =(24 count)  `[height (flop ids)] :: 24 blocks
   =/  prev-height=page-number:t  (dec height)
   =/  prev-id=(unit block-id:t)  (~(get z-by heaviest-chain.d) prev-height)
   ?~  prev-id
@@ -402,7 +420,6 @@
     ~
   $(height prev-height, ids [u.prev-id ids], count +(count))
 ::
-+|  %timestamp
 ::  +update-min-timestamps: sets min timestamp of children of .id
 ::
 ++  update-min-timestamps

@@ -40,31 +40,6 @@ pub mod util {
     use either::{Left, Right};
     use std::cmp::Ordering;
 
-    pub fn gor(stack: &mut NockStack, a: Noun, b: Noun) -> Noun {
-        let c = mug(stack, a);
-        let d = mug(stack, b);
-
-        match c.data().cmp(&d.data()) {
-            Ordering::Greater => NO,
-            Ordering::Less => YES,
-            Ordering::Equal => dor(stack, a, b),
-        }
-    }
-
-    pub fn mor(stack: &mut NockStack, a: Noun, b: Noun) -> Noun {
-        let c = mug(stack, a);
-        let d = mug(stack, b);
-
-        let e = mug(stack, c.as_noun());
-        let f = mug(stack, d.as_noun());
-
-        match e.data().cmp(&f.data()) {
-            Ordering::Greater => NO,
-            Ordering::Less => YES,
-            Ordering::Equal => dor(stack, a, b),
-        }
-    }
-
     pub fn dor(stack: &mut NockStack, a: Noun, b: Noun) -> Noun {
         if unsafe { a.raw_equals(&b) } {
             YES
@@ -111,13 +86,38 @@ pub mod util {
             }
         }
     }
+
+    pub fn gor(stack: &mut NockStack, a: Noun, b: Noun) -> Noun {
+        let c = mug(stack, a);
+        let d = mug(stack, b);
+
+        match c.data().cmp(&d.data()) {
+            Ordering::Greater => NO,
+            Ordering::Less => YES,
+            Ordering::Equal => dor(stack, a, b),
+        }
+    }
+
+    pub fn mor(stack: &mut NockStack, a: Noun, b: Noun) -> Noun {
+        let c = mug(stack, a);
+        let d = mug(stack, b);
+
+        let e = mug(stack, c.as_noun());
+        let f = mug(stack, d.as_noun());
+
+        match e.data().cmp(&f.data()) {
+            Ordering::Greater => NO,
+            Ordering::Less => YES,
+            Ordering::Equal => dor(stack, a, b),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::jets::util::test::{assert_jet, init_context, A};
-    use crate::noun::{D, T};
+    use crate::noun::{D, NO, T, YES};
     use ibig::ubig;
 
     #[test]

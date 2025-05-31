@@ -91,8 +91,6 @@ nockchain-wallet import-keys --input keys.export
 
 ## Running Nodes
 
-To run a Nockchain node without mining:
-
 Make sure your current directory is nockchain.
 
 To run a Nockchain node without mining.
@@ -233,7 +231,7 @@ To check your wallet balance:
 nockchain-wallet --nockchain-socket ./nockchain.sock list-notes
 
 # List all notes by pubkey
-nockchain-wallet --nockchain-socket ./nockchain.sock list-notes-by-pubkey <your-pubkey>
+nockchain-wallet --nockchain-socket ./nockchain.sock list-notes-by-pubkey -p <your-pubkey>
 ```
 
 ### How do I configure logging levels?

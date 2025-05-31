@@ -108,13 +108,13 @@ pub struct HoonMap {
 }
 
 impl HoonMap {
-    pub fn get(&self, stack: &mut NockStack, mut k: Noun) -> Option<(Noun, Noun)> {
+    pub fn get(&self, stack: &mut NockStack, mut k: Noun) -> Option<Noun> {
         let [mut ck, cv] = self.node.uncell().ok()?;
 
         if unsafe { unifying_equality(stack, &mut ck, &mut k) } {
             // ?:  =(b p.n.a)
             //   (some q.n.a)
-            Some((ck, cv))
+            Some(cv)
         } else if gor(stack, k, ck).as_direct().map(|v| v.data()) == Ok(0) {
             // ?:  (gor b p.n.a)
             //   $(a l.a)

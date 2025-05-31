@@ -109,7 +109,6 @@ impl NounExt for Noun {
         }
         Ok(ret.map(|v| v.unwrap()))
     }
-
 }
 
 impl TryFrom<Noun> for MarySlice<'_> {

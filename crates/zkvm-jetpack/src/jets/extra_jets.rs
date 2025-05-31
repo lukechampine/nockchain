@@ -2545,8 +2545,7 @@ pub fn mp_substitute_mega_impl(
                             // =/  rnd  (~(got by chal-map) idx)
                             let rnd = chal_map
                                 .and_then(|v| v.get(stack, D(idx as u64)))
-                                .unwrap()
-                                .1;
+                                .unwrap();
                             let rnd = rnd.as_atom()?.as_u64()?;
                             // (bpscal (bpow rnd exp) acc)
                             let powed = bpow(rnd, exp);
@@ -2741,8 +2740,7 @@ fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
         // =/  chals  (~(got by composition-chals) i)
         let chals = composition_chals
             .and_then(|v| v.get(stack, D(i as _)))
-            .ok_or_else(det_err)?
-            .1;
+            .ok_or_else(det_err)?;
         let chals2 = BPolySlice::try_from(chals)?;
         // =/  trace  (snag i tworow-trace-polys)
         let trace = tworow_trace_polys[i];
@@ -2751,16 +2749,14 @@ fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
         // =/  counts  (~(got by constraint-counts) i)
         let counts = constraint_counts
             .and_then(|v| v.get(stack, D(i as _)))
-            .ok_or_else(det_err)?
-            .1;
+            .ok_or_else(det_err)?;
         let counts: [_; 5] = counts
             .uncell()?
             .map(|v| v.as_atom().unwrap().as_u64().unwrap());
         // =/  dyns  (~(got by dyn-map) i)
         let dyns = dyn_map
             .and_then(|v| v.get(stack, D(i as _)))
-            .ok_or_else(det_err)?
-            .1;
+            .ok_or_else(det_err)?;
         let dyns = BPolySlice::try_from(dyns)?;
         // ::
         // =/  row-zerofier                                           ::  f(X) = (X^N-1)
@@ -2921,7 +2917,7 @@ fn degree_processing(
     for (i, height) in heights.iter().copied().enumerate() {
         // =/  height=@  (snag i heights)
         // =/  constraints  (~(got by constraint-map) i)
-        let (_, constraints) = constraint_map
+        let constraints = constraint_map
             .and_then(|v| v.get(stack, D(i as u64)))
             .unwrap();
         let constraints: [_; 5] = constraints.uncell()?;

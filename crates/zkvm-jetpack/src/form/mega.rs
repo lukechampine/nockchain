@@ -4,7 +4,7 @@ use super::Belt;
 
 // +$  mega-typ  ?(%var %rnd %dyn %con %com)
 #[repr(u64)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, strum::FromRepr)]
 pub enum MegaTyp {
     Con = 0,
     Var = 1,
@@ -29,11 +29,7 @@ impl TryFrom<u64> for MegaTyp {
     type Error = ();
 
     fn try_from(value: u64) -> std::result::Result<Self, Self::Error> {
-        if value <= 4 {
-            Ok(unsafe { core::mem::transmute(value) })
-        } else {
-            Err(())
-        }
+        Self::from_repr(value).ok_or(())
     }
 }
 

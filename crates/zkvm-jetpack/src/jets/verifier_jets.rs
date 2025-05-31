@@ -10,7 +10,7 @@ use crate::form::math::fext::*;
 use crate::form::poly::Poly;
 use crate::form::{bpow, brek, BPolySlice, Belt, Element, FPolySlice, Felt, MegaTyp, PolySlice};
 use crate::hand::handle::new_handle_mut_felt;
-use crate::hand::structs::{HoonList, HoonMap};
+use crate::hand::structs::{HoonList, HoonMap, HoonMapIter};
 use crate::jets::utils::jet_err;
 use crate::noun::noun_ext::NounExt;
 
@@ -203,36 +203,6 @@ fn process_belt(
     (acc, num)
 }
 
-// Combined roll on tap by
-fn roll_by<T, F: FnMut(T, Noun, Noun) -> Result<T, JetErr>>(
-    map: Noun,
-    mut acc: T,
-    f: &mut F,
-) -> Result<T, JetErr> {
-    // ~/  %tap
-    // =+  b=`(list _?>(?=(^ a) n.a))`~
-    // |.  ^+  b
-    // ?~  a
-    if map.is_atom() {
-        // b
-        return Ok(acc);
-    }
-
-    let [n, l, r] = map.uncell()?;
-    let [k, v] = n.uncell()?;
-
-    // $(a r.a, b [n.a $(a l.a)])
-    if r.is_cell() {
-        acc = roll_by(r, acc, f)?;
-    }
-    acc = f(acc, k, v)?;
-    if l.is_cell() {
-        acc = roll_by(l, acc, f)?;
-    }
-
-    Ok(acc)
-}
-
 // =/  add-op   ?:(=(field %base) badd fadd)
 // =/  mul-op   ?:(=(field %base) bmul fmul)
 // =/  aop-door   ?:(=(field %base) bop fop)
@@ -337,13 +307,20 @@ where
 
     // ?:  =(~ mp)
     if mp.is_atom() {
-        // init-zero
-        return Ok(F::zero());
+        if mp.is_direct() && mp.as_direct()?.data() == 0 {
+            return Ok(F::zero());
+        } else {
+            return jet_err();
+        }
     }
 
     // %+  roll  ~(tap by mp)
     // |=  [[k=bpoly v=belt] acc=_init-zero]
-    roll_by(mp, F::zero(), &mut |acc, k, v| {
+    let mut mp = HoonMapIter::from(mp);
+
+    mp.try_fold(F::zero(), |acc, n| {
+        let [k, v] = n.uncell()?;
+
         let Ok(k) = BPolySlice::try_from(k) else {
             return jet_err();
         };
@@ -384,7 +361,7 @@ where
                         //   %+  pow-op
                         //     (lift-op (~(got by chal-map) idx))
                         //   exp
-                        let (_, v) = chal_map
+                        let v = chal_map
                             .as_ref()
                             .unwrap()
                             .get(stack, D(idx as _))
@@ -411,7 +388,7 @@ where
                         //   %+  pow-op
                         //     (~(got by com-map) idx)
                         //   exp
-                        let (_, v) = com_map
+                        let v = com_map
                             .as_ref()
                             .unwrap()
                             .get(stack, D(idx as _))
