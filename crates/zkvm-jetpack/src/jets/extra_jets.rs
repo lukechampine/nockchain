@@ -26,7 +26,7 @@ use crate::noun::noun_ext::NounExt;
 use either::Either;
 use nockvm::interpreter::Context;
 use nockvm::jets::bits::util as bits;
-use nockvm::jets::list::util::{self as list, lent};
+use nockvm::jets::list::util as list;
 use nockvm::jets::math::util as math;
 use nockvm::jets::sort::util::gor;
 use nockvm::jets::util::{self, slot};
@@ -168,6 +168,7 @@ sam_jet! {
     hash_10_jet => hash_10,
     hash_belts_list_jet => hash_belts_list,
     hash_noun_varlen_jet => hash_noun_varlen,
+    hash_pairs_jet => hash_pairs,
     hash_varlen_jet => hash_varlen,
     hash_hashable_jet => hash_hashable,// 'jam 'create_jam_dir,
     hash_ten_cell_jet => hash_ten_cell,
@@ -182,6 +183,7 @@ sam_jet! {
     do_init_mary_jet => do_init_mary,// 'jam 'create_jam_dir,
     // bpdiv_jet => bpdiv 'jam 'create_jam_dir,
     zero_extend_jet => zero_extend 'raw,// 'jam 'create_jam_dir,
+    bp_build_merk_heap_jet => bp_build_merk_heap 'jam 'create_jam_dir,
 }
 
 /*
@@ -798,9 +800,7 @@ pub fn hash_varlen(stack: &mut NockStack, input: Noun) -> Result {
     scag(stack, DIGEST_LENGTH, output)
 }
 
-pub fn hash_pairs_jet(context: &mut Context, subject: Noun) -> Result {
-    let sam = slot(subject, 6)?;
-
+pub fn hash_pairs(stack: &mut NockStack, sam: Noun) -> Result {
     // |=  lis=(list (list @))
     let lis = slot(sam, 1)?;
     trace!("lis: {lis:?} | {}", list::lent(lis)?);
@@ -810,7 +810,7 @@ pub fn hash_pairs_jet(context: &mut Context, subject: Noun) -> Result {
         return Err(JetErr::Punt);
     };
 
-    let ret = Cell::new(&mut context.stack, D(0), D(0));
+    let ret = Cell::new(stack, D(0), D(0));
     let mut cur = ret;
 
     // NOTE: this loop essentially takes the input list, and gets its pairs, reducing the size in
@@ -837,9 +837,9 @@ pub fn hash_pairs_jet(context: &mut Context, subject: Noun) -> Result {
         // Other branch:
         // (hash-10:tip5 (weld (snag b lis) (snag +(b) lis)))
         // :: (weld <...>)
-        let welded = list::weld(&mut context.stack, first, second)?;
+        let welded = list::weld(stack, first, second)?;
         // hash-10:tip5
-        let hashed = hash_10(&mut context.stack, welded)
+        let hashed = hash_10(stack, welded)
             .inspect_err(|e| println!("hash_10 failed: {e:?}"))
             .map_err(|_| JetErr::Punt)?;
 
@@ -853,7 +853,7 @@ pub fn hash_pairs_jet(context: &mut Context, subject: Noun) -> Result {
         cell = tail;
 
         // Append new list entry
-        let new_cell = Cell::new(&mut context.stack, D(0), D(0));
+        let new_cell = Cell::new(stack, D(0), D(0));
         unsafe { (*cur.to_raw_pointer_mut()).tail = new_cell.as_noun() };
         cur = new_cell;
     }
@@ -1360,7 +1360,7 @@ fn do_init_mary(stack: &mut NockStack, inp: Noun) -> Result {
         // ?>  (levy poly |=(=elt &((~(fet mary-utils step) elt) =(step (met-elt elt)))))
         // :-  step
         // :-  (lent poly)
-        let poly_len = lent(poly)?;
+        let poly_len = list::lent(poly)?;
         // =/  high-bit  (lsh [0 (mul (bex 6) (mul step (lent poly)))] 1)
         let bstep = (1 << 6) * step * poly_len;
         let high_bit = bits::lsh(stack, 0, bstep, D(1).as_atom()?)?.as_atom()?;
@@ -2191,6 +2191,161 @@ fn fat(stack: &mut NockStack, f: Felt) -> IndirectAtom {
     let (res, res_felt): (IndirectAtom, &mut Felt) = new_handle_mut_felt(stack);
     *res_felt = f;
     res
+}
+
+fn hashable_bpoly(stack: &mut NockStack, bp: &BPolySlice) -> Noun {
+    let (ret, handle) = new_handle_mut_slice(stack, Some(bp.len()));
+    handle.copy_from_slice(&bp.0);
+    let ret = finalize_poly(stack, Some(bp.len()), ret);
+
+    T(stack, &[D(tas!(b"mary")), D(1), ret])
+}
+
+fn snag_as_digest(stack: &mut NockStack, m: Noun, i: usize) -> Result {
+    // ::  +snag-as-digest
+    // ::  Retrieve the i-th entry of the mary return it as a tip5 hash digest.
+    // ::  Assumes that each entry of the mary is a single hash encoded in base 64.
+    // ::
+    // ++  snag-as-digest
+    //   ~/  %snag-as-digest
+    //   |=  [m=mary i=@]
+    //   ^-  noun-digest:tip5
+    let Ok(ma) = MarySlice::try_from(m) else {
+        return jet_err();
+    };
+
+    //   ?>  =(5 step.m)
+    if ma.step != 5 {
+        return Err(BAIL_EXIT);
+    }
+
+    //   =/  buf  (~(snag ave m) i)
+    let buf = snag_mary(stack, ma, i);
+
+    //   :*  (cut 6 [0 1] buf)
+    //       (cut 6 [1 1] buf)
+    //       (cut 6 [2 1] buf)
+    //       (cut 6 [3 1] buf)
+    //       (cut 6 [4 1] buf)
+    //   ==
+    let uno = cut(stack, 6, 0, 1, buf)?.as_noun();
+    let dos = cut(stack, 6, 1, 1, buf)?.as_noun();
+    let tre = cut(stack, 6, 2, 1, buf)?.as_noun();
+    let qua = cut(stack, 6, 3, 1, buf)?.as_noun();
+    let cin = cut(stack, 6, 4, 1, buf)?.as_noun();
+
+    Ok(T(stack, &[uno, dos, tre, qua, cin]))
+}
+
+pub fn bp_build_merk_heap(stack: &mut NockStack, ma: Noun) -> Result {
+    // Definitions:
+    // +$  mary  [step=@ =array]
+    //    An array where each element is step size (in u64 words). This can be used to build
+    //    multi-dimensional arrays or to store any data you want in one contiguous array.
+    // +$  merk-heap  [h=noun-digest:tip5 m=mary]
+    //     Heap ordered merkle tree stored in an array ?
+    //     +$  noun-digest  [belt belt belt belt belt]
+    //          +$  belt  @
+    //            An integer in the interval [0, p).
+    //            Due to a well chosen p, almost all numbers representable with 64 bits
+    //            are present in the interval. In other words, a belt under our choice
+    //            of p will always fit in 64 bits.
+
+    // ~/  %bp-build-merk-heap-hoon
+    // |=  m=mary
+    let Ok(m) = MarySlice::try_from(ma) else {
+        return jet_err();
+    };
+
+    // ::
+    // ::  +heapify-mary
+    // ::  Take a mary of belts, merklize it, and return it as a heap
+    // ++  heapify-mary
+    //   |=  m=mary     :: take an array of belts
+    //   ^-  mary       :: return type: merkelized array of belts
+    //   =/  size  (dec (bex (xeb len.array.m)))
+    let height = xeb(m.len as usize);
+    let size: u32 = (1 << height) - 1;
+
+    //   :: each digest is 5 64-bit atoms; multiplying rounded-up array size by 5; shifting 64 bits left that many times; alloc'ed memory for new array?
+    //   =/  high-bit  (lsh [6 (mul size 5)] 1)
+    let high_bit = bits::lsh(
+        stack,
+        6,
+        size as usize * 5,
+        DirectAtom::new(1).unwrap().as_atom(),
+    )?
+    .as_atom()?;
+
+    //   ::  make leaves
+    //   =/  res=(list (list @))
+    //     %+  turn
+    //       (range len.array.m)
+    //     |=  i=@
+    //     =/  t  (~(snag-as-bpoly ave m) i)
+    //     (leaf-sequence:shape (hash-hashable:tip5 (hashable-bpoly:tip5 t)))
+    let mut res_l = Vec::with_capacity(m.len as usize);
+    for i in 0..m.len {
+        let t = snag_as_bpoly_mary(m, i as usize);
+        let hbp = hashable_bpoly(stack, &t);
+        let hh = hash_hashable(stack, hbp)?;
+        let leaf = leaf_sequence(stack, hh)?;
+        res_l.push(leaf);
+    }
+    res_l.push(D(0));
+
+    //   :+  5
+    //     size
+    //   %+  add
+    //     high-bit
+    //   %+  rep  6
+    //   %-  zing
+    //   ^-  (list (list @))
+    //   =/  curr  res
+    //   |-
+    //   ?:  =((lent curr) 1)
+    //     res
+    //   =/  pairs  (hash-pairs:tip5 curr)  :: pair the list up
+    //   %=  $
+    //     res      (weld pairs res)
+    //     curr     pairs
+    //   ==
+    // --
+    //
+    //      IS EQUIVALENT TO:
+    //
+    // loop over res;
+    //   - split cloned list into pairs and hash
+    //   - prepend hashes to front of res (this does the heaping)
+    //   - loop until no more pairs can be made (i.e. height of heap)
+    // ... then promote the lists into a single list
+    // ... then assemble the list into an atom
+    // ... then add the high bit to the result
+    // ... then build a mary out of the result
+    let mut res = T(stack, &res_l);
+    let mut curr = res;
+    let mut pairs = D(0);
+    for _ in 0..height {
+        if list::lent(curr)? == 1 {
+            break;
+        }
+        pairs = hash_pairs(stack, curr)?;
+        res = list::weld(stack, pairs, res)?;
+        curr = pairs;
+    }
+    res = list::zing(stack, res)?;
+    let rep = bits::rep(stack, 6, 1, res)?;
+    res = math::add(stack, high_bit, rep).as_noun();
+    let heap_mary = T(stack, &[D(5), D(size as u64), res]);
+
+    // :-  (xeb len.array.m)          :: compute height of heap
+    // :-  %+  snag-as-digest:tip5      :: retrieve the 0th entry of the heap and return it
+    //       heap-mary                  ::   as a tip5 hash digest
+    //     0
+    let digest = snag_as_digest(stack, heap_mary, 0)?;
+
+    // heap-mary
+    Ok(T(stack, &[D(height as u64), digest, heap_mary]))
 }
 
 pub fn compute_deep(stack: &mut NockStack, inp: Noun) -> Result {
