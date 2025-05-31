@@ -43,7 +43,7 @@ pub struct NockAppHandle {
     pub io_sender: ActionSender,
     pub effect_sender: Arc<EffectSender>,
     pub effect_receiver: Mutex<EffectReceiver>,
-    pub metrics: Arc<NockAppMetrics>,
+    pub metrics: Option<Arc<NockAppMetrics>>,
     pub exit: NockAppExit,
 }
 
@@ -176,7 +176,9 @@ impl NockAppHandle {
                 Err(e.into())
             }
             Err(e @ broadcast::error::RecvError::Lagged(n)) => {
-                let _ = self.metrics.next_effect_lagged_error.fetch_add(n as usize);
+                if let Some(metrics) = self.metrics.as_ref() {
+                    let _ = metrics.next_effect_lagged_error.fetch_add(n as usize);
+                }
                 Err(e.into())
             }
         }

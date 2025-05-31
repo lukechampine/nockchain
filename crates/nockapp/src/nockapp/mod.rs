@@ -205,7 +205,7 @@ impl NockApp {
             io_sender: self.action_channel_sender.clone(),
             effect_sender: self.effect_broadcast.clone(),
             effect_receiver: Mutex::new(self.effect_broadcast.subscribe()),
-            metrics: self.metrics.clone(),
+            metrics: Some(self.metrics.clone()),
             exit: self.exit.clone(),
         }
     }
@@ -217,7 +217,7 @@ impl NockApp {
         let io_sender = self.action_channel_sender.clone();
         let effect_sender = self.effect_broadcast.clone();
         let effect_receiver = Mutex::new(self.effect_broadcast.subscribe());
-        let metrics = self.metrics.clone();
+        let metrics = Some(self.metrics.clone());
         let exit = self.exit.clone();
         let fut = driver(NockAppHandle {
             io_sender,
@@ -241,7 +241,7 @@ impl NockApp {
         let io_sender = self.action_channel_sender.clone();
         let effect_sender = self.effect_broadcast.clone();
         let effect_receiver = Mutex::new(self.effect_broadcast.subscribe());
-        let metrics = self.metrics.clone();
+        let metrics = Some(self.metrics.clone());
         let exit = self.exit.clone();
         let fut = driver(NockAppHandle {
             io_sender,

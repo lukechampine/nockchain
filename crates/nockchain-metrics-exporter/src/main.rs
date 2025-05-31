@@ -1,6 +1,5 @@
 #![allow(clippy::doc_overindented_list_items)]
 
-use futures::stream::FuturesUnordered;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use metrics_util::MetricKindMask;
 use nockapp::kernel::boot::{default_boot_cli, init_default_tracing};
@@ -14,11 +13,9 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::{interval, timeout, MissedTickBehavior};
 
 use clap::Parser;
-use futures::StreamExt;
-use metrics::{counter, gauge};
+use metrics::gauge;
 use nockapp::{NockAppError, NockAppExit, Noun};
 use nockvm::noun::{IndirectAtom, D, T};
-use sha3::{Digest, Sha3_256};
 use tokio::net::UnixStream;
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 use tracing::{debug, error, info, trace};
@@ -51,8 +48,8 @@ fn pull_args<const N: usize>(mut inp: Noun) -> Result<[Noun; N], NockAppError> {
 struct MetricsCli {
     #[arg(short, long, default_value = "127.0.0.1:9089")]
     bind: String,
-    #[arg(short, long, help = "paths to nockchain.sock")]
-    socket: Vec<String>,
+    #[arg(short, long, help = "path to nockchain.sock")]
+    socket: String,
     #[arg(
         short,
         long,
@@ -207,6 +204,7 @@ impl Exporter {
             io_sender,
             effect_sender,
             effect_receiver,
+            metrics: None,
             exit: NockAppExit::new().0,
         };
 
@@ -273,9 +271,9 @@ impl Exporter {
         let height = height.as_direct()?.data() as f64;
         let epoch_counter = epoch_counter.as_direct()?.data() as f64;
 
-        gauge!("nockchain_block_timestamp", "path-id" => self.id.clone()).set(timestamp);
-        gauge!("nockchain_block_height", "path-id" => self.id.clone()).set(height);
-        gauge!("nockchain_block_epoch_counter", "path-id" => self.id.clone()).set(epoch_counter);
+        gauge!("nockchain_block_timestamp").set(timestamp);
+        gauge!("nockchain_block_height").set(height);
+        gauge!("nockchain_block_epoch_counter").set(epoch_counter);
 
         Ok(())
     }
@@ -291,10 +289,7 @@ struct RetryExporter {
 impl RetryExporter {
     pub fn new(socket_path: String) -> Self {
         // TODO: pull miner ID out
-        let mut hasher = Sha3_256::new();
-        hasher.update(socket_path.as_bytes());
-        let res = hasher.finalize();
-        let id = hex::encode(&res[..8]);
+        let id = socket_path.clone();
 
         Self {
             socket_path,
@@ -354,34 +349,22 @@ async fn main() -> Result<(), NockAppError> {
         return Err(NockAppError::UnexpectedResult);
     }
 
-    let mut exporters = cli
-        .socket
-        .into_iter()
-        .map(RetryExporter::new)
-        .collect::<Vec<_>>();
-
+    let mut exporter = RetryExporter::new(cli.socket);
     let mut interval = interval(Duration::from_secs(cli.refresh_interval as u64));
     interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
     loop {
-        exporters
-            .iter_mut()
-            .map(|v| async move {
-                let Some(e) = v.acquire().await else {
-                    return Ok(());
-                };
+        let Some(e) = exporter.acquire().await else {
+            return Ok(());
+        };
 
-                match e.update().await {
-                    Err(NockAppError::Timeout) => {
-                        v.disconnect();
-                        Ok(())
-                    }
-                    v => v,
-                }
-            })
-            .collect::<FuturesUnordered<_>>()
-            .collect::<Vec<_>>()
-            .await;
+        match e.update().await {
+            Err(NockAppError::Timeout) => {
+                exporter.disconnect();
+            }
+            v => v?,
+        }
+
         interval.tick().await;
     }
 }
