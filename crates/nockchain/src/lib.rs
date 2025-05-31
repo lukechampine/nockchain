@@ -177,6 +177,8 @@ pub struct NockchainCli {
     pub npc_socket: String,
     #[arg(long, help = "Mine in-kernel", default_value = "false")]
     pub mine: bool,
+    #[arg(long, help = "Number of miners", default_value = "1")]
+    pub num_miners: usize,
     #[arg(
         long,
         help = "Pubkey to mine to (mutually exclusive with --mining-key-adv)"
@@ -594,10 +596,11 @@ pub async fn init_with_kernel(
         mining_config,
         mine,
         Some(mining_init_tx),
+        cli.as_ref().map(|v| v.num_miners).unwrap_or(1),
         cli.as_ref()
             .map(|v| v.nockapp_cli.trace_opts.clone())
             .unwrap_or_default(),
-        cli.as_ref().map(|v| v.fakenet).unwrap_or(false)
+        cli.as_ref().map(|v| v.fakenet).unwrap_or(false),
     );
     nockapp.add_io_driver(mining_driver).await;
 
