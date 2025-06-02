@@ -165,6 +165,8 @@ smallvec = "1.13.2"
 strum = { version = "0.26", features = ["derive"] }
 termcolor = "1.4"
 testcontainers = { git = "https://github.com/bitemyapp/testcontainers-rs.git", rev = "54851fd9faf9b9cded9d681b46f87c056880d870" }
+array-concat = "0.5"
+array-util = "1"
 
 thiserror = "2.0.11"
 tokio = { version = "1.32", features = [

@@ -23,6 +23,8 @@ use crate::hand::structs::{HoonList, HoonMap, HoonMapIter};
 use crate::jets::bp_jets::bpoly_to_list;
 use crate::jets::utils::det_err;
 use crate::noun::noun_ext::NounExt;
+use array_concat::concat_arrays;
+use array_util::try_map;
 use either::Either;
 use nockvm::interpreter::Context;
 use nockvm::jets::bits::util as bits;
@@ -165,13 +167,13 @@ macro_rules! sam_jet {
 }
 
 sam_jet! {
-    hash_10_jet => hash_10,
-    hash_belts_list_jet => hash_belts_list,
-    hash_noun_varlen_jet => hash_noun_varlen,
-    hash_pairs_jet => hash_pairs,
-    hash_varlen_jet => hash_varlen,
+    //hash_10_jet => hash_10,
+    //hash_belts_list_jet => hash_belts_list,
+    //hash_noun_varlen_jet => hash_noun_varlen,
+    //hash_pairs_jet => hash_pairs,
+    //hash_varlen_jet => hash_varlen,
     hash_hashable_jet => hash_hashable,// 'jam 'create_jam_dir,
-    hash_ten_cell_jet => hash_ten_cell,
+    //hash_ten_cell_jet => hash_ten_cell,
     leaf_sequence_jet => leaf_sequence,
     mp_substitute_mega_jet => mp_substitute_mega, //'jam_errs 'create_jam_dir,// 'log 'punt_errs 'jam 'run_once 'create_jam_dir,
     mp_substitute_ultra_jet => mp_substitute_ultra, // 'punt_errs 'run_once 'log 'jam 'create_jam_dir,
@@ -630,7 +632,10 @@ pub fn slag(n: usize, list: Noun) -> Result {
     Ok(cell.as_noun())
 }
 
-pub fn hash_10(stack: &mut NockStack, input: Noun) -> Result {
+pub fn hash_10(
+    stack: &mut NockStack,
+    input: [Belt; 10],
+) -> core::result::Result<NounDigest, JetErr> {
     // ::  +hash-10: hash list of 10 belts into a list of 5 belts
     // |=  input=(list belt)
     // ::  output length is 5
@@ -642,9 +647,12 @@ pub fn hash_10(stack: &mut NockStack, input: Noun) -> Result {
     // FIXME: acc verify this
 
     // =.  input   (turn input montify)
-    let input = scag_map(stack, usize::MAX, input, |stack, i| {
-        montify(stack, i.as_atom()?).map(Atom::as_noun)
+    let input = array_util::try_map(input, |v| {
+        let v = Atom::new(stack, v.0);
+        montify(stack, v)
     })?;
+    let input: [_; 11] = array_concat::concat_arrays!(input.map(|v| v.as_noun()), [D(0)]);
+    let input = T(stack, &input);
 
     // =/  sponge  (init-tip5-state %fixed)
     let sponge = init_tip5_state(stack, DirectAtom::new(tas!(b"fixed"))?)?;
@@ -655,21 +663,34 @@ pub fn hash_10(stack: &mut NockStack, input: Noun) -> Result {
     let sponge = crate::jets::tip5_jets::permutation(stack, welded)?;
 
     // (turn (scag digest-length sponge) mont-reduction)
-    let scagged = scag_map(stack, DIGEST_LENGTH, sponge, |stack, v| {
-        mont_reduction(stack, v.as_atom()?).map(Atom::as_noun)
-    })?;
+    let mut ret = NounDigest::default();
 
-    Ok(scagged)
+    for (i, v) in HoonList::try_from(sponge)?.take(DIGEST_LENGTH).enumerate() {
+        ret[i] = Belt(mont_reduction(stack, v.as_atom()?)?.as_u64()?);
+    }
+
+    Ok(ret)
 }
 
-pub fn hash_belts_list(stack: &mut NockStack, belts: Noun) -> Result {
+pub fn hash_belts_list(
+    stack: &mut NockStack,
+    belts: &[Belt],
+) -> core::result::Result<NounDigest, JetErr> {
     // |=  belts=(list belt)
     // ^-  noun-digest:tip5
     // =-  ?>  ?=(noun-digest -)  -
     // %-  list-to-tuple
     // (hash-varlen belts)
+    let mut belts = belts
+        .iter()
+        .map(|v| Atom::new(stack, v.0).as_noun())
+        .collect::<Vec<_>>();
+    belts.push(D(0));
+    let belts = T(stack, &belts);
     let hashed = hash_varlen(stack, belts)?;
-    list_to_tuple_inplace(hashed)
+    let hashed = list_to_tuple_inplace(hashed)?;
+    let d = hashed.uncell()?;
+    Ok(try_map(d, |v| v.as_atom()?.as_u64().map(Belt))?)
 }
 
 struct DP(Noun);
@@ -684,7 +705,10 @@ impl core::fmt::Debug for DP {
     }
 }
 
-pub fn hash_noun_varlen(stack: &mut NockStack, n: Noun) -> Result {
+pub fn hash_noun_varlen(
+    stack: &mut NockStack,
+    n: Noun,
+) -> core::result::Result<NounDigest, JetErr> {
     // ~/  %hash-noun-varlen
     // |=  n=*
     // ^-  noun-digest
@@ -698,10 +722,15 @@ pub fn hash_noun_varlen(stack: &mut NockStack, n: Noun) -> Result {
     let size = list::lent(leaf)?;
 
     // (hash-belts-list [size (weld leaf dyck)])
-    let welded = list::weld(stack, leaf, dyck)?;
-    let t = T(stack, &[D(size as u64), welded]);
-    let r = hash_belts_list(stack, t)?;
-    Ok(r)
+    let belts = [Belt(size as u64)]
+        .into_iter()
+        .chain(
+            HoonList::try_from(leaf)?
+                .chain(HoonList::try_from(dyck)?)
+                .map(|v| Belt(v.as_atom().unwrap().as_u64().unwrap())),
+        )
+        .collect::<Vec<_>>();
+    hash_belts_list(stack, &belts)
 }
 
 pub fn new_sponge(stack: &mut NockStack) -> Result {
@@ -837,11 +866,17 @@ pub fn hash_pairs(stack: &mut NockStack, sam: Noun) -> Result {
         // Other branch:
         // (hash-10:tip5 (weld (snag b lis) (snag +(b) lis)))
         // :: (weld <...>)
-        let welded = list::weld(stack, first, second)?;
+        let first: [_; DIGEST_LENGTH] = first.uncell()?;
+        let first = try_map(first, |v| v.as_atom()?.as_u64())?.map(Belt);
+        let second: [_; DIGEST_LENGTH] = second.uncell()?;
+        let second = try_map(second, |v| v.as_atom()?.as_u64())?.map(Belt);
+        let welded = concat_arrays!(first, second);
         // hash-10:tip5
         let hashed = hash_10(stack, welded)
             .inspect_err(|e| println!("hash_10 failed: {e:?}"))
             .map_err(|_| JetErr::Punt)?;
+        let hashed = hashed.map(|v| Atom::new(stack, v.0).as_noun());
+        let hashed = T(stack, &hashed);
 
         // Override the head
         unsafe { (*cur.to_raw_pointer_mut()).head = hashed };
@@ -861,70 +896,149 @@ pub fn hash_pairs(stack: &mut NockStack, sam: Noun) -> Result {
     Ok(ret.as_noun())
 }
 
+type NounDigest = [Belt; 5];
+
+enum Hashable<'a> {
+    // [p=hashable q=hashable]
+    Pair(Box<Hashable<'a>>, Box<Hashable<'a>>),
+    // [%leaf p=*]
+    Leaf(Noun),
+    // [%hash p=noun-digest]
+    Hash(NounDigest),
+    // [%list p=(list hashable)]
+    List(Vec<Hashable<'a>>),
+    // [%mary p=mary]
+    Mary(MarySlice<'a>),
+}
+
+impl<'a> Hashable<'a> {
+    unsafe fn from_noun(h: Noun) -> core::result::Result<Self, JetErr> {
+        let h = h.as_cell()?;
+        let ty = h.head().as_direct().map(|v| v.data());
+
+        match ty {
+            Ok(tas!(b"hash")) => {
+                //trace!("hash");
+                // ?:  ?=(%hash -.h)
+                //   p.h
+                Ok(Self::Hash(
+                    h.tail()
+                        .uncell()?
+                        .map(|v| Belt(v.as_atom().unwrap().as_u64().unwrap())),
+                ))
+            }
+            Ok(tas!(b"leaf")) => {
+                // ?:  ?=(%leaf -.h)
+                //   (hash-noun-varlen p.h)
+                Ok(Self::Leaf(h.tail()))
+            }
+            Ok(tas!(b"list")) => {
+                //trace!("list");
+                // ?:  ?=(%list -.h)
+                //   (hash-noun-varlen (turn p.h hash-hashable))
+                let mut v = vec![];
+
+                for e in HoonList::try_from(h.tail())? {
+                    v.push(Self::from_noun(e)?);
+                }
+
+                Ok(Self::List(v))
+            }
+            Ok(tas!(b"mary")) => {
+                let Ok(ma) = MarySlice::try_from(h.tail()) else {
+                    return jet_err();
+                };
+                Ok(Self::Mary(ma))
+            }
+            _ => {
+                let left = Self::from_noun(h.head())?;
+                let right = Self::from_noun(h.tail())?;
+                Ok(Self::Pair(left.into(), right.into()))
+            }
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a Noun> for Hashable<'a> {
+    type Error = JetErr;
+
+    fn try_from(value: &'a Noun) -> std::result::Result<Self, Self::Error> {
+        unsafe { Self::from_noun(*value) }
+    }
+}
+
 pub fn hash_hashable(stack: &mut NockStack, h: Noun) -> Result {
+    let h = Hashable::try_from(&h)?;
+    let r = hash_hashable_impl(stack, &h)?;
+    let r = r.map(|v| Atom::new(stack, v.0).as_noun());
+    Ok(T(stack, &r))
+}
+
+fn hash_hashable_impl(
+    stack: &mut NockStack,
+    h: &Hashable,
+) -> core::result::Result<NounDigest, JetErr> {
     // ~/  %hash-hashable
     // |=  h=hashable
     // ^-  noun-digest
-    let h = h.as_cell()?;
-    let ty = h.head().as_direct().map(|v| v.data());
 
-    match ty {
-        Ok(tas!(b"hash")) => {
-            //trace!("hash");
+    match h {
+        Hashable::Hash(d) => {
+            println!("HASH");
             // ?:  ?=(%hash -.h)
             //   p.h
-            return Ok(h.tail());
+            Ok(*d)
         }
-        Ok(tas!(b"leaf")) => {
-            //trace!("leaf");
+        Hashable::Leaf(n) => {
+            println!("LEAF");
             // ?:  ?=(%leaf -.h)
             //   (hash-noun-varlen p.h)
-            return hash_noun_varlen(stack, h.tail());
+            hash_noun_varlen(stack, *n)
         }
-        Ok(tas!(b"list")) => {
-            //trace!("list");
+        Hashable::List(l) => {
+            println!("LIST");
             // ?:  ?=(%list -.h)
             //   (hash-noun-varlen (turn p.h hash-hashable))
-            let list = scag_map(stack, usize::MAX, h.tail(), |stack, v| {
-                hash_hashable(stack, v)
-            })?;
-            return hash_noun_varlen(stack, list);
+            let mut v = vec![];
+            for e in l {
+                let d = hash_hashable_impl(stack, e)?;
+                let d = d.map(|v| Atom::new(stack, v.0).as_noun());
+                let c = T(stack, &d);
+                v.push(c);
+            }
+            v.push(D(0));
+            let v = T(stack, &v);
+            hash_noun_varlen(stack, v)
         }
-        Ok(tas!(b"mary")) => {
-            //trace!("mary");
-            // ?:  ?=(%mary -.h)
-            let ma = h.tail();
-
+        Hashable::Mary(ma) => {
+            println!("MARY");
             //   %-  hash-hashable
 
             //   :-  leaf+step.p.h
-            let step_ma = step_mary(ma).inspect_err(|e| trace!("step {e:?}"))?;
-            let step = T(stack, &[D(tas!(b"leaf")), step_ma]);
+            let step = Hashable::Leaf(D(ma.step as _));
 
             //   :-  leaf+len.array.p.h
-            let len_ma = len_mary(ma).inspect_err(|e| trace!("len {e:?}"))?;
-            let len = T(stack, &[D(tas!(b"leaf")), len_ma]);
+            let len = Hashable::Leaf(D(ma.len as _));
 
             //   hash+(hash-belts-list (bpoly-to-list array:(~(change-step ave p.h) 1)))
-            let ma = change_step(stack, D(1), ma).inspect_err(|e| trace!("change step {e:?}"))?;
-            let arr = array_mary(ma).inspect_err(|e| trace!("arr {e:?}"))?;
-            let l = bpoly_to_list(stack, arr).inspect_err(|e| trace!("bplist {e:?}"))?;
-            let hash = hash_belts_list(stack, l).inspect_err(|e| trace!("hbl {e:?}"))?;
-            let hash = T(stack, &[D(tas!(b"hash")), hash]);
+            let dat = &ma.dat;
+            let dat = unsafe { core::mem::transmute::<&[u64], &[Belt]>(dat) };
+            let hash = hash_belts_list(stack, dat).inspect_err(|e| trace!("hbl {e:?}"))?;
+            let hash = Hashable::Hash(hash);
 
-            let f = T(stack, &[len, hash]);
-            let f = T(stack, &[step, f]);
+            let f = Hashable::Pair(len.into(), hash.into());
+            let f = Hashable::Pair(step.into(), f.into());
 
-            return hash_hashable(stack, f);
+            hash_hashable_impl(stack, &f)
         }
-        _ => {
-            //trace!("other");
+        Hashable::Pair(a, b) => {
+            println!("PAIR");
             // %-  hash-ten-cell
             // [$(h p.h) $(h q.h)]
-            let p = hash_hashable(stack, h.head())?;
-            let q = hash_hashable(stack, h.tail())?;
-            let c = Cell::new(stack, p, q);
-            return hash_ten_cell(stack, c.as_noun());
+            let p = hash_hashable_impl(stack, a)?;
+            let q = hash_hashable_impl(stack, b)?;
+            let b = concat_arrays!(p, q);
+            hash_10(stack, b)
         }
     }
 }
@@ -948,25 +1062,6 @@ pub fn list_to_tuple_inplace(n: Noun) -> Result {
             }
         }
     }
-}
-
-pub fn hash_ten_cell(stack: &mut NockStack, ten_cell: Noun) -> Result {
-    // ~/  %hash-ten-cell
-    // |=  =ten-cell
-    // ^-  noun-digest
-    // =-  ?>  ?=(noun-digest -)  -
-
-    // NOTE: reversed order
-    // %-  leaf-sequence:shape
-    let seq = leaf_sequence(stack, ten_cell)?;
-
-    // %-  hash-10
-    let hash = hash_10(stack, seq)?;
-
-    // %-  list-to-tuple
-    let tup = list_to_tuple_inplace(hash)?;
-
-    Ok(tup)
 }
 
 pub fn dyck(stack: &mut NockStack, t: Noun) -> Result {
@@ -2698,9 +2793,7 @@ pub fn mp_substitute_mega_impl(
                         // %rnd
                         MegaTyp::Rnd => {
                             // =/  rnd  (~(got by chal-map) idx)
-                            let rnd = chal_map
-                                .and_then(|v| v.get(stack, D(idx as u64)))
-                                .unwrap();
+                            let rnd = chal_map.and_then(|v| v.get(stack, D(idx as u64))).unwrap();
                             let rnd = rnd.as_atom()?.as_u64()?;
                             // (bpscal (bpow rnd exp) acc)
                             let powed = bpow(rnd, exp);

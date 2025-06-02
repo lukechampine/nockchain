@@ -18,6 +18,8 @@ strum.workspace = true
 nockvm.workspace = true
 nockvm_macros.workspace = true
 tracing.workspace = true
+array-concat.workspace = true
+array-util.workspace = true
 
 [dev-dependencies]
 quickcheck.workspace = true
