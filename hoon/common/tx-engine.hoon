@@ -429,12 +429,12 @@
       ?:  =(+(epoch-counter.par) blocks-per-epoch)  0
       +(epoch-counter.par)
     =/  height=@  +(height.par)
-    =/  msg=page-msg  (new:page-msg 'took zero knowledge')
+    :: =/  msg=page-msg  (new:page-msg 'took zero knowledge')
     %*  .  *form
       ::minimum information needed to generate a valid block commitment, so
       ::that a miner can start mining on an empty block.
       height                 height
-      msg                    msg
+      :: msg                    msg
       parent                 digest.par
       timestamp              (time-in-secs now)
       epoch-counter          epoch-counter
