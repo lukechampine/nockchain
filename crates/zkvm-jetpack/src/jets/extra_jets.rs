@@ -461,14 +461,14 @@ fn cut(
     Ok(new_indirect)
 }
 
-fn mont_reduction(stack: &mut NockStack, x: Atom) -> core::result::Result<Atom, JetErr> {
+fn mont_reduction(x: u128) -> u64 {
     // |=  x=melt
     // ^-  belt
     // ?>  (lth x rp)
     // assert!(x < RP);
 
     // ++  p  0xffff.ffff.0000.0001
-    let p = Atom::new(stack, 0xffffffff00000001);
+    let p: u64 = 0xffffffff00000001;
     // ++  r  0x1.0000.0000.0000.0000
     // ++  r-mod-p  4.294.967.295
     // ++  r2  0xffff.fffe.0000.0001
@@ -477,59 +477,49 @@ fn mont_reduction(stack: &mut NockStack, x: Atom) -> core::result::Result<Atom, 
     // ++  h  20.033.703.337
 
     // =/  x1  (cut 5 [1 1] x)
-    let x1 = cut(stack, 5, 1, 1, x)?;
+    let x1 = x as u64;
 
     // =/  x2  (rsh 6 x)
-    let x2 = rsh(stack, 6, 1, x)?;
+    let x2 = (x >> 64) as u64;
 
+    // NOTE: the rest is different. see: https://docs.rs/twenty-first/latest/src/twenty_first/math/b_field_element.rs.html#340-353
     // =/  c
     //   =/  x0  (end 5 x)
-    let x0 = cut(stack, 5, 0, 1, x)?;
-
     //   (lsh 5 (add x0 x1))
-    let c = math::add(stack, x0, x1);
-    let c = bits::lsh(stack, 5, 1, c)?.as_atom()?;
-
     // =/  f   (rsh 6 c)
-    let f = rsh(stack, 6, 1, c)?;
-
     // =/  d   (sub c (add x1 (mul f p)))
-    let d = math::mul(stack, f, p);
-    let d = math::add(stack, x1, d);
-    let d = math::sub(stack, c, d)?;
-
     // ?:  (gte x2 d)
-    if math::gte_b(stack, x2, d) {
-        //   (sub x2 d)
-        Ok(math::sub(stack, x2, d)?)
-    } else {
-        // (sub (add x2 p) d)
-        let v = math::add(stack, x2, p);
-        Ok(math::sub(stack, v, d)?)
-    }
+    //   (sub x2 d)
+    // (sub (add x2 p) d)
+
+    let (a, e) = x1.overflowing_add(x1 << 32);
+    let b = a.wrapping_sub(a >> 32).wrapping_sub(e as u64);
+
+    let (r, c) = x2.overflowing_sub(b);
+
+    r.wrapping_sub((1 + !p) * c as u64)
 }
 
 // ::  +montiply: computes a*b = (abr^{-1} mod p); note mul, not fmul: avoids mod p reduction!
-fn montiply(stack: &mut NockStack, a: Atom, b: Atom) -> core::result::Result<Atom, JetErr> {
+fn montiply(a: u64, b: u64) -> u64 {
     // |:  [a=`melt`r-mod-p b=`melt`r-mod-p]
     // ^-  belt
     // ~+
     // ?>  ?&((based a) (based b))
     // FIXME: verify based
-    let v = math::mul(stack, a, b);
-    mont_reduction(stack, v)
+    mont_reduction((a as u128) * (b as u128))
 }
 
 // ::  +montify: transform to Montgomery space, i.e. compute x•r = xr mod p
-fn montify(stack: &mut NockStack, x: Atom) -> core::result::Result<Atom, JetErr> {
+fn montify(x: u64) -> u64 {
     // ++  r2  0xffff.fffe.0000.0001
-    let r2 = Atom::new(stack, 0xfffffffe00000001);
+    let r2: u64 = 0xfffffffe00000001;
 
     // |=  x=belt
     // ^-  melt
     // ~+
     // (montiply x r2)
-    montiply(stack, x, r2)
+    montiply(x, r2)
 }
 
 // FIXME: grab rate from arm
@@ -570,8 +560,7 @@ pub fn init_tip5_state(stack: &mut NockStack, domain: DirectAtom) -> Result {
         // ^~((weld (reap rate 0) (reap capacity (montify 1))))
         tas!(b"fixed") => {
             let reaped = reap(stack, RATE, D(0))?;
-            let one = Atom::new(stack, 1);
-            let montified = montify(stack, one)?.as_noun();
+            let montified = Atom::new(stack, montify(1)).as_noun();
             let montified = produce_list(stack, 0, CAPACITY, |_, _| montified)?;
             list::weld(stack, reaped, montified)
         }
@@ -647,11 +636,9 @@ pub fn hash_10(
     // FIXME: acc verify this
 
     // =.  input   (turn input montify)
-    let input = array_util::try_map(input, |v| {
-        let v = Atom::new(stack, v.0);
-        montify(stack, v)
-    })?;
-    let input: [_; 11] = array_concat::concat_arrays!(input.map(|v| v.as_noun()), [D(0)]);
+    let input = input.map(|v| Belt(montify(v.0)));
+    let input: [_; 11] =
+        array_concat::concat_arrays!(input.map(|v| Atom::new(stack, v.0).as_noun()), [D(0)]);
     let input = T(stack, &input);
 
     // =/  sponge  (init-tip5-state %fixed)
@@ -666,7 +653,7 @@ pub fn hash_10(
     let mut ret = NounDigest::default();
 
     for (i, v) in HoonList::try_from(sponge)?.take(DIGEST_LENGTH).enumerate() {
-        ret[i] = Belt(mont_reduction(stack, v.as_atom()?)?.as_u64()?);
+        ret[i] = Belt(mont_reduction(v.as_atom()?.as_u64()? as _));
     }
 
     Ok(ret)
@@ -681,16 +668,8 @@ pub fn hash_belts_list(
     // =-  ?>  ?=(noun-digest -)  -
     // %-  list-to-tuple
     // (hash-varlen belts)
-    let mut belts = belts
-        .iter()
-        .map(|v| Atom::new(stack, v.0).as_noun())
-        .collect::<Vec<_>>();
-    belts.push(D(0));
-    let belts = T(stack, &belts);
     let hashed = hash_varlen(stack, belts)?;
-    let hashed = list_to_tuple_inplace(hashed)?;
-    let d = hashed.uncell()?;
-    Ok(try_map(d, |v| v.as_atom()?.as_u64().map(Belt))?)
+    Ok(hashed)
 }
 
 struct DP(Noun);
@@ -713,28 +692,21 @@ pub fn hash_noun_varlen(
     // |=  n=*
     // ^-  noun-digest
     // =/  leaf=(list @)  (leaf-sequence:shape n)
-    let leaf = leaf_sequence(stack, n)?;
+    let leaf = leaf_sequence_impl::<Belt>(n)?;
 
     // =/  dyck=(list @)  (dyck:shape n)
-    let dyck = dyck(stack, n)?;
+    let dyck = dyck(n)?;
 
     // =/  size  (lent leaf)
-    let size = list::lent(leaf)?;
+    let size = leaf.len();
 
     // (hash-belts-list [size (weld leaf dyck)])
-    let leaf_list = HoonList::try_from(leaf)?;
-    // NOTE: this may be empty, so vec it
-    let dyck_list = HoonList::try_from(dyck)
-        .map(|v| v.collect::<Vec<_>>())
-        .unwrap_or_default();
     let belts = [Belt(size as u64)]
         .into_iter()
-        .chain(
-            leaf_list
-                .chain(dyck_list)
-                .map(|v| Belt(v.as_atom().unwrap().as_u64().unwrap())),
-        )
+        .chain(leaf)
+        .chain(dyck)
         .collect::<Vec<_>>();
+
     hash_belts_list(stack, &belts)
 }
 
@@ -743,9 +715,8 @@ pub fn new_sponge(stack: &mut NockStack) -> Result {
 }
 
 pub fn absorb_sponge(
-    stack: &mut NockStack,
     sponge: &mut [u64; tip5::STATE_SIZE],
-    input: Noun,
+    input: &[Belt],
 ) -> core::result::Result<(), JetErr> {
     // |=  input=(list belt)
     // ^+  +>.$
@@ -756,25 +727,20 @@ pub fn absorb_sponge(
     // ?>  (levy input based)
 
     // =/  [q=@ r=@]  (dvr (lent input) rate)
-    let l = list::lent(input).inspect_err(|e| println!("1: {e:?}"))?;
+    let l = input.len();
     let q = l / RATE;
     let r = l % RATE;
 
     // ::  pad input with ~[1 0 ... 0] to be a multiple of rate
     // =.  input  (weld input [1 (reap (dec (sub rate r)) 0)])
     let v = RATE - r - 1;
-    let reapped = produce_list(stack, 0, v, |_, _| D(0)).inspect_err(|e| println!("2: {e:?}"))?;
-    let l = T(stack, &[D(1), reapped]);
-    let input = list::weld(stack, input, l).inspect_err(|e| println!("3: {e:?}"))?;
+    let mut input = input.to_vec();
+    input.push(Belt(1));
+    input.resize(input.len() + v, Belt(0));
 
     // ::  bring input into montgomery space
     // =.  input  (turn input montify)
-    let input = scag_map(stack, usize::MAX, input, |stack, v| {
-        montify(stack, v.as_atom().inspect_err(|e| println!("5: {e:?}"))?).map(Atom::as_noun)
-    })
-    .inspect_err(|e| println!("4: {e:?}"))?;
-
-    let mut input = HoonList::try_from(input).inspect_err(|e| println!("5: {e:?}"))?;
+    let mut input = input.into_iter().map(|v| montify(v.0));
 
     // |-
     // ?:  =(q 0)
@@ -784,10 +750,7 @@ pub fn absorb_sponge(
 
         // ++  absorb-rate
         //   ?>  =((lent input) rate)
-        let input_head = [(); RATE]
-            .map(|_| input.next().unwrap())
-            .map(|v| v.as_atom().unwrap())
-            .map(|v| v.as_u64().unwrap());
+        let input_head = [(); RATE].map(|_| input.next().unwrap());
 
         //   =.  sponge  (weld input (slag rate sponge))
         sponge[..RATE].copy_from_slice(&input_head);
@@ -798,25 +761,23 @@ pub fn absorb_sponge(
     Ok(())
 }
 
-pub fn squeeze_sponge(stack: &mut NockStack, spo: &mut [u64; tip5::STATE_SIZE]) -> Result {
+pub fn squeeze_sponge(spo: &mut [u64; tip5::STATE_SIZE]) -> [Belt; RATE] {
     // |.  ^+  [*(list belt) +.$]
     // =*  rng  +.$
     // ::  squeeze out the full rate and bring out of montgomery space
     // =/  output  (turn (scag rate sponge) mont-reduction)
-    let mut list = D(0);
-    for &e in spo[..RATE].iter().rev() {
-        let a = Atom::new(stack, e);
-        let a = mont_reduction(stack, a)?;
-        let n = a.as_noun();
-        list = T(stack, &[n, list]);
-    }
+    let ret = <[u64; RATE]>::try_from(&spo[..RATE]).unwrap();
+    let ret = ret.map(|v| Belt(mont_reduction(v as _)));
 
     tip5::permute(spo);
 
-    Ok(list)
+    ret
 }
 
-pub fn hash_varlen(stack: &mut NockStack, input: Noun) -> Result {
+pub fn hash_varlen(
+    stack: &mut NockStack,
+    input: &[Belt],
+) -> core::result::Result<NounDigest, JetErr> {
     // |=  input=(list belt)
     // ^-  (list belt)
     // =/  spo  (new:sponge)
@@ -824,14 +785,14 @@ pub fn hash_varlen(stack: &mut NockStack, input: Noun) -> Result {
     let mut spo = crate::jets::tip5_jets::hoon_list_to_sponge(spo)?;
 
     // =.  spo  (absorb:spo input)
-    absorb_sponge(stack, &mut spo, input).inspect_err(|e| println!("1: {e:?}"))?;
+    absorb_sponge(&mut spo, input).inspect_err(|e| println!("1: {e:?}"))?;
 
     // =^  output  spo
     //   (squeeze:spo)
-    let output = squeeze_sponge(stack, &mut spo).inspect_err(|e| println!("2: {e:?}"))?;
+    let output = squeeze_sponge(&mut spo);
 
     // (scag digest-length output)
-    scag(stack, DIGEST_LENGTH, output)
+    Ok(output[..DIGEST_LENGTH].try_into().unwrap())
 }
 
 pub fn hash_pairs(stack: &mut NockStack, sam: Noun) -> Result {
@@ -1064,7 +1025,7 @@ pub fn list_to_tuple_inplace(n: Noun) -> Result {
     }
 }
 
-pub fn dyck(stack: &mut NockStack, t: Noun) -> Result {
+pub fn dyck(t: Noun) -> core::result::Result<Vec<Belt>, JetErr> {
     // ~/  %dyck
     // |=  t=*
     // %-  flop
@@ -1074,20 +1035,51 @@ pub fn dyck(stack: &mut NockStack, t: Noun) -> Result {
     // ?@  t  vec
     // $(t +.t, vec [1 $(t -.t, vec [0 vec])])
     // TODO: make this non-recursive
-    fn recurse(stack: &mut NockStack, t: Noun, vec: Noun) -> Noun {
+    fn recurse(t: Noun, vec: Vec<Belt>) -> Vec<Belt> {
         let Ok(t) = t.as_cell() else {
             return vec;
         };
-        let head_vec = Cell::new(stack, D(0), vec);
-        let head_res = recurse(stack, t.head(), head_vec.as_noun());
-        let tail_vec = Cell::new(stack, D(1), head_res);
-        recurse(stack, t.tail(), tail_vec.as_noun())
+        let mut head_vec = vec![Belt(0)];
+        head_vec.extend_from_slice(&vec);
+        let head_res = recurse(t.head(), head_vec);
+        let mut tail_vec = vec![Belt(1)];
+        tail_vec.extend_from_slice(&head_res);
+        recurse(t.tail(), tail_vec)
     }
-    let res = recurse(stack, t, D(0));
-    list::flop(stack, res)
+    let mut res = recurse(t, vec![]);
+    res.reverse();
+    Ok(res)
 }
 
-pub fn leaf_sequence(stack: &mut NockStack, mut t: Noun) -> Result {
+pub fn leaf_sequence(stack: &mut NockStack, t: Noun) -> Result {
+    let mut r = leaf_sequence_impl(t)?;
+    r.push(D(0));
+    Ok(T(stack, &r))
+}
+
+trait FromAtom: Sized {
+    fn from_atom(a: Atom) -> core::result::Result<Self, JetErr>;
+}
+
+impl FromAtom for Atom {
+    fn from_atom(a: Atom) -> core::result::Result<Self, JetErr> {
+        Ok(a)
+    }
+}
+
+impl FromAtom for Noun {
+    fn from_atom(a: Atom) -> core::result::Result<Self, JetErr> {
+        Ok(a.as_noun())
+    }
+}
+
+impl FromAtom for Belt {
+    fn from_atom(a: Atom) -> core::result::Result<Self, JetErr> {
+        Ok(Belt(a.as_u64()?))
+    }
+}
+
+pub fn leaf_sequence_impl<T: FromAtom>(mut t: Noun) -> core::result::Result<Vec<T>, JetErr> {
     // ~/  %leaf-sequence
     // |=  t=*
     // %-  flop
@@ -1100,10 +1092,8 @@ pub fn leaf_sequence(stack: &mut NockStack, mut t: Noun) -> Result {
     // NOTE: Let's do this differently...
     // leaf-sequence constructs a flattened reversed list of all elems of t (as a list!), and then
     // reverses it. So, let's just flatten in-order...
-    let ret = Cell::new(stack, D(0), D(0));
-    let mut cur = ret;
-
-    let mut prev = D(0);
+    let mut ret = vec![];
+    let mut prev: Vec<Noun> = vec![];
 
     loop {
         match t.as_either_atom_cell() {
@@ -1111,24 +1101,17 @@ pub fn leaf_sequence(stack: &mut NockStack, mut t: Noun) -> Result {
                 // if t = atom:
 
                 //   push t to cur.head
-                unsafe { (*cur.to_raw_pointer_mut()).head = a.as_noun() };
+                ret.push(T::from_atom(a)?);
 
                 //   t = prev.pop_cell() else break
-                let Ok(prev_t) = prev.as_cell() else { break };
-                t = prev_t.head();
-                prev = prev_t.tail();
-
-                //   cur.tail = new_cell
-                //   cur = new_cell
-                let new_cell = Cell::new(stack, D(0), D(0));
-                unsafe { (*cur.to_raw_pointer_mut()).tail = new_cell.as_noun() };
-                cur = new_cell;
+                let Some(prev_t) = prev.pop() else { break };
+                t = prev_t;
             }
             Either::Right(c) => {
                 // else:
 
                 //  prev.push_cell(cell.tail)
-                prev = Cell::new(stack, c.tail(), prev).as_noun();
+                prev.push(c.tail());
 
                 //  t = cell.head
                 t = c.head();
@@ -1136,7 +1119,7 @@ pub fn leaf_sequence(stack: &mut NockStack, mut t: Noun) -> Result {
         }
     }
 
-    Ok(ret.as_noun())
+    Ok(ret)
 }
 
 fn pull_arg(inp: Noun) -> core::result::Result<(Noun, Noun), JetErr> {
