@@ -722,11 +722,16 @@ pub fn hash_noun_varlen(
     let size = list::lent(leaf)?;
 
     // (hash-belts-list [size (weld leaf dyck)])
+    let leaf_list = HoonList::try_from(leaf)?;
+    // NOTE: this may be empty, so vec it
+    let dyck_list = HoonList::try_from(dyck)
+        .map(|v| v.collect::<Vec<_>>())
+        .unwrap_or_default();
     let belts = [Belt(size as u64)]
         .into_iter()
         .chain(
-            HoonList::try_from(leaf)?
-                .chain(HoonList::try_from(dyck)?)
+            leaf_list
+                .chain(dyck_list)
                 .map(|v| Belt(v.as_atom().unwrap().as_u64().unwrap())),
         )
         .collect::<Vec<_>>();
@@ -984,19 +989,16 @@ fn hash_hashable_impl(
 
     match h {
         Hashable::Hash(d) => {
-            println!("HASH");
             // ?:  ?=(%hash -.h)
             //   p.h
             Ok(*d)
         }
         Hashable::Leaf(n) => {
-            println!("LEAF");
             // ?:  ?=(%leaf -.h)
             //   (hash-noun-varlen p.h)
             hash_noun_varlen(stack, *n)
         }
         Hashable::List(l) => {
-            println!("LIST");
             // ?:  ?=(%list -.h)
             //   (hash-noun-varlen (turn p.h hash-hashable))
             let mut v = vec![];
@@ -1011,7 +1013,6 @@ fn hash_hashable_impl(
             hash_noun_varlen(stack, v)
         }
         Hashable::Mary(ma) => {
-            println!("MARY");
             //   %-  hash-hashable
 
             //   :-  leaf+step.p.h
@@ -1032,7 +1033,6 @@ fn hash_hashable_impl(
             hash_hashable_impl(stack, &f)
         }
         Hashable::Pair(a, b) => {
-            println!("PAIR");
             // %-  hash-ten-cell
             // [$(h p.h) $(h q.h)]
             let p = hash_hashable_impl(stack, a)?;
