@@ -185,7 +185,7 @@ sam_jet! {
     do_init_mary_jet => do_init_mary,// 'jam 'create_jam_dir,
     // bpdiv_jet => bpdiv 'jam 'create_jam_dir,
     zero_extend_jet => zero_extend 'raw,// 'jam 'create_jam_dir,
-    bp_build_merk_heap_jet => bp_build_merk_heap 'jam 'create_jam_dir,
+    bp_build_merk_heap_jet => bp_build_merk_heap //'jam 'create_jam_dir,
 }
 
 /*
@@ -553,16 +553,15 @@ pub fn reap(stack: &mut NockStack, size: usize, val: Noun) -> Result {
     produce_list(stack, 0, size, |_, _| val)
 }
 
-pub fn init_tip5_state(stack: &mut NockStack, domain: DirectAtom) -> Result {
+pub fn init_tip5_state(domain: DirectAtom) -> core::result::Result<[u64; tip5::STATE_SIZE], JetErr> {
     match domain.data() {
         // ^~((reap state-size 0))
-        tas!(b"variable") => produce_list(stack, 0, STATE_SIZE, |_, _| D(0)),
+        tas!(b"variable") => Ok([0; tip5::STATE_SIZE]),
         // ^~((weld (reap rate 0) (reap capacity (montify 1))))
         tas!(b"fixed") => {
-            let reaped = reap(stack, RATE, D(0))?;
-            let montified = Atom::new(stack, montify(1)).as_noun();
-            let montified = produce_list(stack, 0, CAPACITY, |_, _| montified)?;
-            list::weld(stack, reaped, montified)
+            let zero = [0; RATE];
+            let mont = [montify(1); CAPACITY];
+            Ok(concat_arrays!(zero, mont))
         }
         _ => Err(BAIL_EXIT),
     }
@@ -622,7 +621,6 @@ pub fn slag(n: usize, list: Noun) -> Result {
 }
 
 pub fn hash_10(
-    stack: &mut NockStack,
     input: [Belt; 10],
 ) -> core::result::Result<NounDigest, JetErr> {
     // ::  +hash-10: hash list of 10 belts into a list of 5 belts
@@ -636,31 +634,22 @@ pub fn hash_10(
     // FIXME: acc verify this
 
     // =.  input   (turn input montify)
-    let input = input.map(|v| Belt(montify(v.0)));
-    let input: [_; 11] =
-        array_concat::concat_arrays!(input.map(|v| Atom::new(stack, v.0).as_noun()), [D(0)]);
-    let input = T(stack, &input);
+    let input = input.map(|v| montify(v.0));
 
     // =/  sponge  (init-tip5-state %fixed)
-    let sponge = init_tip5_state(stack, DirectAtom::new(tas!(b"fixed"))?)?;
+    let mut sponge = init_tip5_state(DirectAtom::new(tas!(b"fixed"))?)?;
 
     // =.  sponge  (permutation (weld input (slag rate sponge)))
-    let slagged = slag(RATE, sponge)?;
-    let welded = list::weld(stack, input, slagged)?;
-    let sponge = crate::jets::tip5_jets::permutation(stack, welded)?;
+    sponge[..RATE].copy_from_slice(&input);
+    tip5::permute(&mut sponge);
 
     // (turn (scag digest-length sponge) mont-reduction)
-    let mut ret = NounDigest::default();
+    let ret: [u64; DIGEST_LENGTH] = sponge[..DIGEST_LENGTH].try_into().unwrap();
 
-    for (i, v) in HoonList::try_from(sponge)?.take(DIGEST_LENGTH).enumerate() {
-        ret[i] = Belt(mont_reduction(v.as_atom()?.as_u64()? as _));
-    }
-
-    Ok(ret)
+    Ok(ret.map(|v| Belt(mont_reduction(v as _))))
 }
 
 pub fn hash_belts_list(
-    stack: &mut NockStack,
     belts: &[Belt],
 ) -> core::result::Result<NounDigest, JetErr> {
     // |=  belts=(list belt)
@@ -668,7 +657,7 @@ pub fn hash_belts_list(
     // =-  ?>  ?=(noun-digest -)  -
     // %-  list-to-tuple
     // (hash-varlen belts)
-    let hashed = hash_varlen(stack, belts)?;
+    let hashed = hash_varlen(belts)?;
     Ok(hashed)
 }
 
@@ -685,7 +674,6 @@ impl core::fmt::Debug for DP {
 }
 
 pub fn hash_noun_varlen(
-    stack: &mut NockStack,
     n: Noun,
 ) -> core::result::Result<NounDigest, JetErr> {
     // ~/  %hash-noun-varlen
@@ -707,11 +695,11 @@ pub fn hash_noun_varlen(
         .chain(dyck)
         .collect::<Vec<_>>();
 
-    hash_belts_list(stack, &belts)
+    hash_belts_list(&belts)
 }
 
-pub fn new_sponge(stack: &mut NockStack) -> Result {
-    init_tip5_state(stack, DirectAtom::new(tas!(b"variable"))?)
+pub fn new_sponge() -> core::result::Result<[u64; tip5::STATE_SIZE], JetErr> {
+    init_tip5_state(DirectAtom::new(tas!(b"variable"))?)
 }
 
 pub fn absorb_sponge(
@@ -775,14 +763,12 @@ pub fn squeeze_sponge(spo: &mut [u64; tip5::STATE_SIZE]) -> [Belt; RATE] {
 }
 
 pub fn hash_varlen(
-    stack: &mut NockStack,
     input: &[Belt],
 ) -> core::result::Result<NounDigest, JetErr> {
     // |=  input=(list belt)
     // ^-  (list belt)
     // =/  spo  (new:sponge)
-    let spo = new_sponge(stack)?;
-    let mut spo = crate::jets::tip5_jets::hoon_list_to_sponge(spo)?;
+    let mut spo = new_sponge()?;
 
     // =.  spo  (absorb:spo input)
     absorb_sponge(&mut spo, input).inspect_err(|e| println!("1: {e:?}"))?;
@@ -832,16 +818,19 @@ pub fn hash_pairs(stack: &mut NockStack, sam: Noun) -> Result {
         // Other branch:
         // (hash-10:tip5 (weld (snag b lis) (snag +(b) lis)))
         // :: (weld <...>)
-        let first: [_; DIGEST_LENGTH] = first.uncell()?;
+        let first: [_; DIGEST_LENGTH + 1] = first.uncell()?;
+        let first: [_; DIGEST_LENGTH] = first[..DIGEST_LENGTH].try_into().unwrap();
         let first = try_map(first, |v| v.as_atom()?.as_u64())?.map(Belt);
-        let second: [_; DIGEST_LENGTH] = second.uncell()?;
+        let second: [_; DIGEST_LENGTH + 1] = second.uncell()?;
+        let second: [_; DIGEST_LENGTH] = second[..DIGEST_LENGTH].try_into().unwrap();
         let second = try_map(second, |v| v.as_atom()?.as_u64())?.map(Belt);
         let welded = concat_arrays!(first, second);
         // hash-10:tip5
-        let hashed = hash_10(stack, welded)
+        let hashed = hash_10(welded)
             .inspect_err(|e| println!("hash_10 failed: {e:?}"))
             .map_err(|_| JetErr::Punt)?;
         let hashed = hashed.map(|v| Atom::new(stack, v.0).as_noun());
+        let hashed: [_; DIGEST_LENGTH + 1] = concat_arrays!(hashed, [D(0)]);
         let hashed = T(stack, &hashed);
 
         // Override the head
@@ -957,7 +946,7 @@ fn hash_hashable_impl(
         Hashable::Leaf(n) => {
             // ?:  ?=(%leaf -.h)
             //   (hash-noun-varlen p.h)
-            hash_noun_varlen(stack, *n)
+            hash_noun_varlen(*n)
         }
         Hashable::List(l) => {
             // ?:  ?=(%list -.h)
@@ -971,7 +960,7 @@ fn hash_hashable_impl(
             }
             v.push(D(0));
             let v = T(stack, &v);
-            hash_noun_varlen(stack, v)
+            hash_noun_varlen(v)
         }
         Hashable::Mary(ma) => {
             //   %-  hash-hashable
@@ -985,7 +974,7 @@ fn hash_hashable_impl(
             //   hash+(hash-belts-list (bpoly-to-list array:(~(change-step ave p.h) 1)))
             let dat = &ma.dat;
             let dat = unsafe { core::mem::transmute::<&[u64], &[Belt]>(dat) };
-            let hash = hash_belts_list(stack, dat).inspect_err(|e| trace!("hbl {e:?}"))?;
+            let hash = hash_belts_list(dat).inspect_err(|e| trace!("hbl {e:?}"))?;
             let hash = Hashable::Hash(hash);
 
             let f = Hashable::Pair(len.into(), hash.into());
@@ -999,7 +988,7 @@ fn hash_hashable_impl(
             let p = hash_hashable_impl(stack, a)?;
             let q = hash_hashable_impl(stack, b)?;
             let b = concat_arrays!(p, q);
-            hash_10(stack, b)
+            hash_10(b)
         }
     }
 }
