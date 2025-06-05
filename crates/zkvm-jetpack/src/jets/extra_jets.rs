@@ -175,7 +175,6 @@ sam_jet! {
     hash_hashable_jet => hash_hashable,// 'jam 'create_jam_dir,
     //hash_ten_cell_jet => hash_ten_cell,
     leaf_sequence_jet => leaf_sequence,
-    mp_substitute_mega_jet => mp_substitute_mega, //'jam_errs 'create_jam_dir,// 'log 'punt_errs 'jam 'run_once 'create_jam_dir,
     mp_substitute_ultra_jet => mp_substitute_ultra, // 'punt_errs 'run_once 'log 'jam 'create_jam_dir,
     compute_composition_poly_jet => compute_composition_poly, // 'punt_errs 'run_once 'log 'jam 'create_jam_dir,
     compute_deep_jet => compute_deep,// 'jam 'create_jam_dir,

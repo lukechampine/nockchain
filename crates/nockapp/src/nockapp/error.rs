@@ -1,6 +1,5 @@
 use crate::noun::slab::CueError;
 use crate::CrownError;
-use std::any::Any;
 use thiserror::Error;
 use tokio::sync::mpsc::error::{SendError, TrySendError};
 use tracing::error;
@@ -55,8 +54,8 @@ pub enum NockAppError {
     DecodeError(#[from] bincode::error::DecodeError),
     #[error("Send error: {0}")]
     SendError(#[from] tokio::sync::watch::error::SendError<u64>),
-    #[error("Serf thread error")]
-    SerfThreadError(Box<dyn Any + Send + 'static>),
+    #[error("Config error: {0}")]
+    ConfigError(#[from] config::ConfigError),
 }
 
 impl From<TrySendError<IOAction>> for NockAppError {

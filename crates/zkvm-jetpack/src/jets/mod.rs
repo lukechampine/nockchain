@@ -5,6 +5,7 @@ pub mod crypto_jets;
 pub mod extra_jets;
 pub mod fext_jets;
 pub mod mary_jets;
+pub mod mega_jets;
 pub mod tip5_jets;
 pub mod utils;
 pub mod verifier_jets;

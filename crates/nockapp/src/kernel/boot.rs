@@ -15,6 +15,9 @@ use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, EnvFilter};
 
+const DEFAULT_SAVE_INTERVAL: u64 = 30000;
+const DEFAULT_LOG_FILTER: &str = "info,slogger=trace";
+
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub enum TraceMode {
     File,
@@ -91,7 +94,7 @@ pub struct Cli {
 
     #[arg(
         long,
-        default_value = "1000",
+        default_value_t = DEFAULT_SAVE_INTERVAL,
         help = "Set the save interval for checkpoints (in ms)"
     )]
     pub save_interval: u64,
@@ -122,7 +125,7 @@ pub enum SetupResult {
 
 pub fn default_boot_cli(new: bool) -> Cli {
     Cli {
-        save_interval: 1000,
+        save_interval: DEFAULT_SAVE_INTERVAL,
         new,
         trace_opts: Default::default(),
         color: ColorChoice::Auto,
@@ -228,17 +231,12 @@ where
 }
 
 /// Initialize tracing with appropriate configuration based on CLI arguments.
-///
-/// This function sets up logging with different profiles:
-/// - Production mode: Full verbose logging as specified by log_level
-/// - Development mode: Cleaner, less noisy logging focused on application code
-///
-/// In development mode, the base filter is set to INFO level, with application
-/// modules set to DEBUG. Additional modules can be specified with dev_modules.
 pub fn init_default_tracing(cli: &Cli) {
     use tracing_subscriber::Layer;
 
-    let filter = EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(|_| "trace".to_string()));
+    let filter = EnvFilter::new(
+        std::env::var("RUST_LOG").unwrap_or_else(|_| DEFAULT_LOG_FILTER.to_string()),
+    );
     let use_ansi = cli.color == ColorChoice::Auto || cli.color == ColorChoice::Always;
 
     let tracy = if std::env::var("USE_TRACY").unwrap_or_else(|_| "false".to_string()) == "true" {
@@ -249,42 +247,39 @@ pub fn init_default_tracing(cli: &Cli) {
         None
     };
 
-    // Build and initialize the subscriber based on format and mode
-    match std::env::var("MINIMAL_LOG_FORMAT").unwrap_or_else(|_| "false".to_string()) == "true" {
-        // Default pretty format for production
-        false => {
-            let r = tracing_subscriber::registry()
-                .with(
-                    fmt::layer()
-                        .with_ansi(use_ansi)
-                        .with_target(true)
-                        .with_level(true),
-                )
-                .with(filter);
+    // Build and initialize the subscriber
+    // If RUST_LOG is set and MINIMAL_LOG_FORMAT is unset, we will do production-grade logging.
+    // Otherwise we will do more minimal logging suitable for an interactive terminal.
+    if std::env::var("MINIMAL_LOG_FORMAT").is_ok() || std::env::var("RUST_LOG").is_err() {
+        let fmt_layer = fmt::layer()
+            .with_ansi(use_ansi)
+            .event_format(MinimalFormatter);
 
-            if let Some((nockcode_filter, tracy)) = tracy {
-                r.with(tracy.with_filter(nockcode_filter))
-                    .init();
-            } else {
-                r.init();
-            }
+        let r = tracing_subscriber::registry()
+            .with(fmt_layer)
+            .with(filter);
+
+        if let Some((nockcode_filter, tracy)) = tracy {
+            r.with(tracy.with_filter(nockcode_filter))
+                .init();
+        } else {
+            r.init();
         }
-        // Development mode with minimal formatter
-        true => {
-            let fmt_layer = fmt::layer()
-                .with_ansi(use_ansi)
-                .event_format(MinimalFormatter);
-
-            let r = tracing_subscriber::registry()
-                .with(fmt_layer)
-                .with(filter);
-
-            if let Some((nockcode_filter, tracy)) = tracy {
-                r.with(tracy.with_filter(nockcode_filter))
-                    .init();
-            } else {
-                r.init();
-            }
+    } else {
+        let r = tracing_subscriber::registry()
+            .with(
+                fmt::layer()
+                    .with_ansi(use_ansi)
+                    .with_target(true)
+                    .with_level(true),
+            )
+            .with(filter);
+            
+        if let Some((nockcode_filter, tracy)) = tracy {
+            r.with(tracy.with_filter(nockcode_filter))
+                .init();
+        } else {
+            r.init();
         }
     }
 }
