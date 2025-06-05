@@ -7,7 +7,7 @@ use crate::form::bpoly::{
     bpsub_,
 };
 use crate::form::fext::{fadd, fadd_, fdiv_, finv_, fmul_, fneg, fneg_, fpow_};
-use crate::form::mary::MarySlice;
+use crate::form::mary::{Mary, MarySlice};
 use crate::form::math::poly::p_ntt;
 use crate::form::math::tip5;
 use crate::form::mega::{brek, MegaTyp};
@@ -553,7 +553,9 @@ pub fn reap(stack: &mut NockStack, size: usize, val: Noun) -> Result {
     produce_list(stack, 0, size, |_, _| val)
 }
 
-pub fn init_tip5_state(domain: DirectAtom) -> core::result::Result<[u64; tip5::STATE_SIZE], JetErr> {
+pub fn init_tip5_state(
+    domain: DirectAtom,
+) -> core::result::Result<[u64; tip5::STATE_SIZE], JetErr> {
     match domain.data() {
         // ^~((reap state-size 0))
         tas!(b"variable") => Ok([0; tip5::STATE_SIZE]),
@@ -620,9 +622,7 @@ pub fn slag(n: usize, list: Noun) -> Result {
     Ok(cell.as_noun())
 }
 
-pub fn hash_10(
-    input: [Belt; 10],
-) -> core::result::Result<NounDigest, JetErr> {
+pub fn hash_10(input: [Belt; 10]) -> core::result::Result<NounDigest, JetErr> {
     // ::  +hash-10: hash list of 10 belts into a list of 5 belts
     // |=  input=(list belt)
     // ::  output length is 5
@@ -649,9 +649,7 @@ pub fn hash_10(
     Ok(ret.map(|v| Belt(mont_reduction(v as _))))
 }
 
-pub fn hash_belts_list(
-    belts: &[Belt],
-) -> core::result::Result<NounDigest, JetErr> {
+pub fn hash_belts_list(belts: &[Belt]) -> core::result::Result<NounDigest, JetErr> {
     // |=  belts=(list belt)
     // ^-  noun-digest:tip5
     // =-  ?>  ?=(noun-digest -)  -
@@ -673,9 +671,7 @@ impl core::fmt::Debug for DP {
     }
 }
 
-pub fn hash_noun_varlen(
-    n: Noun,
-) -> core::result::Result<NounDigest, JetErr> {
+pub fn hash_noun_varlen(n: Noun) -> core::result::Result<NounDigest, JetErr> {
     // ~/  %hash-noun-varlen
     // |=  n=*
     // ^-  noun-digest
@@ -762,9 +758,7 @@ pub fn squeeze_sponge(spo: &mut [u64; tip5::STATE_SIZE]) -> [Belt; RATE] {
     ret
 }
 
-pub fn hash_varlen(
-    input: &[Belt],
-) -> core::result::Result<NounDigest, JetErr> {
+pub fn hash_varlen(input: &[Belt]) -> core::result::Result<NounDigest, JetErr> {
     // |=  input=(list belt)
     // ^-  (list belt)
     // =/  spo  (new:sponge)
@@ -781,74 +775,28 @@ pub fn hash_varlen(
     Ok(output[..DIGEST_LENGTH].try_into().unwrap())
 }
 
-pub fn hash_pairs(stack: &mut NockStack, sam: Noun) -> Result {
+pub fn hash_pairs(inp: &[NounDigest]) -> core::result::Result<Vec<NounDigest>, JetErr> {
     // |=  lis=(list (list @))
-    let lis = slot(sam, 1)?;
-    trace!("lis: {lis:?} | {}", list::lent(lis)?);
 
-    // If the list is empty, well, we can just reevaluate nock.
-    let Ok(mut cell) = lis.as_cell() else {
-        return Err(JetErr::Punt);
-    };
-
-    let ret = Cell::new(stack, D(0), D(0));
-    let mut cur = ret;
+    let mut ret = vec![];
 
     // NOTE: this loop essentially takes the input list, and gets its pairs, reducing the size in
     // half. That's the point of `++  indices`.
-    loop {
-        // :: (snag b lis)
-        let first = cell.head();
-
-        match cell.tail().as_either_atom_cell() {
-            Either::Left(_) => {
-                // NOTE: here we are not hashing!
-                // ?:  =(+(b) (lent lis))
-                //   (snag b lis)
-                unsafe { (*cur.to_raw_pointer_mut()).head = first };
-
-                break;
-            }
-            Either::Right(tail) => cell = tail,
-        }
-
-        // :: (snag +(b) lis)
-        let second = cell.head();
-
-        // Other branch:
+    for v in inp.chunks(2) {
+        let Ok([first, second]) = <[NounDigest; 2]>::try_from(v) else {
+            return jet_err();
+        };
         // (hash-10:tip5 (weld (snag b lis) (snag +(b) lis)))
         // :: (weld <...>)
-        let first: [_; DIGEST_LENGTH + 1] = first.uncell()?;
-        let first: [_; DIGEST_LENGTH] = first[..DIGEST_LENGTH].try_into().unwrap();
-        let first = try_map(first, |v| v.as_atom()?.as_u64())?.map(Belt);
-        let second: [_; DIGEST_LENGTH + 1] = second.uncell()?;
-        let second: [_; DIGEST_LENGTH] = second[..DIGEST_LENGTH].try_into().unwrap();
-        let second = try_map(second, |v| v.as_atom()?.as_u64())?.map(Belt);
         let welded = concat_arrays!(first, second);
         // hash-10:tip5
         let hashed = hash_10(welded)
             .inspect_err(|e| println!("hash_10 failed: {e:?}"))
             .map_err(|_| JetErr::Punt)?;
-        let hashed = hashed.map(|v| Atom::new(stack, v.0).as_noun());
-        let hashed: [_; DIGEST_LENGTH + 1] = concat_arrays!(hashed, [D(0)]);
-        let hashed = T(stack, &hashed);
-
-        // Override the head
-        unsafe { (*cur.to_raw_pointer_mut()).head = hashed };
-
-        let Ok(tail) = cell.tail().as_cell() else {
-            // We reached the end
-            break;
-        };
-        cell = tail;
-
-        // Append new list entry
-        let new_cell = Cell::new(stack, D(0), D(0));
-        unsafe { (*cur.to_raw_pointer_mut()).tail = new_cell.as_noun() };
-        cur = new_cell;
+        ret.push(hashed);
     }
 
-    Ok(ret.as_noun())
+    Ok(ret)
 }
 
 type NounDigest = [Belt; 5];
@@ -1068,7 +1016,7 @@ impl FromAtom for Belt {
     }
 }
 
-pub fn leaf_sequence_impl<T: FromAtom>(mut t: Noun) -> core::result::Result<Vec<T>, JetErr> {
+fn leaf_sequence_impl<T: FromAtom>(mut t: Noun) -> core::result::Result<Vec<T>, JetErr> {
     // ~/  %leaf-sequence
     // |=  t=*
     // %-  flop
@@ -2336,13 +2284,7 @@ pub fn bp_build_merk_heap(stack: &mut NockStack, ma: Noun) -> Result {
 
     //   :: each digest is 5 64-bit atoms; multiplying rounded-up array size by 5; shifting 64 bits left that many times; alloc'ed memory for new array?
     //   =/  high-bit  (lsh [6 (mul size 5)] 1)
-    let high_bit = bits::lsh(
-        stack,
-        6,
-        size as usize * 5,
-        DirectAtom::new(1).unwrap().as_atom(),
-    )?
-    .as_atom()?;
+    // NOTE: high bit is handled by new_handle_mut_mary
 
     //   ::  make leaves
     //   =/  res=(list (list @))
@@ -2356,10 +2298,10 @@ pub fn bp_build_merk_heap(stack: &mut NockStack, ma: Noun) -> Result {
         let t = snag_as_bpoly_mary(m, i as usize);
         let hbp = hashable_bpoly(stack, &t);
         let hh = hash_hashable(stack, hbp)?;
-        let leaf = leaf_sequence(stack, hh)?;
+        let leaf = leaf_sequence_impl::<Belt>(hh)?;
+        let leaf = leaf.try_into().unwrap();
         res_l.push(leaf);
     }
-    res_l.push(D(0));
 
     //   :+  5
     //     size
@@ -2389,21 +2331,26 @@ pub fn bp_build_merk_heap(stack: &mut NockStack, ma: Noun) -> Result {
     // ... then assemble the list into an atom
     // ... then add the high bit to the result
     // ... then build a mary out of the result
-    let mut res = T(stack, &res_l);
-    let mut curr = res;
-    let mut pairs = D(0);
-    for _ in 0..height {
-        if list::lent(curr)? == 1 {
+    let mut res = vec![];
+    let mut curr = res_l;
+    loop {
+        let osize = res.len();
+        res.resize(osize + curr.len(), NounDigest::default());
+        res.copy_within(0..osize, curr.len());
+        res[..curr.len()].copy_from_slice(&curr);
+
+        if curr.len() == 1 {
             break;
         }
-        pairs = hash_pairs(stack, curr)?;
-        res = list::weld(stack, pairs, res)?;
-        curr = pairs;
+
+        curr = hash_pairs(&curr)?;
     }
-    res = list::zing(stack, res)?;
-    let rep = bits::rep(stack, 6, 1, res)?;
-    res = math::add(stack, high_bit, rep).as_noun();
-    let heap_mary = T(stack, &[D(5), D(size as u64), res]);
+    assert_eq!(res.len(), size as usize);
+    // SAFETY: NounDigest is 5 u64, and it's all contiguous, therefore safe to transmute.
+    let d = unsafe { core::slice::from_raw_parts(res.as_ptr() as *const u64, res.len() * 5) };
+    let (res, res_ma) = new_handle_mut_mary(stack, 5, res.len());
+    res_ma.dat.copy_from_slice(d);
+    let heap_mary = finalize_mary(stack, res_ma.step as _, res_ma.len as _, res);
 
     // :-  (xeb len.array.m)          :: compute height of heap
     // :-  %+  snag-as-digest:tip5      :: retrieve the 0th entry of the heap and return it
