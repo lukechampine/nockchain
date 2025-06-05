@@ -277,6 +277,7 @@ pub async fn mining_attempt_inner(
 
     let cancel_task = async {
         cancel_notify.notified().await;
+        cancel_notify.notify_one();
         // FIXME HACK: allowing other miners 10 seconds to finish proofs before cancelling
         if mined.load(Ordering::Relaxed) {
             debug!("Waiting 10 secs for proof to finish...");
