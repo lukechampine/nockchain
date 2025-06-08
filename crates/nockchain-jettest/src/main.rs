@@ -18,7 +18,8 @@ use nockvm::mug::mug;
 use std::path::Path;
 use std::time::Instant;
 use tempfile::tempdir;
-use zkvm_jetpack::hot::{produce_prover_hot_state, EXTRA_JETS};
+use zkvm_jetpack::hot::produce_prover_hot_state;
+use zkvm_jetpack::jets::nbx::nbx_jets;
 
 pub enum MiningWire {
     Mined,
@@ -66,7 +67,12 @@ pub struct Test {
     effect: Option<String>,
     #[arg(short, long, help = "permute through jet combinations")]
     permute: bool,
-    #[arg(short, long, help = "maximum number of jets to disable when permuting", requires = "permute")]
+    #[arg(
+        short,
+        long,
+        help = "maximum number of jets to disable when permuting",
+        requires = "permute"
+    )]
     max_disable: Option<usize>,
 }
 
@@ -87,16 +93,12 @@ impl Test {
             max_disable,
         } = self;
 
-        let max_disable = if permute {
-            max_disable
-        } else {
-            Some(0)
-        };
+        let max_disable = if permute { max_disable } else { Some(0) };
 
         let hot_state = produce_prover_hot_state();
         let hot_state = [URBIT_HOT_STATE, &hot_state].concat();
-        let permute_jets = EXTRA_JETS;
-        let jet_names = EXTRA_JETS
+        let permute_jets = nbx_jets().collect::<Vec<_>>();
+        let jet_names = permute_jets
             .iter()
             .map(|(p, _, _)| std::str::from_utf8(p.last().unwrap().unwrap_left()).unwrap())
             .collect::<Vec<_>>();
