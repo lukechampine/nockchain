@@ -163,6 +163,7 @@ sam_jet! {
     do_init_mary_jet => do_init_mary,// 'jam 'create_jam_dir,
     // bpdiv_jet => bpdiv 'jam 'create_jam_dir,
     zero_extend_jet => zero_extend 'raw,// 'jam 'create_jam_dir,
+    weld_step_jet => weld_step 'raw,// 'jam 'create_jam_dir,
     bp_build_merk_heap_jet => bp_build_merk_heap, //'jam 'create_jam_dir,
     build_merk_heap_jet => build_merk_heap, //'jam 'create_jam_dir,
     bpeval_lift_jet => bpeval_lift_sam,
@@ -206,6 +207,21 @@ pub const NBX_ONE_JETS: &[HotEntry] = &[
         ],
         1,
         zero_extend_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ave"),
+            Left(b"weld-step"),
+        ],
+        1,
+        weld_step_jet,
     ),
     (
         &[

@@ -1,8 +1,11 @@
-use crate::form::mary::MarySlice;
+use crate::form::mary::{Mary, MarySlice};
 use crate::form::{BPolySlice, Belt, Element, FPolySlice, Felt};
 use crate::form::{BPolyVec, PolySlice};
+use crate::hand::handle::{finalize_mary, new_handle_mut_mary};
+use crate::jets::utils::jet_err;
 use crate::noun::noun_ext::NounExt;
 use either::Either;
+use ibig::Stack;
 use nockvm::interpreter::Context;
 use nockvm::jets::bits::util as bits;
 use nockvm::jets::list::util as list;
@@ -254,6 +257,59 @@ pub fn zero_extend(context: &mut Context, subject: Noun) -> Result {
     b[(step * n) as usize] = 1;
 
     Ok(T(&mut context.stack, &[D(step), D(len + n), out.as_noun()]))
+}
+
+pub fn weld_step(context: &mut Context, subject: Noun) -> Result {
+    let parent_core = slot(subject, 7)?;
+    let ma = slot(parent_core, 6)?;
+    let Ok(ma) = MarySlice::try_from(ma) else {
+        return jet_err();
+    };
+
+    // ~/  %weld-step
+    // |=  na=mary
+    let na = slot(subject, 6)?;
+    let Ok(na) = MarySlice::try_from(na) else {
+        return jet_err();
+    };
+
+    // ^-  mary
+    // ?>  =(len.array.ma len.array.na)
+    assert_eq!(ma.len, na.len);
+
+    // %+  roll  (range len.array.na)
+    // =/  mu=mary
+    //   :+  (add step.ma step.na)
+    //     len.array.ma
+    //   (lsh [6 (mul (add step.ma step.na) len.array.ma)] 1)
+    let mu_step = ma.step + na.step;
+    let (ret, mu) = new_handle_mut_mary(&mut context.stack, mu_step as usize, ma.len as usize);
+    // |=  [i=@ mu=_mu]
+    for (mu, (ma, na)) in mu.dat.chunks_exact_mut(mu_step as _).zip(
+        ma.dat
+            .chunks_exact(ma.step as _)
+            .zip(na.dat.chunks_exact(na.step as _)),
+    ) {
+        // =;  weld-dat
+        //   (~(stow ave mu) i weld-dat)
+        // =/  r1  (snag i)
+        // =?  r1  !=(step.ma 1)
+        //   (sub r1 (lsh [6 step.ma] 1))
+        // =/  r2  (~(snag ave na) i)
+        // =?  r2  !=(step.na 1)
+        //   (add (lsh [6 step.na] 1) r2)
+        // (add (lsh [6 step.ma] r2) r1)
+        let (m, n) = mu.split_at_mut(ma.len());
+        m.copy_from_slice(ma);
+        n.copy_from_slice(na);
+    }
+
+    Ok(finalize_mary(
+        &mut context.stack,
+        mu_step as usize,
+        ma.len as usize,
+        ret,
+    ))
 }
 
 pub fn bpcan(mut p: BPolyVec) -> BPolyVec {
