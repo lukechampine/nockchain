@@ -5,12 +5,15 @@ use nockvm::mem::NockStack;
 use nockvm::noun::*;
 use nockvm_macros::tas;
 
-use crate::form::binv;
+use crate::form::mary::{Mary, MarySlice};
+use crate::form::{binv, bsub};
 use crate::hand::handle::{finalize_mary, new_handle_mut_mary};
 use crate::hand::structs::{HoonList, HoonMap};
+use crate::jets::utils::jet_err;
 use crate::noun::noun_ext::NounExt;
 
 use super::one::P;
+use super::utils::xeb;
 
 // ::
 // ::  $zero-map: see description
@@ -342,4 +345,75 @@ pub fn rna_bfta_sam(stack: &mut NockStack, sam: Noun) -> Result {
         .collect::<Vec<_>>();
     ret.push(D(0));
     Ok(T(stack, &ret))
+}
+
+// TODO: move to seven.rs
+fn height_mary(p: MarySlice) -> u32 {
+    // ~/  %height-mary
+    // |=  p=mary
+    // ^-  @
+    // ~+
+    // =/  len  len.array.p
+    // ?:  =(len 0)  0
+    if p.len == 0 {
+        0
+    } else {
+        // (bex (xeb (dec len)))
+        1 << xeb((p.len - 1) as usize)
+    }
+}
+
+pub fn pad(stack: &mut NockStack, sam: Noun) -> Result {
+    // ~/  %pad
+    // |=  table=table-mary
+    let [header, p] = sam.uncell()?;
+    let Ok(p) = MarySlice::try_from(p) else {
+        return jet_err();
+    };
+    // NOTE: we rely on step being 14 for code to be correct (hoon doesn't check it, but it also
+    // does rely on it).
+    assert_eq!(p.step, 14);
+    // ^-  table-mary
+    // =/  height  (height-mary:tlib p.table)
+    let height = height_mary(p);
+    // ?:  =(height len.array.p.table)
+    if height == p.len {
+        // table
+        return Ok(sam);
+    }
+    // =/  rows  p.table
+    let mut rows = Mary {
+        step: p.step,
+        len: p.len,
+        dat: p.dat.to_vec(),
+    };
+    // =/  len  len.array.rows
+    let len = rows.len;
+    // NOTE: already covered
+    // ?:  =(height len)  table
+    // =;  padding=mary
+    //   table(p (~(weld ave rows) padding))
+    // %-  zing-bpolys
+    // %-  head
+    // %^  spin  (range (sub height len))  (sub len 1)
+    // |=  [i=@ ct=@]
+    let mut ct = len as u64 - 1;
+    for _ in 0..(height - len) {
+        // :_  (bsub ct 1)
+        // (init-bpoly ~[0 0 0 0 0 0 0 0 ct (binv ct) 0 0 0 0])
+        let a1 = [0; 8];
+        let a2 = [ct, binv(ct)];
+        let a3 = [0; 4];
+        ct = bsub(ct, 1);
+        rows.dat.extend_from_slice(&a1);
+        rows.dat.extend_from_slice(&a2);
+        rows.dat.extend_from_slice(&a3);
+        rows.len += 1;
+    }
+
+    let (ret_ma, h_ma) = new_handle_mut_mary(stack, rows.step as _, rows.len as _);
+    h_ma.dat.copy_from_slice(&rows.dat);
+    let ma = finalize_mary(stack, rows.step as _, rows.len as _, ret_ma);
+
+    Ok(T(stack, &[header, ma]))
 }

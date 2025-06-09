@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 use std::iter::{repeat, repeat_n};
 
-use crate::form::bpoly::{bp_hadamard_inplace, bpadd_in_place, bpscal_inplace};
+use crate::form::bpoly::{bp_coseword, bp_hadamard_inplace, bpadd_in_place, bpscal_inplace};
 use crate::form::fext::{fadd_, fdiv_, finv_, fmul_, fneg_};
+use crate::form::mary::MarySlice;
 use crate::form::math::poly::p_ntt;
 use crate::form::mega::{brek, MegaTyp};
 use crate::form::{
@@ -10,7 +11,9 @@ use crate::form::{
     PolyVec,
 };
 use crate::form::{poly::Poly, BPolySlice, Belt};
-use crate::hand::handle::{finalize_poly, new_handle_mut_felt, new_handle_mut_slice};
+use crate::hand::handle::{
+    finalize_mary, finalize_poly, new_handle_mut_felt, new_handle_mut_mary, new_handle_mut_slice,
+};
 use crate::hand::structs::{HoonList, HoonMap, HoonMapIter};
 use crate::noun::noun_ext::NounExt;
 use nockvm::jets::{JetErr, Result};
@@ -958,4 +961,44 @@ pub fn fat(stack: &mut NockStack, f: Felt) -> IndirectAtom {
     let (res, res_felt): (IndirectAtom, &mut Felt) = new_handle_mut_felt(stack);
     *res_felt = f;
     res
+}
+
+pub fn turn_coseword(stack: &mut NockStack, sam: Noun) -> Result {
+    // ~/  %turn-coseword
+    // |=  [polys=mary offset=belt order=@]
+    let [polys, offset, order] = sam.uncell()?;
+    let Ok(polys) = MarySlice::try_from(polys) else {
+        return jet_err();
+    };
+    let offset = offset.as_belt()?;
+    let order = order.as_direct()?.data() as u32;
+    let root = Belt(order as _).ordered_root()?;
+
+    // ^-  mary
+    // %-  zing-bpolys
+
+    // NOTE: bp-coseword returns a bpoly of length `order`
+    let (ret_ma, h_ma) = new_handle_mut_mary(stack, order as _, polys.len as _);
+
+    h_ma.dat
+        .chunks_mut(order as _)
+        .zip(polys.dat.chunks_exact(polys.step as _))
+        // %+  turn  (range len.array.polys)
+        // |=  i=@
+        // =/  bp=bpoly  (~(snag-as-bpoly ave polys) i)
+        .map(|(a, bp)| {
+            // SAFETY: Belt and u64 are equivalent
+            unsafe {
+                (
+                    core::mem::transmute::<&mut [u64], &mut [Belt]>(a),
+                    core::mem::transmute::<&[u64], &[Belt]>(bp),
+                )
+            }
+        })
+        .for_each(|(a, bp)| {
+            // (bp-coseword bp offset order)
+            a.copy_from_slice(&bp_coseword(bp, &offset, order, &root));
+        });
+
+    Ok(finalize_mary(stack, order as _, polys.len as _, ret_ma))
 }

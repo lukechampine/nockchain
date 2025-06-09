@@ -176,6 +176,8 @@ sam_jet! {
     rna_bfta_jet => rna_bfta_sam,
     build_jet => build,
     precompute_ntts_jet => precompute_ntts,
+    turn_coseword_jet => turn_coseword,
+    pad_jet => pad,
 }
 
 pub const NBX_ONE_JETS: &[HotEntry] = &[
@@ -314,6 +316,21 @@ pub const NBX_TWO_JETS: &[HotEntry] = &[
         ],
         1,
         bpeval_lift_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"turn-coseword"),
+        ],
+        1,
+        turn_coseword_jet,
     ),
 ];
 
@@ -504,6 +521,21 @@ pub const NBX_MEMORY_JETS: &[HotEntry] = &[
         ],
         1,
         build_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"memory-table"),
+            Left(b"funcs"),
+            Left(b"pad"),
+        ],
+        1,
+        pad_jet,
     ),
 ];
 
