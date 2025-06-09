@@ -168,7 +168,7 @@ pub fn compute_deep(stack: &mut NockStack, inp: Noun) -> Result {
             //   (bpoly-to-fpoly (~(snag-as-bpoly ave p) i))
             let mut lis = Vec::with_capacity(p.len as usize);
             for i in 0..p.len {
-                let bp = snag_as_bpoly_mary(p, i as usize);
+                let bp = snag_as_poly_mary(p, i as usize);
                 let fp = bpoly_to_fpoly(bp);
                 lis.push(fp);
             }

@@ -1,5 +1,5 @@
 use crate::form::mary::MarySlice;
-use crate::form::{BPolySlice, Belt};
+use crate::form::{BPolySlice, Belt, Element, FPolySlice, Felt};
 use crate::form::{BPolyVec, PolySlice};
 use crate::noun::noun_ext::NounExt;
 use either::Either;
@@ -121,20 +121,16 @@ pub fn snag_mary(stack: &mut NockStack, ma: MarySlice, i: usize) -> Atom {
     }
 }
 
-pub fn snag_as_bpoly_mary<'a>(ma: MarySlice<'a>, i: usize) -> BPolySlice<'a> {
-    // ~/  %snag-as-bpoly
+pub fn snag_as_poly_mary<'a, T: Element>(ma: MarySlice<'a>, i: usize) -> PolySlice<'a, T> {
+    // ~/  %snag-as-fpoly
     // |=  i=@
-    // ^-  bpoly
-    // :-  step.ma
-    // =/  dat  (snag i)
-    // ?:  =(step.ma 1)
-    //   =/  high-bit  (lsh [0 (mul (bex 6) step.ma)] 1)
-    //   (add high-bit dat)
-    // dat
+    // ^-  fpoly
+    // [(div step.ma 3) (snag i)]
     let dat = ma.dat.split_at(i * (ma.step as usize)).1;
     let dat = dat.split_at(ma.step as usize).0;
-    // SAFETY: Belt is a transparent wrapper for u64
-    PolySlice(unsafe { core::mem::transmute::<&[u64], &[Belt]>(dat) })
+    let len = dat.len() / T::len();
+    // SAFETY: The data slice always contains len number of poly elems inside
+    PolySlice(unsafe { core::slice::from_raw_parts(dat.as_ptr() as *const T, len) })
 }
 
 fn met_elt(elt: Atom) -> usize {

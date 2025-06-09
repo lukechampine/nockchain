@@ -1,5 +1,6 @@
 use crate::form::mary::MarySlice;
 use crate::form::math::tip5::{self, CAPACITY, DIGEST_LENGTH, RATE, STATE_SIZE};
+use crate::form::{Element, ElementEx, FPolySlice, Felt, PolySlice};
 use crate::form::{poly::Poly, BPolySlice, Belt};
 use crate::hand::handle::{
     finalize_mary, finalize_poly, new_handle_mut_mary, new_handle_mut_slice,
@@ -460,6 +461,14 @@ pub fn dyck(t: Noun) -> core::result::Result<Vec<Belt>, JetErr> {
 }
 
 pub fn bp_build_merk_heap(stack: &mut NockStack, ma: Noun) -> Result {
+    build_merk_heap_impl::<Belt>(stack, ma)
+}
+
+pub fn build_merk_heap(stack: &mut NockStack, ma: Noun) -> Result {
+    build_merk_heap_impl::<Felt>(stack, ma)
+}
+
+pub fn build_merk_heap_impl<T: ElementEx>(stack: &mut NockStack, ma: Noun) -> Result {
     // Definitions:
     // +$  mary  [step=@ =array]
     //    An array where each element is step size (in u64 words). This can be used to build
@@ -502,8 +511,8 @@ pub fn bp_build_merk_heap(stack: &mut NockStack, ma: Noun) -> Result {
     //     (leaf-sequence:shape (hash-hashable:tip5 (hashable-bpoly:tip5 t)))
     let mut res_l = Vec::with_capacity(m.len as usize);
     for i in 0..m.len {
-        let t = snag_as_bpoly_mary(m, i as usize);
-        let hbp = hashable_bpoly(stack, &t);
+        let t = snag_as_poly_mary::<T>(m, i as usize);
+        let hbp = hashable_poly(stack, &t);
         let hh = hash_hashable(stack, hbp)?;
         let leaf = leaf_sequence_impl::<Belt>(hh)?;
         let leaf = leaf.try_into().unwrap();
@@ -569,12 +578,12 @@ pub fn bp_build_merk_heap(stack: &mut NockStack, ma: Noun) -> Result {
     Ok(T(stack, &[D(height as u64), digest, heap_mary]))
 }
 
-fn hashable_bpoly(stack: &mut NockStack, bp: &BPolySlice) -> Noun {
-    let (ret, handle) = new_handle_mut_slice(stack, Some(bp.len()));
-    handle.copy_from_slice(&bp.0);
-    let ret = finalize_poly(stack, Some(bp.len()), ret);
+fn hashable_poly<T: ElementEx>(stack: &mut NockStack, p: &PolySlice<T>) -> Noun {
+    let (ret, handle) = new_handle_mut_slice(stack, Some(p.len()));
+    handle.copy_from_slice(&p.0);
+    let ret = finalize_poly(stack, Some(p.len()), ret);
 
-    T(stack, &[D(tas!(b"mary")), D(1), ret])
+    T(stack, &[D(tas!(b"mary")), D(T::len() as u64), ret])
 }
 
 fn snag_as_digest(stack: &mut NockStack, m: Noun, i: usize) -> Result {

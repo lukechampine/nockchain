@@ -155,7 +155,8 @@ sam_jet! {
     do_init_mary_jet => do_init_mary,// 'jam 'create_jam_dir,
     // bpdiv_jet => bpdiv 'jam 'create_jam_dir,
     zero_extend_jet => zero_extend 'raw,// 'jam 'create_jam_dir,
-    bp_build_merk_heap_jet => bp_build_merk_heap //'jam 'create_jam_dir,
+    bp_build_merk_heap_jet => bp_build_merk_heap, //'jam 'create_jam_dir,
+    build_merk_heap_jet => build_merk_heap, //'jam 'create_jam_dir,
 }
 
 pub const NBX_ONE_JETS: &[HotEntry] = &[
@@ -301,6 +302,40 @@ pub const NBX_THREE_JETS: &[HotEntry] = &[
         ],
         1,
         hash_hashable_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"misc-lib"),
+            Left(b"merkle"),
+            Left(b"bp-build-merk-heap"),
+        ],
+        1,
+        bp_build_merk_heap_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"misc-lib"),
+            Left(b"merkle"),
+            Left(b"build-merk-heap"),
+        ],
+        1,
+        build_merk_heap_jet,
     ),
 ];
 
