@@ -16,21 +16,20 @@ use crate::jets::bp_jets::init_bpoly;
 
 use super::utils::*;
 
+// ++  p  0xffff.ffff.0000.0001
+pub const P: u64 = 0xffffffff00000001;
+// ++  r  0x1.0000.0000.0000.0000
+// ++  r-mod-p  4.294.967.295
+// ++  r2  0xffff.fffe.0000.0001
+// ++  rp  0xffff.ffff.0000.0001.0000.0000.0000.0000
+// ++  g  7
+// ++  h  20.033.703.337
+
 pub fn mont_reduction(x: u128) -> u64 {
     // |=  x=melt
     // ^-  belt
     // ?>  (lth x rp)
     // assert!(x < RP);
-
-    // ++  p  0xffff.ffff.0000.0001
-    let p: u64 = 0xffffffff00000001;
-    // ++  r  0x1.0000.0000.0000.0000
-    // ++  r-mod-p  4.294.967.295
-    // ++  r2  0xffff.fffe.0000.0001
-    // ++  rp  0xffff.ffff.0000.0001.0000.0000.0000.0000
-    // ++  g  7
-    // ++  h  20.033.703.337
-
     // =/  x1  (cut 5 [1 1] x)
     let x1 = x as u64;
 
@@ -52,7 +51,7 @@ pub fn mont_reduction(x: u128) -> u64 {
 
     let (r, c) = x2.overflowing_sub(b);
 
-    r.wrapping_sub((1 + !p) * c as u64)
+    r.wrapping_sub((1 + !P) * c as u64)
 }
 
 // ::  +montiply: computes a*b = (abr^{-1} mod p); note mul, not fmul: avoids mod p reduction!

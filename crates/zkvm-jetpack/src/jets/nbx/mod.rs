@@ -1,13 +1,16 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use either::Either::*;
 use nockvm::interpreter::Context;
 use nockvm::jets::hot::{HotEntry, K_138};
 use nockvm::jets::util::slot;
-use nockvm::jets::Result;
+use nockvm::jets::{Result, JetErr};
 use nockvm::noun::*;
 
 mod eight;
 mod five;
 mod one;
+mod prover_memory;
 mod three;
 mod two;
 mod utils;
@@ -15,8 +18,11 @@ mod utils;
 use eight::*;
 use five::*;
 use one::*;
+use prover_memory::*;
 use three::*;
 use two::*;
+
+use super::utils::jet_err;
 
 macro_rules! jam_err {
     ($name:ident) => {{
@@ -166,6 +172,8 @@ sam_jet! {
     bstack_push_jet => bstack_push 'raw,
     fstack_push_jet => fstack_push 'raw,
     pstack_push_jet => pstack_push 'raw,
+    rna_bfta_jet => rna_bfta_sam,
+    build_jet => build,
 }
 
 pub const NBX_ONE_JETS: &[HotEntry] = &[
@@ -429,6 +437,38 @@ pub const NBX_EIGHT_JETS: &[HotEntry] = &[
     ),
 ];
 
+pub const NBX_MEMORY_JETS: &[HotEntry] = &[
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"memory-table"),
+            Left(b"rna-bfta"),
+        ],
+        1,
+        rna_bfta_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"memory-table"),
+            Left(b"funcs"),
+            Left(b"build"),
+        ],
+        1,
+        build_jet,
+    ),
+];
+
 pub fn nbx_jets() -> impl Iterator<Item = HotEntry> {
     [
         NBX_ONE_JETS,
@@ -436,6 +476,7 @@ pub fn nbx_jets() -> impl Iterator<Item = HotEntry> {
         NBX_THREE_JETS,
         NBX_FIVE_JETS,
         NBX_EIGHT_JETS,
+        NBX_MEMORY_JETS,
     ]
     .map(|v| v.iter().copied())
     .into_iter()

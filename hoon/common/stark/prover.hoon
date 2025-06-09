@@ -39,7 +39,7 @@
 :: generate-proof is the main body of the prover.
 ++  generate-proof
   :: Disabled jet hint for now, under development.
-  :: ~/  %generate-proof
+  ~/  %generate-proof
   |=  $:  header=noun-digest:tip5
           nonce=noun-digest:tip5
           pow-len=@
