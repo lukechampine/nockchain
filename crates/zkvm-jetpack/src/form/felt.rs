@@ -1,10 +1,12 @@
 use core::ops::{Add, Div, Mul, Neg, Sub};
 
+use nockvm::noun::Noun;
 use num_traits::{MulAdd, Pow};
 
 use crate::form::base::*;
 use crate::form::fext::*;
 use crate::form::{Belt, Felt};
+use crate::noun::noun_ext::NounExt;
 
 impl Felt {
     #[inline(always)]
@@ -81,6 +83,14 @@ impl core::ops::IndexMut<usize> for Felt {
 //         &self.0
 //     }
 // }
+
+impl TryFrom<Noun> for Felt {
+    type Error = nockvm::noun::Error;
+
+    fn try_from(value: Noun) -> std::result::Result<Self, Self::Error> {
+        value.as_felt().copied()
+    }
+}
 
 impl From<[Belt; 3]> for Felt {
     #[inline(always)]

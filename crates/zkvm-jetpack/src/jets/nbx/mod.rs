@@ -6,12 +6,14 @@ use nockvm::jets::Result;
 use nockvm::noun::*;
 
 mod eight;
+mod five;
 mod one;
 mod three;
 mod two;
 mod utils;
 
 use eight::*;
+use five::*;
 use one::*;
 use three::*;
 use two::*;
@@ -158,6 +160,12 @@ sam_jet! {
     bp_build_merk_heap_jet => bp_build_merk_heap, //'jam 'create_jam_dir,
     build_merk_heap_jet => build_merk_heap, //'jam 'create_jam_dir,
     bpeval_lift_jet => bpeval_lift_sam,
+    bstack_push_all_jet => bstack_push_all 'raw,
+    fstack_push_all_jet => fstack_push_all 'raw,
+    pstack_push_all_jet => pstack_push_all 'raw,
+    bstack_push_jet => bstack_push 'raw,
+    fstack_push_jet => fstack_push 'raw,
+    pstack_push_jet => pstack_push 'raw,
 }
 
 pub const NBX_ONE_JETS: &[HotEntry] = &[
@@ -355,6 +363,27 @@ pub const NBX_THREE_JETS: &[HotEntry] = &[
     ),
 ];
 
+pub const NBX_FIVE_JETS: &[HotEntry] = &[(
+    &[
+        K_138,
+        Left(b"one"),
+        Left(b"two"),
+        Left(b"tri"),
+        Left(b"qua"),
+        Left(b"pen"),
+        Left(b"zeke"),
+        Left(b"ext-field"),
+        Left(b"misc-lib"),
+        Left(b"proof-lib"),
+        Left(b"utils"),
+        Left(b"constraint-util"),
+        Left(b"pstack"),
+        Left(b"push-all"),
+    ],
+    1,
+    pstack_push_all_jet,
+)];
+
 pub const NBX_EIGHT_JETS: &[HotEntry] = &[
     (
         &[
@@ -401,8 +430,14 @@ pub const NBX_EIGHT_JETS: &[HotEntry] = &[
 ];
 
 pub fn nbx_jets() -> impl Iterator<Item = HotEntry> {
-    [NBX_ONE_JETS, NBX_TWO_JETS, NBX_THREE_JETS, NBX_EIGHT_JETS]
-        .map(|v| v.iter().copied())
-        .into_iter()
-        .flatten()
+    [
+        NBX_ONE_JETS,
+        NBX_TWO_JETS,
+        NBX_THREE_JETS,
+        NBX_FIVE_JETS,
+        NBX_EIGHT_JETS,
+    ]
+    .map(|v| v.iter().copied())
+    .into_iter()
+    .flatten()
 }

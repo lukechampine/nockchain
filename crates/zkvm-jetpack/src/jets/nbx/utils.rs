@@ -11,7 +11,7 @@ use nockvm::mug::mug;
 use nockvm::noun::*;
 use nockvm::serialization::jam;
 
-pub struct DP(Noun);
+pub struct DP(pub Noun);
 
 impl core::fmt::Debug for DP {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {

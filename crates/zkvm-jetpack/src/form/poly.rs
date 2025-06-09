@@ -1,7 +1,12 @@
 #![allow(clippy::len_without_is_empty)]
 
 use core::ops::*;
+use nockvm::mem::NockStack;
+use nockvm::noun::{Atom, Noun};
+use std::fmt::Debug;
 use std::slice::Iter;
+
+use crate::hand::handle::new_handle_mut_felt;
 
 use super::fext::fpow_;
 use super::{bpow, FieldError};
@@ -15,11 +20,18 @@ pub struct Belt(pub u64);
 pub struct Felt(pub [Belt; 3]);
 
 pub trait ElementEx:
-    Element + Copy + Mul<Output = Self> + Add<Output = Self> + Sub<Output = Self>
+    Element
+    + Copy
+    + Mul<Output = Self>
+    + Add<Output = Self>
+    + Sub<Output = Self>
+    + TryFrom<Noun>
+    + Debug
 {
     fn from_u64(v: u64) -> Self;
     fn epow(&self, p: u64) -> Self;
     fn ordered_root(order: u64) -> Result<Self, FieldError>;
+    fn as_noun(self, stack: &mut NockStack) -> Noun;
 }
 
 impl ElementEx for Belt {
@@ -34,6 +46,10 @@ impl ElementEx for Belt {
     fn ordered_root(order: u64) -> Result<Self, FieldError> {
         Belt(order).ordered_root()
     }
+
+    fn as_noun(self, stack: &mut NockStack) -> Noun {
+        Atom::new(stack, self.0).as_noun()
+    }
 }
 
 impl ElementEx for Felt {
@@ -47,6 +63,12 @@ impl ElementEx for Felt {
 
     fn ordered_root(order: u64) -> Result<Self, FieldError> {
         Felt::ordered_root(order)
+    }
+
+    fn as_noun(self, stack: &mut NockStack) -> Noun {
+        let (r, h) = new_handle_mut_felt(stack);
+        *h = self;
+        r.as_noun()
     }
 }
 
