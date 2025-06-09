@@ -50,6 +50,46 @@ pub fn bpoly_to_fpoly<'a>(bp: BPolySlice<'a>) -> FPolyVec {
     PolyVec(bp.data().iter().copied().map(Felt::lift).collect())
 }
 
+pub fn bpeval_lift_sam(stack: &mut NockStack, sam: Noun) -> Result {
+    // |:  [bp=`bpoly`one-bpoly x=`felt`(lift 1)]
+    let [bp, x] = sam.uncell()?;
+    let Ok(bp) = BPolySlice::try_from(bp) else {
+        return jet_err();
+    };
+    let x = x.as_felt().copied().unwrap_or_else(|_| Felt::one());
+    // ^-  felt
+    let (r, h) = new_handle_mut_felt(stack);
+    *h = bpeval_lift(bp, x);
+    Ok(r.as_noun())
+}
+
+// ::  +bpeval-lift: evaluate a bpoly at a felt
+pub fn bpeval_lift(bp: BPolySlice, x: Felt) -> Felt {
+    // |:  [bp=`bpoly`one-bpoly x=`felt`(lift 1)]
+    // ^-  felt
+    // ~+
+    // ?:  (bp-is-zero bp)  (lift 0)
+    if bp.is_zero() {
+        return Felt::zero();
+    }
+    // ?:  =(len.bp 1)  (lift (~(snag bop bp) 0))
+    if bp.len() == 1 {
+        return Felt::lift(bp.0[0]);
+    }
+    // =/  p  ~(to-poly bop bp)
+    // =.  p  (flop p)
+    // =/  res=@  (lift 0)
+    // |-
+    bp.0.iter().rev().fold(Felt::zero(), |res, p| {
+        // ?~  p    !!
+        // ?~  t.p
+        //   (fadd (fmul res x) (lift i.p))
+        // ::  based on p(x) = (...((a_n)x + a_{n-1})x + a_{n-2})x + ... )
+        // $(res (fadd (fmul res x) (lift i.p)), p t.p)
+        fadd_(&fmul_(&res, &x), &Felt::lift(*p))
+    })
+}
+
 pub fn fpadd<'a>(fp: FPolyVec, fq: FPolySlice) -> FPolyVec {
     // ~/  %fpadd
     // |:  [fp=`fpoly`zero-fpoly fq=`fpoly`zero-fpoly]

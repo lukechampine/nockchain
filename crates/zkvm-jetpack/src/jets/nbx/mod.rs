@@ -157,6 +157,7 @@ sam_jet! {
     zero_extend_jet => zero_extend 'raw,// 'jam 'create_jam_dir,
     bp_build_merk_heap_jet => bp_build_merk_heap, //'jam 'create_jam_dir,
     build_merk_heap_jet => build_merk_heap, //'jam 'create_jam_dir,
+    bpeval_lift_jet => bpeval_lift_sam,
 }
 
 pub const NBX_ONE_JETS: &[HotEntry] = &[
@@ -265,6 +266,21 @@ pub const NBX_TWO_JETS: &[HotEntry] = &[
         ],
         1,
         fp_ifft_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"bpeval-lift"),
+        ],
+        1,
+        bpeval_lift_jet,
     ),
 ];
 
