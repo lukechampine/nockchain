@@ -30,7 +30,14 @@ macro_rules! based {
 pub fn badd(a: u64, b: u64) -> u64 {
     based!(a);
     based!(b);
-    (((a as u128) + (b as u128)) % PRIME_128) as u64
+    // NOTE: see https://docs.rs/twenty-first/latest/src/twenty_first/math/b_field_element.rs.html#686-707
+    let (x1, c1) = a.overflowing_sub(PRIME - b);
+
+    if c1 {
+        x1.wrapping_add(PRIME)
+    } else {
+        x1
+    }
 }
 
 #[inline(always)]
@@ -47,12 +54,8 @@ pub fn bneg(a: u64) -> u64 {
 pub fn bsub(a: u64, b: u64) -> u64 {
     based!(a);
     based!(b);
-
-    if a >= b {
-        a - b
-    } else {
-        (((a as u128) + PRIME_128) - (b as u128)) as u64
-    }
+    let (x1, c1) = a.overflowing_sub(b);
+    x1.wrapping_sub((1 + !PRIME) * c1 as u64)
 }
 
 /// Reduce a 128 bit number
