@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::form::bpoly::{bpadd_in_place, bpdiv, bppow, bpscal_inplace, bpsub_};
+use crate::form::bpoly::{bp_fft, bpadd_in_place, bpdiv, bppow, bpscal_inplace, bpsub_};
 use crate::form::fext::{fmul_, fpow_};
 use crate::form::mary::MarySlice;
 use crate::form::{binv, bneg, BPolyVec, FPolySlice, FPolyVec, Felt, PolySlice, PolyVec};
@@ -707,4 +707,44 @@ fn degree_processing(
     }
 
     Ok(((1 << xeb((d - 1) as usize)) - 1, m))
+}
+
+pub fn precompute_ntts(stack: &mut NockStack, inp: Noun) -> Result {
+    // |=  [polys=mary height=@ ntt-len=@]
+    let [polys, height, ntt_len] = inp.uncell()?;
+    let polys = MarySlice::try_from(polys).or_else(|_| jet_err())?;
+    let height = height.as_direct()?.data() as usize;
+    let ntt_len = ntt_len.as_direct()?.data() as usize;
+
+    // ^-  bpoly
+    // %-  need
+    // =/  new-len  (mul height ntt-len)
+    let new_len = height * ntt_len;
+
+    // %+  roll  (range len.array.polys)
+    let acc = (0..polys.len).try_fold(PolyVec(vec![]), |mut acc, i| {
+        // |=  [i=@ acc=(unit bpoly)]
+        // =/  p=bpoly  (~(snag-as-bpoly ave polys) i)
+        let p = snag_as_poly_mary(polys, i as usize);
+        let mut p = PolyVec(p.0.to_vec());
+
+        // =/  fft=bpoly
+        //   (bp-fft (~(zero-extend bop p) (sub new-len len.p)))
+        p.0.resize(new_len, Belt(0));
+        let fft = bp_fft(&p.0)?;
+
+        // ?~  acc  (some fft)
+        // (some (~(weld bop u.acc) fft))
+        acc.0.extend_from_slice(&fft);
+        Ok::<_, JetErr>(acc)
+    })?;
+
+    assert!(!acc.0.is_empty());
+
+    let (res_atom, res_slice): (IndirectAtom, &mut [Belt]) =
+        new_handle_mut_slice(stack, Some(acc.len()));
+
+    res_slice.copy_from_slice(&acc.0);
+
+    Ok(finalize_poly(stack, Some(acc.len()), res_atom))
 }

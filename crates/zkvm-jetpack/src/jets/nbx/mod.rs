@@ -174,6 +174,7 @@ sam_jet! {
     pstack_push_jet => pstack_push 'raw,
     rna_bfta_jet => rna_bfta_sam,
     build_jet => build,
+    precompute_ntts_jet => precompute_ntts,
 }
 
 pub const NBX_ONE_JETS: &[HotEntry] = &[
@@ -434,6 +435,27 @@ pub const NBX_EIGHT_JETS: &[HotEntry] = &[
         ],
         1,
         compute_deep_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"misc-lib"),
+            Left(b"proof-lib"),
+            Left(b"utils"),
+            Left(b"fri"),
+            Left(b"table-lib"),
+            Left(b"stark-core"),
+            Left(b"precompute-ntts"),
+        ],
+        1,
+        precompute_ntts_jet,
     ),
 ];
 
