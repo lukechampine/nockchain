@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 
-use crate::form::bpoly::{bp_fft, bpadd_in_place, bpdiv, bppow, bpscal_inplace, bpsub_};
+use crate::form::bpoly::{bpadd_in_place, bpdiv, bppow, bpscal_inplace, bpsub_};
 use crate::form::fext::{fmul_, fpow_};
 use crate::form::mary::MarySlice;
+use crate::form::math::poly::*;
 use crate::form::{binv, bneg, BPolyVec, FPolySlice, FPolyVec, Felt, PolySlice, PolyVec};
 use crate::form::{poly::Poly, BPolySlice, Belt};
 use crate::hand::handle::{finalize_poly, new_handle_mut_slice};
@@ -533,7 +534,7 @@ fn process_composition_constraints(
     dyns: BPolySlice,
     fri_deg_bound: u64,
     max_height: u64,
-    chal_map: &BTreeMap<u64, Belt>,//Option<HoonMap>,
+    chal_map: &BTreeMap<u64, Belt>, //Option<HoonMap>,
 ) -> core::result::Result<BPolyVec, JetErr> {
     // |=  $:  constraints=(list [(list @) mp-ultra])
     //         trace=bpoly
@@ -734,6 +735,7 @@ pub fn precompute_ntts(stack: &mut NockStack, inp: Noun) -> Result {
     // %-  need
     // =/  new-len  (mul height ntt-len)
     let new_len = height * ntt_len;
+    let twiddles = p_fft_twiddles::<Belt>(new_len)?;
 
     // %+  roll  (range len.array.polys)
     let acc = (0..polys.len).try_fold(PolyVec(vec![]), |mut acc, i| {
@@ -745,7 +747,7 @@ pub fn precompute_ntts(stack: &mut NockStack, inp: Noun) -> Result {
         // =/  fft=bpoly
         //   (bp-fft (~(zero-extend bop p) (sub new-len len.p)))
         p.0.resize(new_len, Belt(0));
-        let fft = bp_fft(&p.0)?;
+        let fft = p_ntt_twiddled(p.0, &twiddles);
 
         // ?~  acc  (some fft)
         // (some (~(weld bop u.acc) fft))

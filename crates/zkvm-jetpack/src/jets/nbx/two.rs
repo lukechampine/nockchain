@@ -5,9 +5,11 @@ use crate::form::bpoly::{bp_coseword, bp_hadamard_inplace, bpadd_in_place, bpsca
 use crate::form::fext::{fadd_, fdiv_, finv_, fmul_, fneg_};
 use crate::form::mary::MarySlice;
 use crate::form::math::poly::p_ntt;
+use crate::form::math::poly::*;
 use crate::form::mega::{brek, MegaTyp};
 use crate::form::{
-    binv, bneg, bpow, BPolyVec, Element, ElementEx, FPolySlice, FPolySliceMut, FPolyVec, Felt, PolySlice, PolyVec
+    binv, bneg, bpow, BPolyVec, Element, ElementEx, FPolySlice, FPolySliceMut, FPolyVec, Felt,
+    PolySlice, PolyVec,
 };
 use crate::form::{poly::Poly, BPolySlice, Belt};
 use crate::hand::handle::{
@@ -393,7 +395,7 @@ pub fn mp_substitute_ultra(stack: &mut NockStack, inp: Noun) -> Result {
     Ok(T(stack, &ret))
 }
 
-trait Map<K, V> {
+pub trait Map<K, V> {
     fn get(&self, stack: &mut NockStack, k: K) -> Option<V>;
 }
 
@@ -565,10 +567,11 @@ fn fpmul_fast<'a>(fp: FPolyVec, fq: FPolyVec) -> FPolyVec {
     // %+  %~  zip  fop
     //     (fp-fft (~(zero-extend fop fp) (sub deg-prod deg-p)))
     let a = zeroextend_slice(fp, deg_prod, Felt::zero());
-    let mut a = fp_fft(a).unwrap();
+    let twiddles = p_fft_twiddles::<Felt>(a.0.len()).unwrap();
+    let mut a = PolyVec(p_ntt_twiddled(a.0, &twiddles));
     //   (fp-fft (~(zero-extend fop fq) (sub deg-prod deg-q)))
     let b = zeroextend_slice(fq, deg_prod, Felt::zero());
-    let mut b = fp_fft(b).unwrap();
+    let mut b = PolyVec(p_ntt_twiddled(b.0, &twiddles));
     // fmul
     a.0.truncate(b.0.len());
     b.0.truncate(a.0.len());
@@ -714,6 +717,7 @@ pub fn mp_substitute_mega(stack: &mut NockStack, inp: Noun) -> Result {
     Ok(ret)
 }
 
+#[inline(never)]
 pub fn mp_substitute_mega_impl(
     stack: &mut NockStack,
     p: Noun,
@@ -727,7 +731,8 @@ pub fn mp_substitute_mega_impl(
 
     // %+  roll  ~(tap by p)
     // |=  [[k=bpoly v=belt] acc=_zero-bpoly]
-    let acc = HoonMapIter::from(p).try_fold(PolyVec(vec![Belt(0)]), |acc, e| {
+    let mut acc = PolyVec(vec![Belt(0)]);
+    for e in HoonMapIter::from(p) {
         let [k, v] = e.uncell()?;
         let Ok(k) = BPolySlice::try_from(k) else {
             return jet_err();
@@ -744,7 +749,7 @@ pub fn mp_substitute_mega_impl(
 
         // ?:  =(v 0)  acc
         if v == Belt(0) {
-            return Ok(acc);
+            continue;
         }
 
         // %+  bpadd  acc
@@ -752,72 +757,80 @@ pub fn mp_substitute_mega_impl(
         // %+  roll  (range len.k)
         // |=  [i=@ acc=_ones]
         // ^-  bpoly
-        let mut rolled =
-            k.0.iter()
-                .copied()
-                // =/  [typ=mega-typ:mp-to-mega idx=@ exp=@ud]
-                //   (brek:mp-to-mega ter)
-                .map(brek)
-                .try_fold(ones, |mut acc, (typ, idx, exp)| {
-                    // ?-  typ
-                    Ok::<_, JetErr>(match typ {
-                        // %var
-                        MegaTyp::Var => {
-                            // =/  var=bpoly  (~(swag bop poly) (mul idx len) len)
-                            let a = poly.0.split_at(idx * len).1;
-                            let var = PolySlice(&a[..core::cmp::min(a.len(), len)]);
-                            // %+  roll  (range exp)
-                            // |=  [i=@ power=_acc]
-                            for _ in 0..exp {
-                                // (bp-hadamard power var)
-                                bp_hadamard_inplace(&mut acc.0, var.0);
-                            }
-                            acc
+        let mut rolled = {
+            let mut acc = ones;
+
+            for (typ, idx, exp) in
+                k.0.iter()
+                    .copied()
+                    // =/  [typ=mega-typ:mp-to-mega idx=@ exp=@ud]
+                    //   (brek:mp-to-mega ter)
+                    .map(brek)
+            {
+                // ?-  typ
+                match typ {
+                    // %var
+                    MegaTyp::Var => {
+                        // =/  var=bpoly  (~(swag bop poly) (mul idx len) len)
+                        let a = poly.0.split_at(idx * len).1;
+                        let var = PolySlice(&a[..core::cmp::min(a.len(), len)]);
+                        assert_eq!(var.0.len(), acc.0.len());
+                        assert!(var.0.len() % 16 == 0);
+                        assert!(acc.0.len() % 16 == 0);
+                        // %+  roll  (range exp)
+                        // |=  [i=@ power=_acc]
+                        for _ in 0..exp {
+                            // (bp-hadamard power var)
+                            bp_hadamard_inplace(&mut acc.0, var.0);
                         }
-                        // %rnd
-                        MegaTyp::Rnd => {
-                            // =/  rnd  (~(got by chal-map) idx)
-                            let rnd = chal_map.get(stack, idx as u64).unwrap();
-                            // (bpscal (bpow rnd exp) acc)
-                            let powed = bpow(rnd.0, exp);
-                            bpscal_inplace(Belt(powed), &mut acc.0);
-                            acc
+                    }
+                    // %rnd
+                    MegaTyp::Rnd => {
+                        // =/  rnd  (~(got by chal-map) idx)
+                        let rnd = chal_map.get(stack, idx as u64).unwrap();
+                        // (bpscal (bpow rnd exp) acc)
+                        let powed = bpow(rnd.0, exp);
+                        assert!(acc.len() % 16 == 0);
+                        bpscal_inplace(Belt(powed), &mut acc.0);
+                    }
+                    // %dyn
+                    MegaTyp::Dyn => {
+                        // =/  dyn  (~(snag bop dyns) idx)
+                        let _dyn = dyns.0[idx];
+                        // (bpscal (bpow dyn exp) acc)
+                        let powed = bpow(_dyn.0, exp);
+                        assert!(acc.len() % 16 == 0);
+                        bpscal_inplace(Belt(powed), &mut acc.0);
+                    }
+                    // %con
+                    MegaTyp::Con => {
+                        // acc
+                    }
+                    // %com
+                    MegaTyp::Com => {
+                        // =/  com=bpoly  (~(got by com-map) idx)
+                        let com = com_map.get(&(idx as u64)).unwrap();
+                        assert_eq!(com.0.len(), acc.0.len());
+                        assert!(com.0.len() % 16 == 0);
+                        assert!(acc.0.len() % 16 == 0);
+                        // %+  roll  (range exp)
+                        // |=  [i=@ power=_acc]
+                        for _ in 0..exp {
+                            // (bp-hadamard power com)
+                            bp_hadamard_inplace(&mut acc.0, &com.0);
                         }
-                        // %dyn
-                        MegaTyp::Dyn => {
-                            // =/  dyn  (~(snag bop dyns) idx)
-                            let _dyn = dyns.0[idx];
-                            // (bpscal (bpow dyn exp) acc)
-                            let powed = bpow(_dyn.0, exp);
-                            bpscal_inplace(Belt(powed), &mut acc.0);
-                            acc
-                        }
-                        // %con
-                        MegaTyp::Con => {
-                            // acc
-                            acc
-                        }
-                        // %com
-                        MegaTyp::Com => {
-                            // =/  com=bpoly  (~(got by com-map) idx)
-                            let com = com_map.get(&(idx as u64)).unwrap();
-                            // %+  roll  (range exp)
-                            // |=  [i=@ power=_acc]
-                            for _ in 0..exp {
-                                // (bp-hadamard power com)
-                                bp_hadamard_inplace(&mut acc.0, &com.0);
-                            }
-                            acc
-                        }
-                    })
-                })?;
+                    }
+                }
+            }
+            acc
+        };
 
         // :: %+  bpscal  v
         bpscal_inplace(v, &mut rolled.0);
         // :: %+  bpadd  acc
         bpadd_in_place(&mut rolled.0, &acc.0);
-        Ok(rolled)
-    })?;
+        acc = rolled;
+    }
 
     Ok(acc)
 }
