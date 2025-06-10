@@ -21,9 +21,10 @@ let
     doCheck = false;
   };
 
-  nockchain-base = craneLib.buildPackage (
+  nockchain-base = profile: craneLib.buildPackage (
   individualCrateArgs // {
     pname = "nockchain";
+    CARGO_PROFILE = profile;
     cargoExtraArgs = "-p nockchain";
     buildInputs = [ hoonc.hoonc ];
     preBuild = "mkdir -p assets && cp ${jam-pkg.dumb-jam.out} './assets/dumb.jam' && cp ${jam-pkg.miner-jam.out} './assets/miner.jam'";
@@ -46,7 +47,8 @@ let
 in
 {
   hoonc = hoonc.hoonc;
-  nockchain = nockchain-base;
+  nockchain = (nockchain-base "release");
+  nockchain-v4 = (nockchain-base "release-v4");
   nockchain-wallet = wallet-base;
   nockchain-metrics-exporter = metrics-exporter-base;
 }

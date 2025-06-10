@@ -32,7 +32,7 @@
         packages = code // {
           all = pkgs.symlinkJoin {
             name = "all";
-            paths = with code; [ hoonc nockchain nockchain-wallet ];
+            paths = with code; [ hoonc nockchain nockchain-wallet nockchain-metrics-exporter ];
           };
           default = packages.all;
         };

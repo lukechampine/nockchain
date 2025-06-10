@@ -1,0 +1,6 @@
+
+[profile.release-v4]
+inherits = "release"
+rustflags = ["-C", "target-cpu=x86-64-v4"]
+opt-level = 3
+lto = true
