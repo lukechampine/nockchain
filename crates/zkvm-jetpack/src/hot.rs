@@ -10,10 +10,9 @@ use crate::jets::fext_jets::*;
 use crate::jets::mary_jets::*;
 use crate::jets::mega_jets::*;
 use crate::jets::memory_table_jets::*;
+use crate::jets::nbx::*;
 use crate::jets::tip5_jets::*;
 use crate::jets::verifier_jets::*;
-use crate::jets::mega_jets::*;
-use crate::jets::nbx::*;
 
 pub fn produce_prover_hot_state() -> Vec<HotEntry> {
     let mut jets: Vec<HotEntry> = Vec::new();
@@ -32,21 +31,21 @@ pub fn produce_prover_hot_state() -> Vec<HotEntry> {
 }
 
 pub const ZKVM_TABLE_JETS: &[HotEntry] = &[
-    //(
-    //    &[
-    //        K_138,
-    //        Left(b"one"),
-    //        Left(b"two"),
-    //        Left(b"tri"),
-    //        Left(b"qua"),
-    //        Left(b"pen"),
-    //        Left(b"memory-table"),
-    //        Left(b"funcs"),
-    //        Left(b"extend"),
-    //    ],
-    //    1,
-    //    memory_extend_jet,
-    //),
+    /*(
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"memory-table"),
+            Left(b"funcs"),
+            Left(b"extend"),
+        ],
+        1,
+        memory_extend_jet,
+    ),*/
     (
         &[
             K_138,
@@ -553,25 +552,23 @@ pub const BASE_POLY_JETS: &[HotEntry] = &[
     ),
 ];
 
-pub const ZTD_JETS: &[HotEntry] = &[
-    (
-        &[
-            K_138,
-            Left(b"one"),
-            Left(b"two"),
-            Left(b"tri"),
-            Left(b"qua"),
-            Left(b"pen"),
-            Left(b"zeke"),
-            Left(b"ext-field"),
-            Left(b"misc-lib"),
-            Left(b"tip5-lib"),
-            Left(b"permutation"),
-        ],
-        1,
-        permutation_jet,
-    ),
-];
+pub const ZTD_JETS: &[HotEntry] = &[(
+    &[
+        K_138,
+        Left(b"one"),
+        Left(b"two"),
+        Left(b"tri"),
+        Left(b"qua"),
+        Left(b"pen"),
+        Left(b"zeke"),
+        Left(b"ext-field"),
+        Left(b"misc-lib"),
+        Left(b"tip5-lib"),
+        Left(b"permutation"),
+    ],
+    1,
+    permutation_jet,
+)];
 
 pub const KEYGEN_JETS: &[HotEntry] = &[(
     &[
@@ -600,22 +597,20 @@ pub const KEYGEN_JETS: &[HotEntry] = &[(
     argon2_jet,
 )];
 
-pub const UNVETTED_JETS: &[HotEntry] = &[
-    (
-        &[
-            K_138,
-            Left(b"one"),
-            Left(b"two"),
-            Left(b"tri"),
-            Left(b"qua"),
-            Left(b"pen"),
-            Left(b"zeke"),
-            Left(b"init-bpoly"),
-        ],
-        1,
-        init_bpoly_jet,
-    ),
-];
+pub const UNVETTED_JETS: &[HotEntry] = &[(
+    &[
+        K_138,
+        Left(b"one"),
+        Left(b"two"),
+        Left(b"tri"),
+        Left(b"qua"),
+        Left(b"pen"),
+        Left(b"zeke"),
+        Left(b"init-bpoly"),
+    ],
+    1,
+    init_bpoly_jet,
+)];
 
 pub const CURVE_JETS: &[HotEntry] = &[(
     &[
