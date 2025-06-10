@@ -20,13 +20,15 @@ pub struct Belt(pub u64);
 pub struct Felt(pub [Belt; 3]);
 
 pub trait ElementEx:
-    Element
+    'static
+    + Element
     + Copy
     + Mul<Output = Self>
     + Add<Output = Self>
     + Sub<Output = Self>
     + TryFrom<Noun>
     + Debug
+    + Ord
 {
     fn from_u64(v: u64) -> Self;
     fn epow(&self, p: u64) -> Self;
