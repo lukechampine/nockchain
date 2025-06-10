@@ -278,6 +278,13 @@
     :-  hash+p.form
     leaf+is-coinbase.form
   ::
+  ++  hashable-unit
+    |=  s=(unit form)
+    ^-  hashable:tip5
+    ?~  s  leaf+~
+    :-  leaf+~
+    (hashable u.s)
+  ::
   ++  hash  |=(=form (hash-hashable:tip5 (hashable form)))
   --
 ::
@@ -1728,9 +1735,20 @@
     |=  sed=form
     ^-  hashable:tip5
     :^    (hashable:lock recipient.sed)
-      (hashable:timelock-intent timelock-intent.sed)
+        (hashable:timelock-intent timelock-intent.sed)
       leaf+gift.sed
     hash+parent-hash.sed
+  ::
+  ::  +sig-hashable: we do include output-source since we still need to sign it
+  ++  sig-hashable
+    |=  sed=form
+    ^-  hashable:tip5
+    :*  (hashable-unit:source output-source.sed)
+        (hashable:lock recipient.sed)
+        (hashable:timelock-intent timelock-intent.sed)
+        leaf+gift.sed
+        hash+parent-hash.sed
+    ==
   ::
   ++  hash  |=(=form (hash-hashable:tip5 (hashable form)))
   --
@@ -1798,6 +1816,14 @@
     ^-  hashable:tip5
     ?~  form  leaf+form
     :+  (hashable:seed n.form)
+      $(form l.form)
+    $(form r.form)
+  ::
+  ++  sig-hashable
+    |=  =form
+    ^-  hashable:tip5
+    ?~  form  leaf+form
+    :+  (sig-hashable:seed n.form)
       $(form l.form)
     $(form r.form)
   ::
@@ -1960,7 +1986,7 @@
     |=  sen=form
     ^-  hash
     %-  hash-hashable:tip5
-    [(hashable:seeds seeds.sen) leaf+fee.sen]
+    [(sig-hashable:seeds seeds.sen) leaf+fee.sen]
   --
 ::
 ::  $input: note transfering assets to outputs within a tx

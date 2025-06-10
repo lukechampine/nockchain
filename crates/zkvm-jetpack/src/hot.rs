@@ -4,9 +4,12 @@ use nockvm::jets::hot::{HotEntry, K_138};
 use crate::jets::base_jets::*;
 use crate::jets::bp_jets::*;
 use crate::jets::cheetah_jets::*;
+use crate::jets::compute_table_jets::*;
 use crate::jets::crypto_jets::*;
 use crate::jets::fext_jets::*;
 use crate::jets::mary_jets::*;
+use crate::jets::mega_jets::*;
+use crate::jets::memory_table_jets::*;
 use crate::jets::tip5_jets::*;
 use crate::jets::verifier_jets::*;
 use crate::jets::mega_jets::*;
@@ -23,10 +26,73 @@ pub fn produce_prover_hot_state() -> Vec<HotEntry> {
     jets.extend(nbx_jets());
     jets.extend(XTRA_JETS);
     jets.extend(EXTENSION_FIELD_JETS);
+    jets.extend(ZKVM_TABLE_JETS);
 
     jets
 }
 
+pub const ZKVM_TABLE_JETS: &[HotEntry] = &[
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"memory-table"),
+            Left(b"funcs"),
+            Left(b"extend"),
+        ],
+        1,
+        memory_extend_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"memory-table"),
+            Left(b"funcs"),
+            Left(b"mega-extend"),
+        ],
+        1,
+        memory_mega_extend_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"compute-table"),
+            Left(b"funcs"),
+            Left(b"extend"),
+        ],
+        1,
+        compute_extend_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"compute-table"),
+            Left(b"funcs"),
+            Left(b"mega-extend"),
+        ],
+        1,
+        compute_mega_extend_jet,
+    ),
+];
 pub const XTRA_JETS: &[HotEntry] = &[
     (
         &[
@@ -113,6 +179,21 @@ pub const XTRA_JETS: &[HotEntry] = &[
         ],
         1,
         mpeval_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"mp-substitute-mega"),
+        ],
+        1,
+        mp_substitute_mega_jet,
     ),
 ];
 
@@ -252,21 +333,6 @@ pub const EXTENSION_FIELD_JETS: &[HotEntry] = &[
         1,
         fpow_jet,
     ),
-    (
-        &[
-            K_138,
-            Left(b"one"),
-            Left(b"two"),
-            Left(b"tri"),
-            Left(b"qua"),
-            Left(b"pen"),
-            Left(b"zeke"),
-            Left(b"ext-field"),
-            Left(b"mp-substitute-mega"),
-        ],
-        1,
-        mp_substitute_mega_jet,
-    ),
 ];
 
 pub const BASE_FIELD_JETS: &[HotEntry] = &[
@@ -353,6 +419,35 @@ pub const BASE_FIELD_JETS: &[HotEntry] = &[
         ],
         1,
         bpow_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"zeke"),
+            Left(b"bp-ntt"),
+        ],
+        1,
+        bp_ntt_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"bp-fft"),
+        ],
+        1,
+        bp_fft_jet,
     ),
 ];
 
@@ -455,34 +550,6 @@ pub const BASE_POLY_JETS: &[HotEntry] = &[
         1,
         bp_hadamard_jet,
     ),
-    (
-        &[
-            K_138,
-            Left(b"one"),
-            Left(b"two"),
-            Left(b"tri"),
-            Left(b"qua"),
-            Left(b"pen"),
-            Left(b"zeke"),
-            Left(b"bp-ntt"),
-        ],
-        1,
-        bp_ntt_jet,
-    ),
-    (
-        &[
-            K_138,
-            Left(b"one"),
-            Left(b"two"),
-            Left(b"tri"),
-            Left(b"qua"),
-            Left(b"pen"),
-            Left(b"zeke"),
-            Left(b"bp-fft"),
-        ],
-        1,
-        bp_fft_jet,
-    ),
 ];
 
 pub const ZTD_JETS: &[HotEntry] = &[
@@ -533,66 +600,6 @@ pub const KEYGEN_JETS: &[HotEntry] = &[(
 )];
 
 pub const UNVETTED_JETS: &[HotEntry] = &[
-    (
-        &[
-            K_138,
-            Left(b"one"),
-            Left(b"two"),
-            Left(b"tri"),
-            Left(b"qua"),
-            Left(b"pen"),
-            Left(b"zeke"),
-            Left(b"ext-field"),
-            Left(b"bp-ntt"),
-        ],
-        1,
-        bp_ntt_jet,
-    ),
-    (
-        &[
-            K_138,
-            Left(b"one"),
-            Left(b"two"),
-            Left(b"tri"),
-            Left(b"qua"),
-            Left(b"pen"),
-            Left(b"zeke"),
-            Left(b"ext-field"),
-            Left(b"bp-fft"),
-        ],
-        1,
-        bp_fft_jet,
-    ),
-    (
-        &[
-            K_138,
-            Left(b"one"),
-            Left(b"two"),
-            Left(b"tri"),
-            Left(b"qua"),
-            Left(b"pen"),
-            Left(b"zeke"),
-            Left(b"ext-field"),
-            Left(b"bp-shift"),
-        ],
-        1,
-        bp_shift_jet,
-    ),
-    (
-        &[
-            K_138,
-            Left(b"one"),
-            Left(b"two"),
-            Left(b"tri"),
-            Left(b"qua"),
-            Left(b"pen"),
-            Left(b"zeke"),
-            Left(b"ext-field"),
-            Left(b"bp-coseword"),
-        ],
-        1,
-        bp_coseword_jet,
-    ),
     (
         &[
             K_138,
