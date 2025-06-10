@@ -60,8 +60,29 @@ pub fn bsub(a: u64, b: u64) -> u64 {
 
 /// Reduce a 128 bit number
 #[inline(always)]
-pub fn reduce(n: u128) -> u64 {
-    (n % PRIME_128) as u64
+pub fn reduce(prod: u128) -> u64 {
+    // NOTE: see https://docs.rs/risc0-core/1.2.6/src/risc0_core/field/goldilocks.rs.html#299
+    let ret: u64 = prod as u64;
+    // Get two high words
+    let med: u32 = (prod >> 64) as u32;
+    let high: u32 = (prod >> 96) as u32;
+    // Subtract out high bits, add in P if underflow
+    let ret = if ret >= (high as u64) {
+        ret.wrapping_sub(high as u64)
+    } else {
+        ret.wrapping_sub(high as u64).wrapping_add(PRIME)
+    };
+
+    // Compute shifted effect of medium
+    let med_shift = ((med as u64) << 32).wrapping_sub(med as u64);
+
+    // Add in, if overflow, subtract a P
+    let ret = ret.wrapping_add(med_shift);
+    if ret < med_shift || ret >= PRIME {
+        ret.wrapping_sub(PRIME)
+    } else {
+        ret
+    }
 }
 
 #[inline(always)]
