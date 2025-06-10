@@ -32,21 +32,21 @@ pub fn produce_prover_hot_state() -> Vec<HotEntry> {
 }
 
 pub const ZKVM_TABLE_JETS: &[HotEntry] = &[
-    (
-        &[
-            K_138,
-            Left(b"one"),
-            Left(b"two"),
-            Left(b"tri"),
-            Left(b"qua"),
-            Left(b"pen"),
-            Left(b"memory-table"),
-            Left(b"funcs"),
-            Left(b"extend"),
-        ],
-        1,
-        memory_extend_jet,
-    ),
+    //(
+    //    &[
+    //        K_138,
+    //        Left(b"one"),
+    //        Left(b"two"),
+    //        Left(b"tri"),
+    //        Left(b"qua"),
+    //        Left(b"pen"),
+    //        Left(b"memory-table"),
+    //        Left(b"funcs"),
+    //        Left(b"extend"),
+    //    ],
+    //    1,
+    //    memory_extend_jet,
+    //),
     (
         &[
             K_138,
