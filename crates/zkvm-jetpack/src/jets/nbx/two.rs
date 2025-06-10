@@ -7,8 +7,7 @@ use crate::form::mary::MarySlice;
 use crate::form::math::poly::p_ntt;
 use crate::form::mega::{brek, MegaTyp};
 use crate::form::{
-    binv, bneg, bpow, BPolyVec, Element, FPolySlice, FPolySliceMut, FPolyVec, Felt, PolySlice,
-    PolyVec,
+    binv, bneg, bpow, BPolyVec, Element, ElementEx, FPolySlice, FPolySliceMut, FPolyVec, Felt, PolySlice, PolyVec
 };
 use crate::form::{poly::Poly, BPolySlice, Belt};
 use crate::hand::handle::{
@@ -378,7 +377,7 @@ pub fn mp_substitute_ultra(stack: &mut NockStack, inp: Noun) -> Result {
         return jet_err();
     };
 
-    let ret = mp_substitute_ultra_impl(stack, p, trace_evals, height, chal_map, dyns)?;
+    let ret = mp_substitute_ultra_impl(stack, p, trace_evals, height, &chal_map, dyns)?;
     let mut ret = ret
         .into_iter()
         .map(|v| {
@@ -394,12 +393,52 @@ pub fn mp_substitute_ultra(stack: &mut NockStack, inp: Noun) -> Result {
     Ok(T(stack, &ret))
 }
 
+trait Map<K, V> {
+    fn get(&self, stack: &mut NockStack, k: K) -> Option<V>;
+}
+
+trait MapKey {
+    fn as_noun(&self, stack: &mut NockStack) -> Noun;
+}
+
+impl<T: ElementEx> MapKey for T {
+    fn as_noun(&self, stack: &mut NockStack) -> Noun {
+        ElementEx::as_noun(*self, stack)
+    }
+}
+
+impl MapKey for u64 {
+    fn as_noun(&self, stack: &mut NockStack) -> Noun {
+        Atom::new(stack, *self).as_noun()
+    }
+}
+
+impl<K: MapKey, V: TryFrom<Noun>> Map<K, V> for HoonMap {
+    fn get(&self, stack: &mut NockStack, k: K) -> Option<V> {
+        let k = k.as_noun(stack);
+        let v = self.get(stack, k)?;
+        V::try_from(v).ok()
+    }
+}
+
+impl<K: MapKey, V: TryFrom<Noun>> Map<K, V> for Option<HoonMap> {
+    fn get(&self, stack: &mut NockStack, k: K) -> Option<V> {
+        self.and_then(|v| Map::get(&v, stack, k))
+    }
+}
+
+impl<K: Ord, V: Copy> Map<K, V> for BTreeMap<K, V> {
+    fn get(&self, _: &mut NockStack, k: K) -> Option<V> {
+        BTreeMap::get(self, &k).copied()
+    }
+}
+
 pub fn mp_substitute_ultra_impl(
     stack: &mut NockStack,
     p: Noun,
     trace_evals: BPolySlice,
     height: u64,
-    chal_map: Option<HoonMap>,
+    chal_map: &impl Map<u64, Belt>,
     dyns: BPolySlice,
 ) -> core::result::Result<Vec<BPolyVec>, JetErr> {
     // ^-  (list bpoly)
@@ -663,7 +702,7 @@ pub fn mp_substitute_mega(stack: &mut NockStack, inp: Noun) -> Result {
         p,
         trace_evals,
         height.as_atom()?.as_u64()?,
-        chal_map,
+        &chal_map,
         dyns,
         &com_map,
     )?;
@@ -680,7 +719,7 @@ pub fn mp_substitute_mega_impl(
     p: Noun,
     trace_evals: BPolySlice,
     height: u64,
-    chal_map: Option<HoonMap>,
+    chal_map: &impl Map<u64, Belt>,
     dyns: BPolySlice,
     com_map: &BTreeMap<u64, BPolyVec>,
 ) -> core::result::Result<BPolyVec, JetErr> {
@@ -738,10 +777,9 @@ pub fn mp_substitute_mega_impl(
                         // %rnd
                         MegaTyp::Rnd => {
                             // =/  rnd  (~(got by chal-map) idx)
-                            let rnd = chal_map.and_then(|v| v.get(stack, D(idx as u64))).unwrap();
-                            let rnd = rnd.as_atom()?.as_u64()?;
+                            let rnd = chal_map.get(stack, idx as u64).unwrap();
                             // (bpscal (bpow rnd exp) acc)
-                            let powed = bpow(rnd, exp);
+                            let powed = bpow(rnd.0, exp);
                             bpscal_inplace(Belt(powed), &mut acc.0);
                             acc
                         }

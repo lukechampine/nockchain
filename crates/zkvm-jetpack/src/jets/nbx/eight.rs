@@ -6,7 +6,7 @@ use crate::form::mary::MarySlice;
 use crate::form::{binv, bneg, BPolyVec, FPolySlice, FPolyVec, Felt, PolySlice, PolyVec};
 use crate::form::{poly::Poly, BPolySlice, Belt};
 use crate::hand::handle::{finalize_poly, new_handle_mut_slice};
-use crate::hand::structs::{HoonList, HoonMap};
+use crate::hand::structs::{HoonList, HoonMap, HoonMapIter};
 use crate::jets::utils::det_err;
 use crate::noun::noun_ext::NounExt;
 use nockvm::jets::{JetErr, Result};
@@ -382,11 +382,25 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
         return jet_err();
     };
 
-    let [constraint_map, constraint_counts, composition_chals, chal_map, dyn_map] = [
+    let chal_map = HoonMapIter::try_from(chal_map)
+        .ok()
+        .into_iter()
+        .flat_map(|v| {
+            v.map(|v| {
+                let [ck, cv] = v
+                    .uncell()
+                    .unwrap()
+                    .map(|v| v.as_atom().unwrap().as_u64().unwrap());
+                (ck, Belt(cv))
+            })
+        })
+        .collect::<BTreeMap<u64, Belt>>();
+
+    let [constraint_map, constraint_counts, composition_chals, /*chal_map,*/ dyn_map] = [
         constraint_map,
         constraint_counts,
         composition_chals,
-        chal_map,
+        /*chal_map,*/
         dyn_map,
     ]
     .map(HoonMap::try_from)
@@ -491,7 +505,7 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
                 dyns,
                 fri_deg_bound,
                 max_height,
-                chal_map,
+                &chal_map,
             )?;
             // %-  bpdiv
             // :_  boundary-zerofier
@@ -519,7 +533,7 @@ fn process_composition_constraints(
     dyns: BPolySlice,
     fri_deg_bound: u64,
     max_height: u64,
-    chal_map: Option<HoonMap>,
+    chal_map: &BTreeMap<u64, Belt>,//Option<HoonMap>,
 ) -> core::result::Result<BPolyVec, JetErr> {
     // |=  $:  constraints=(list [(list @) mp-ultra])
     //         trace=bpoly
