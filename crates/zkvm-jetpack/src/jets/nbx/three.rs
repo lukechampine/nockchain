@@ -1,6 +1,11 @@
+use std::mem::MaybeUninit;
+
 use crate::form::mary::MarySlice;
 use crate::form::math::tip5::{self, CAPACITY, DIGEST_LENGTH, RATE, STATE_SIZE};
-use crate::form::{montify, mont_reduction, Element, ElementEx, FPolySlice, Felt, PolySlice};
+use crate::form::{
+    mont_reduction, montify, BPolyVec, Element, ElementEx, FPolySlice, Felt, Melt, PolySlice,
+    PolyVec,
+};
 use crate::form::{poly::Poly, BPolySlice, Belt};
 use crate::hand::handle::{
     finalize_mary, finalize_poly, new_handle_mut_mary, new_handle_mut_slice,
@@ -92,21 +97,21 @@ fn leaf_sequence_impl<T: FromAtom>(mut t: Noun) -> core::result::Result<Vec<T>, 
     Ok(ret)
 }
 
-pub fn init_tip5_state(domain: DirectAtom) -> core::result::Result<[u64; STATE_SIZE], JetErr> {
+pub fn init_tip5_state(domain: DirectAtom) -> core::result::Result<[Melt; STATE_SIZE], JetErr> {
     match domain.data() {
         // ^~((reap state-size 0))
-        tas!(b"variable") => Ok([0; STATE_SIZE]),
+        tas!(b"variable") => Ok([Melt(0); STATE_SIZE]),
         // ^~((weld (reap rate 0) (reap capacity (montify 1))))
         tas!(b"fixed") => {
-            let zero = [0; RATE];
-            let mont = [montify(1); CAPACITY];
+            let zero = [Melt(0); RATE];
+            let mont = [Melt::one(); CAPACITY];
             Ok(concat_arrays!(zero, mont))
         }
         _ => Err(BAIL_EXIT),
     }
 }
 
-pub fn hash_10(input: [Belt; 10]) -> core::result::Result<NounDigest, JetErr> {
+pub fn hash_10(input: [Melt; 10]) -> core::result::Result<NounDigest, JetErr> {
     // ::  +hash-10: hash list of 10 belts into a list of 5 belts
     // |=  input=(list belt)
     // ::  output length is 5
@@ -118,7 +123,7 @@ pub fn hash_10(input: [Belt; 10]) -> core::result::Result<NounDigest, JetErr> {
     // FIXME: acc verify this
 
     // =.  input   (turn input montify)
-    let input = input.map(|v| montify(v.0));
+    // let input = input.map(|v| montify(v.0));
 
     // =/  sponge  (init-tip5-state %fixed)
     let mut sponge = init_tip5_state(DirectAtom::new(tas!(b"fixed"))?)?;
@@ -128,19 +133,9 @@ pub fn hash_10(input: [Belt; 10]) -> core::result::Result<NounDigest, JetErr> {
     tip5::permute(&mut sponge);
 
     // (turn (scag digest-length sponge) mont-reduction)
-    let ret: [u64; DIGEST_LENGTH] = sponge[..DIGEST_LENGTH].try_into().unwrap();
+    let ret: [Melt; DIGEST_LENGTH] = sponge[..DIGEST_LENGTH].try_into().unwrap();
 
-    Ok(ret.map(|v| Belt(mont_reduction(v as _))))
-}
-
-pub fn hash_belts_list(belts: &[Belt]) -> core::result::Result<NounDigest, JetErr> {
-    // |=  belts=(list belt)
-    // ^-  noun-digest:tip5
-    // =-  ?>  ?=(noun-digest -)  -
-    // %-  list-to-tuple
-    // (hash-varlen belts)
-    let hashed = hash_varlen(belts)?;
-    Ok(hashed)
+    Ok(ret)
 }
 
 pub fn hash_noun_varlen(n: Noun) -> core::result::Result<NounDigest, JetErr> {
@@ -163,16 +158,16 @@ pub fn hash_noun_varlen(n: Noun) -> core::result::Result<NounDigest, JetErr> {
         .chain(dyck)
         .collect::<Vec<_>>();
 
-    hash_belts_list(&belts)
+    hash_varlen(&belts)
 }
 
-pub fn new_sponge() -> core::result::Result<[u64; tip5::STATE_SIZE], JetErr> {
+pub fn new_sponge() -> core::result::Result<[Melt; tip5::STATE_SIZE], JetErr> {
     init_tip5_state(DirectAtom::new(tas!(b"variable"))?)
 }
 
-pub fn absorb_sponge(
-    sponge: &mut [u64; tip5::STATE_SIZE],
-    input: &[Belt],
+pub fn absorb_sponge<T: Into<Melt> + Copy>(
+    sponge: &mut [Melt; tip5::STATE_SIZE],
+    input: &[T],
 ) -> core::result::Result<(), JetErr> {
     // |=  input=(list belt)
     // ^+  +>.$
@@ -189,14 +184,33 @@ pub fn absorb_sponge(
 
     // ::  pad input with ~[1 0 ... 0] to be a multiple of rate
     // =.  input  (weld input [1 (reap (dec (sub rate r)) 0)])
-    let v = RATE - r - 1;
-    let mut input = input.to_vec();
-    input.push(Belt(1));
-    input.resize(input.len() + v, Belt(0));
-
     // ::  bring input into montgomery space
     // =.  input  (turn input montify)
-    let mut input = input.into_iter().map(|v| montify(v.0));
+    let (input, end) = input.split_at(RATE * q);
+    let mut input = input
+        .chunks_exact(RATE)
+        .map(|i| {
+            <[T; RATE]>::try_from(i)
+                .unwrap()
+                .map(<T as Into<Melt>>::into)
+        })
+        .chain([{
+            let mut r = [MaybeUninit::uninit(); RATE];
+            let (a, b) = r.split_at_mut(end.len());
+            a.iter_mut()
+                .zip(
+                    end.iter()
+                        .copied()
+                        .map(<T as Into<Melt>>::into)
+                        .map(MaybeUninit::new),
+                )
+                .for_each(|(a, b)| *a = b);
+            let (a, b) = b.split_at_mut(1);
+            a[0] = MaybeUninit::new(Melt::one());
+            b.iter_mut()
+                .for_each(|v| *v = MaybeUninit::new(Melt::zero()));
+            r.map(|v| unsafe { MaybeUninit::assume_init(v) })
+        }]);
 
     // |-
     // ?:  =(q 0)
@@ -206,7 +220,7 @@ pub fn absorb_sponge(
 
         // ++  absorb-rate
         //   ?>  =((lent input) rate)
-        let input_head = [(); RATE].map(|_| input.next().unwrap());
+        let input_head = input.next().unwrap();
 
         //   =.  sponge  (weld input (slag rate sponge))
         sponge[..RATE].copy_from_slice(&input_head);
@@ -217,20 +231,19 @@ pub fn absorb_sponge(
     Ok(())
 }
 
-pub fn squeeze_sponge(spo: &mut [u64; tip5::STATE_SIZE]) -> [Belt; RATE] {
+pub fn squeeze_sponge(spo: &mut [Melt; tip5::STATE_SIZE]) -> [Melt; RATE] {
     // |.  ^+  [*(list belt) +.$]
     // =*  rng  +.$
     // ::  squeeze out the full rate and bring out of montgomery space
     // =/  output  (turn (scag rate sponge) mont-reduction)
-    let ret = <[u64; RATE]>::try_from(&spo[..RATE]).unwrap();
-    let ret = ret.map(|v| Belt(mont_reduction(v as _)));
+    let ret = <[Melt; RATE]>::try_from(&spo[..RATE]).unwrap();
 
     tip5::permute(spo);
 
     ret
 }
 
-pub fn hash_varlen(input: &[Belt]) -> core::result::Result<NounDigest, JetErr> {
+pub fn hash_varlen<T: Into<Melt> + Copy>(input: &[T]) -> core::result::Result<NounDigest, JetErr> {
     // |=  input=(list belt)
     // ^-  (list belt)
     // =/  spo  (new:sponge)
@@ -271,7 +284,7 @@ pub fn hash_pairs(inp: &[NounDigest]) -> core::result::Result<Vec<NounDigest>, J
     Ok(ret)
 }
 
-type NounDigest = [Belt; 5];
+type NounDigest = [Melt; 5];
 
 enum Hashable<'a> {
     // [p=hashable q=hashable]
@@ -299,7 +312,8 @@ impl<'a> Hashable<'a> {
                 Ok(Self::Hash(
                     h.tail()
                         .uncell()?
-                        .map(|v| Belt(v.as_atom().unwrap().as_u64().unwrap())),
+                        .map(|v| Belt(v.as_atom().unwrap().as_u64().unwrap()))
+                        .map(Melt::from),
                 ))
             }
             Ok(tas!(b"leaf")) => {
@@ -345,7 +359,7 @@ impl<'a> TryFrom<&'a Noun> for Hashable<'a> {
 pub fn hash_hashable(stack: &mut NockStack, h: Noun) -> Result {
     let h = Hashable::try_from(&h)?;
     let r = hash_hashable_impl(stack, &h)?;
-    let r = r.map(|v| Atom::new(stack, v.0).as_noun());
+    let r = r.map(Belt::from).map(|v| Atom::new(stack, v.0).as_noun());
     Ok(T(stack, &r))
 }
 
@@ -374,7 +388,7 @@ fn hash_hashable_impl(
             let mut v = vec![];
             for e in l {
                 let d = hash_hashable_impl(stack, e)?;
-                let d = d.map(|v| Atom::new(stack, v.0).as_noun());
+                let d = d.map(Belt::from).map(|v| Atom::new(stack, v.0).as_noun());
                 let c = T(stack, &d);
                 v.push(c);
             }
@@ -394,7 +408,7 @@ fn hash_hashable_impl(
             //   hash+(hash-belts-list (bpoly-to-list array:(~(change-step ave p.h) 1)))
             let dat = &ma.dat;
             let dat = unsafe { core::mem::transmute::<&[u64], &[Belt]>(dat) };
-            let hash = hash_belts_list(dat).inspect_err(|e| trace!("hbl {e:?}"))?;
+            let hash = hash_varlen(dat).inspect_err(|e| trace!("hbl {e:?}"))?;
             let hash = Hashable::Hash(hash);
 
             let f = Hashable::Pair(len.into(), hash.into());
@@ -512,11 +526,9 @@ pub fn build_merk_heap_impl<T: ElementEx>(stack: &mut NockStack, ma: Noun) -> Re
     let mut res_l = Vec::with_capacity(m.len as usize);
     for i in 0..m.len {
         let t = snag_as_poly_mary::<T>(m, i as usize);
-        let hbp = hashable_poly(stack, &t);
-        let hh = hash_hashable(stack, hbp)?;
-        let leaf = leaf_sequence_impl::<Belt>(hh)?;
-        let leaf = leaf.try_into().unwrap();
-        res_l.push(leaf);
+        let hbp = hashable_poly(t);
+        let hh = hash_hashable_impl(stack, &hbp)?;
+        res_l.push(hh);
     }
 
     //   :+  5
@@ -562,9 +574,16 @@ pub fn build_merk_heap_impl<T: ElementEx>(stack: &mut NockStack, ma: Noun) -> Re
         curr = hash_pairs(&curr)?;
     }
     assert_eq!(res.len(), size as usize);
+    let rl = res.len() * 5;
+    let rc = res.capacity() * 5;
+    let r = res.as_mut_ptr() as *mut Melt;
+    core::mem::forget(res);
     // SAFETY: NounDigest is 5 u64, and it's all contiguous, therefore safe to transmute.
-    let d = unsafe { core::slice::from_raw_parts(res.as_ptr() as *const u64, res.len() * 5) };
-    let (res, res_ma) = new_handle_mut_mary(stack, 5, res.len());
+    let res = unsafe { Vec::from_raw_parts(r, rl, rc) };
+    let res: BPolyVec = PolyVec(res).into();
+    // SAFETY: Same here
+    let d = unsafe { core::slice::from_raw_parts(res.0.as_ptr() as *const u64, res.len()) };
+    let (res, res_ma) = new_handle_mut_mary(stack, 5, res.len() / 5);
     res_ma.dat.copy_from_slice(d);
     let heap_mary = finalize_mary(stack, res_ma.step as _, res_ma.len as _, res);
 
@@ -578,12 +597,14 @@ pub fn build_merk_heap_impl<T: ElementEx>(stack: &mut NockStack, ma: Noun) -> Re
     Ok(T(stack, &[D(height as u64), digest, heap_mary]))
 }
 
-fn hashable_poly<T: ElementEx>(stack: &mut NockStack, p: &PolySlice<T>) -> Noun {
-    let (ret, handle) = new_handle_mut_slice(stack, Some(p.len()));
-    handle.copy_from_slice(&p.0);
-    let ret = finalize_poly(stack, Some(p.len()), ret);
-
-    T(stack, &[D(tas!(b"mary")), D(T::len() as u64), ret])
+fn hashable_poly<'a, T: ElementEx>(p: PolySlice<'a, T>) -> Hashable<'a> {
+    let dat =
+        unsafe { core::slice::from_raw_parts(p.0.as_ptr() as *const u64, p.0.len() * T::len()) };
+    Hashable::Mary(MarySlice {
+        step: T::len() as _,
+        len: p.len() as _,
+        dat,
+    })
 }
 
 fn snag_as_digest(stack: &mut NockStack, m: Noun, i: usize) -> Result {

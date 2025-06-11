@@ -5,20 +5,21 @@ use nockvm::noun::{Atom, Noun, D, T};
 use nockvm::mem::NockStack;
 
 use crate::form::math::tip5::*;
+use crate::form::Melt;
 use crate::jets::utils::jet_err;
 
-pub fn hoon_list_to_sponge(list: Noun) -> Result<[u64; STATE_SIZE], JetErr> {
+pub fn hoon_list_to_sponge(list: Noun) -> Result<[Melt; STATE_SIZE], JetErr> {
     if list.is_atom() {
         return jet_err();
     }
 
-    let mut sponge = [0; STATE_SIZE];
+    let mut sponge = [Melt(0); STATE_SIZE];
     let mut current = list;
     let mut i = 0;
 
     while current.is_cell() {
         let cell = current.as_cell()?;
-        sponge[i] = cell.head().as_atom()?.as_u64()?;
+        sponge[i] = Melt(cell.head().as_atom()?.as_u64()?);
         current = cell.tail();
         i = i + 1;
     }
@@ -43,7 +44,7 @@ pub fn permutation(stack: &mut NockStack, sample: Noun) -> Result<Noun, JetErr> 
     let mut sponge = hoon_list_to_sponge(sample)?;
     permute(&mut sponge);
 
-    let new_sponge = vec_to_hoon_list(stack, &sponge);
+    let new_sponge = vec_to_hoon_list(stack, &sponge.map(|v| v.0));
 
     Ok(new_sponge)
 }

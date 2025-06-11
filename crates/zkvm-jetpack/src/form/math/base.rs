@@ -59,7 +59,7 @@ pub fn bsub(a: u64, b: u64) -> u64 {
 }
 
 #[inline(always)]
-pub fn mont_reduction(x: u128) -> u64 {
+pub const fn mont_reduction(x: u128) -> u64 {
     // |=  x=melt
     // ^-  belt
     // ?>  (lth x rp)
@@ -90,7 +90,7 @@ pub fn mont_reduction(x: u128) -> u64 {
 
 // ::  +montiply: computes a*b = (abr^{-1} mod p); note mul, not fmul: avoids mod p reduction!
 #[inline(always)]
-pub fn montiply(a: u64, b: u64) -> u64 {
+pub const fn montiply(a: u64, b: u64) -> u64 {
     // |:  [a=`melt`r-mod-p b=`melt`r-mod-p]
     // ^-  belt
     // ~+
@@ -101,7 +101,7 @@ pub fn montiply(a: u64, b: u64) -> u64 {
 
 // ::  +montify: transform to Montgomery space, i.e. compute x•r = xr mod p
 #[inline(always)]
-pub fn montify(x: u64) -> u64 {
+pub const fn montify(x: u64) -> u64 {
     // ++  r2  0xffff.fffe.0000.0001
     let r2: u64 = 0xfffffffe00000001;
 

@@ -1,4 +1,9 @@
-use crate::form::math::{badd, bmul, bpow, PRIME_128};
+use num_traits::Pow;
+
+use crate::form::math::PRIME_128;
+use crate::form::Melt;
+
+use super::montify;
 
 pub const DIGEST_LENGTH: usize = 5;
 pub const STATE_SIZE: usize = 16;
@@ -130,43 +135,68 @@ const MDS_MATRIX_I64: [[i64; STATE_SIZE]; STATE_SIZE] = [
     ],
 ];
 
-pub fn permute(sponge: &mut [u64; 16]) {
+const MDS_MATRIX_MONT: [[Melt; STATE_SIZE]; STATE_SIZE] = const {
+    let mut i = 0;
+    let mut ret = [[Melt(0); STATE_SIZE]; STATE_SIZE];
+    while i < ret.len() {
+        let ret = &mut ret[i];
+        let mut j = 0;
+        while j < ret.len() {
+            ret[j] = Melt(montify(MDS_MATRIX_I64[i][j] as u64));
+            j += 1;
+        }
+        i += 1;
+    }
+    ret
+};
+
+const ROUND_CONSTANTS2: [Melt; NUM_ROUNDS * STATE_SIZE] = const {
+    let mut i = 0;
+    let mut ret = [Melt(0); NUM_ROUNDS * STATE_SIZE];
+    while i < ret.len() {
+        ret[i] = Melt((((ROUND_CONSTANTS[i] as u128) * R) % PRIME_128) as u64);
+        i += 1;
+    }
+    ret
+};
+
+pub fn permute(sponge: &mut [Melt; 16]) {
     for i in 0..NUM_ROUNDS {
         let a = sbox_layer(array_ref![sponge, 0, STATE_SIZE]);
         let b = linear_layer(&a);
 
         for j in 0..STATE_SIZE {
-            let r_cons = (((ROUND_CONSTANTS[i * STATE_SIZE + j] as u128) * R) % PRIME_128) as u64;
-            sponge[j] = badd(r_cons, b[j]);
+            let r_cons = ROUND_CONSTANTS2[i * STATE_SIZE + j];
+            sponge[j] = r_cons + b[j];
         }
     }
 }
 
-fn sbox_layer(state: &[u64; STATE_SIZE]) -> [u64; STATE_SIZE] {
-    let mut res: [u64; STATE_SIZE] = [0; STATE_SIZE];
+fn sbox_layer(state: &[Melt; STATE_SIZE]) -> [Melt; STATE_SIZE] {
+    let mut res: [Melt; STATE_SIZE] = [Melt(0); STATE_SIZE];
 
     for i in 0..NUM_SPLIT_AND_LOOKUP {
-        let mut bytes = state[i].to_le_bytes();
+        let mut bytes = state[i].0.to_le_bytes();
         for i in 0..8 {
             bytes[i] = LOOKUP_TABLE[bytes[i] as usize];
         }
-        res[i] = u64::from_le_bytes(bytes);
+        res[i] = Melt(u64::from_le_bytes(bytes));
     }
 
     for j in NUM_SPLIT_AND_LOOKUP..STATE_SIZE {
-        res[j] = bpow(state[j], 7);
+        res[j] = state[j].pow(7u64);
     }
     res
 }
 
-fn linear_layer(state: &[u64; 16]) -> [u64; 16] {
-    let mut result = [0u64; 16];
+fn linear_layer(state: &[Melt; 16]) -> [Melt; 16] {
+    let mut result = [Melt(0u64); 16];
 
     for i in 0..16 {
         for j in 0..16 {
-            let matrix_element = MDS_MATRIX_I64[i][j] as u64;
-            let product = bmul(matrix_element, state[j]);
-            result[i] = badd(result[i], product);
+            let matrix_element = MDS_MATRIX_MONT[i][j];
+            let product = matrix_element * state[j];
+            result[i] = result[i] + product;
         }
     }
 
