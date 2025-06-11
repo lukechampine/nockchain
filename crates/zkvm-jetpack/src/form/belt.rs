@@ -106,6 +106,15 @@ impl Mul for Belt {
     }
 }
 
+impl Pow<u64> for Belt {
+    type Output = Self;
+
+    #[inline(always)]
+    fn pow(self, rhs: u64) -> Self::Output {
+        Belt(bpow(self.0, rhs))
+    }
+}
+
 impl Pow<usize> for Belt {
     type Output = Self;
 

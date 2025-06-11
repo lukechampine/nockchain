@@ -6,13 +6,12 @@ use nockvm::noun::*;
 use nockvm_macros::tas;
 
 use crate::form::mary::{Mary, MarySlice};
-use crate::form::{binv, bsub};
+use crate::form::{binv, bsub, PRIME};
 use crate::hand::handle::{finalize_mary, new_handle_mut_mary};
 use crate::hand::structs::{HoonList, HoonMap};
 use crate::jets::utils::jet_err;
 use crate::noun::noun_ext::NounExt;
 
-use super::one::P;
 use super::utils::xeb;
 
 // ::
@@ -56,7 +55,7 @@ fn header(stack: &mut NockStack) -> Noun {
         // :*  name:static:common
         D(tas!(b"memory")),
         //     p
-        Atom::new(stack, P).as_noun(),
+        Atom::new(stack, PRIME).as_noun(),
         //     (lent basic-column-names:static:common)
         D(14),
         //     (lent ext-column-names:static:common)

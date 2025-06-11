@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::iter::{repeat, repeat_n};
 
-use crate::form::bpoly::{bp_coseword, bp_hadamard_inplace, bpadd_in_place, bpscal_inplace};
+use crate::form::bpoly::{bp_coseword, bpscal_inplace};
 use crate::form::fext::{fadd_, fdiv_, finv_, fmul_, fneg_};
 use crate::form::mary::MarySlice;
 use crate::form::math::poly::p_ntt;
@@ -9,7 +9,7 @@ use crate::form::math::poly::*;
 use crate::form::mega::{brek, MegaTyp};
 use crate::form::{
     binv, bneg, bpow, BPolyVec, Element, ElementEx, FPolySlice, FPolySliceMut, FPolyVec, Felt,
-    PolySlice, PolyVec,
+    PolySlice, PolyVec, Melt,
 };
 use crate::form::{poly::Poly, BPolySlice, Belt};
 use crate::hand::handle::{
@@ -379,7 +379,7 @@ pub fn mp_substitute_ultra(stack: &mut NockStack, inp: Noun) -> Result {
         return jet_err();
     };
 
-    let ret = mp_substitute_ultra_impl(stack, p, trace_evals, height, &chal_map, dyns)?;
+    let ret = mp_substitute_ultra_impl::<Belt, _>(stack, p, trace_evals, height, &chal_map, dyns)?;
     let mut ret = ret
         .into_iter()
         .map(|v| {
@@ -435,14 +435,14 @@ impl<K: Ord, V: Copy> Map<K, V> for BTreeMap<K, V> {
     }
 }
 
-pub fn mp_substitute_ultra_impl(
+pub fn mp_substitute_ultra_impl<E: ElementEx, T: Copy + Into<E>>(
     stack: &mut NockStack,
     p: Noun,
-    trace_evals: BPolySlice,
+    trace_evals: PolySlice<T>,
     height: u64,
     chal_map: &impl Map<u64, Belt>,
     dyns: BPolySlice,
-) -> core::result::Result<Vec<BPolyVec>, JetErr> {
+) -> core::result::Result<Vec<PolyVec<E>>, JetErr> {
     // ^-  (list bpoly)
     let [p_head, p_tail] = p.uncell()?;
 
@@ -452,7 +452,7 @@ pub fn mp_substitute_ultra_impl(
         tas!(b"mega") => {
             // :~  (mp-substitute-mega +.p trace-evals height chal-map dyns ~)
             // ==
-            Ok(vec![mp_substitute_mega_impl(
+            Ok(vec![mp_substitute_mega_impl::<E, _, E>(
                 stack,
                 p_tail,
                 trace_evals,
@@ -481,7 +481,7 @@ pub fn mp_substitute_ultra_impl(
                 // (mp-substitute-mega mp trace-evals height chal-map dyns ~)
                 com_map.insert(
                     i as u64,
-                    mp_substitute_mega_impl(
+                    mp_substitute_mega_impl::<E, _, E>(
                         stack,
                         mp,
                         trace_evals,
@@ -700,7 +700,7 @@ pub fn mp_substitute_mega(stack: &mut NockStack, inp: Noun) -> Result {
     // println!("chal_map={:?}", mug(stack, chal_map).data());
     // println!("dyns={:?}", mug(stack, dyns).data());
     // println!("com_map={:?}", mug(stack, com_map).data());
-    let acc = mp_substitute_mega_impl(
+    let acc = mp_substitute_mega_impl::<Belt, _, _>(
         stack,
         p,
         trace_evals,
@@ -718,26 +718,26 @@ pub fn mp_substitute_mega(stack: &mut NockStack, inp: Noun) -> Result {
 }
 
 #[inline(never)]
-pub fn mp_substitute_mega_impl(
+pub fn mp_substitute_mega_impl<E: ElementEx, T: Into<E> + Copy, P: Into<E> + Copy>(
     stack: &mut NockStack,
     p: Noun,
-    trace_evals: BPolySlice,
+    trace_evals: PolySlice<T>,
     height: u64,
     chal_map: &impl Map<u64, Belt>,
     dyns: BPolySlice,
-    com_map: &BTreeMap<u64, BPolyVec>,
-) -> core::result::Result<BPolyVec, JetErr> {
+    com_map: &BTreeMap<u64, PolyVec<P>>,
+) -> core::result::Result<PolyVec<E>, JetErr> {
     // ^-  bpoly
 
     // %+  roll  ~(tap by p)
     // |=  [[k=bpoly v=belt] acc=_zero-bpoly]
-    let mut acc = PolyVec(vec![Belt(0)]);
+    let mut acc = PolyVec(vec![E::zero()]);
     for e in HoonMapIter::from(p) {
         let [k, v] = e.uncell()?;
         let Ok(k) = BPolySlice::try_from(k) else {
             return jet_err();
         };
-        let v = Belt(v.as_atom()?.as_u64()?);
+        let v = E::from_u64(v.as_atom()?.as_u64()?);
 
         // =/  [poly=bpoly len=@]  [trace-evals (mul 4 height)]
         let poly = trace_evals;
@@ -745,10 +745,10 @@ pub fn mp_substitute_mega_impl(
         // println!("trace-evals: poly={:?}, len={:?}", mug(stack, poly), len);
 
         // =/  ones=bpoly  (init-bpoly (reap len 1))
-        let ones = PolyVec(vec![Belt(1); len]);
+        let ones = PolyVec(vec![E::one(); len]);
 
         // ?:  =(v 0)  acc
-        if v == Belt(0) {
+        if v.is_zero() {
             continue;
         }
 
@@ -757,8 +757,9 @@ pub fn mp_substitute_mega_impl(
         // %+  roll  (range len.k)
         // |=  [i=@ acc=_ones]
         // ^-  bpoly
-        let mut rolled = {
+        let (mut rolled, scal) = {
             let mut acc = ones;
+            let mut scal = E::one();
 
             for (typ, idx, exp) in
                 k.0.iter()
@@ -781,7 +782,7 @@ pub fn mp_substitute_mega_impl(
                         // |=  [i=@ power=_acc]
                         for _ in 0..exp {
                             // (bp-hadamard power var)
-                            bp_hadamard_inplace(&mut acc.0, var.0);
+                            p_hadamard_inplace(&mut acc.0, var.0);
                         }
                     }
                     // %rnd
@@ -790,8 +791,7 @@ pub fn mp_substitute_mega_impl(
                         let rnd = chal_map.get(stack, idx as u64).unwrap();
                         // (bpscal (bpow rnd exp) acc)
                         let powed = bpow(rnd.0, exp);
-                        assert!(acc.len() % 16 == 0);
-                        bpscal_inplace(Belt(powed), &mut acc.0);
+                        scal = scal * E::from_u64(powed);
                     }
                     // %dyn
                     MegaTyp::Dyn => {
@@ -799,8 +799,7 @@ pub fn mp_substitute_mega_impl(
                         let _dyn = dyns.0[idx];
                         // (bpscal (bpow dyn exp) acc)
                         let powed = bpow(_dyn.0, exp);
-                        assert!(acc.len() % 16 == 0);
-                        bpscal_inplace(Belt(powed), &mut acc.0);
+                        scal = scal * E::from_u64(powed);
                     }
                     // %con
                     MegaTyp::Con => {
@@ -817,18 +816,19 @@ pub fn mp_substitute_mega_impl(
                         // |=  [i=@ power=_acc]
                         for _ in 0..exp {
                             // (bp-hadamard power com)
-                            bp_hadamard_inplace(&mut acc.0, &com.0);
+                            p_hadamard_inplace(&mut acc.0, &com.0);
                         }
                     }
                 }
             }
-            acc
-        };
 
+            (acc, scal)
+        };
+        assert!(rolled.len() % 16 == 0);
         // :: %+  bpscal  v
-        bpscal_inplace(v, &mut rolled.0);
+        pscal_inplace(v * scal, &mut rolled.0);
         // :: %+  bpadd  acc
-        bpadd_in_place(&mut rolled.0, &acc.0);
+        padd_in_place(&mut rolled.0, &acc.0);
         acc = rolled;
     }
 

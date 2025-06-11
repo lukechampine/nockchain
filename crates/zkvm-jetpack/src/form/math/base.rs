@@ -58,6 +58,60 @@ pub fn bsub(a: u64, b: u64) -> u64 {
     x1.wrapping_sub((1 + !PRIME) * c1 as u64)
 }
 
+#[inline(always)]
+pub fn mont_reduction(x: u128) -> u64 {
+    // |=  x=melt
+    // ^-  belt
+    // ?>  (lth x rp)
+    // assert!(x < RP);
+    // =/  x1  (cut 5 [1 1] x)
+    let x1 = x as u64;
+
+    // =/  x2  (rsh 6 x)
+    let x2 = (x >> 64) as u64;
+
+    // NOTE: the rest is different. see: https://docs.rs/twenty-first/latest/src/twenty_first/math/b_field_element.rs.html#340-353
+    // =/  c
+    //   =/  x0  (end 5 x)
+    //   (lsh 5 (add x0 x1))
+    // =/  f   (rsh 6 c)
+    // =/  d   (sub c (add x1 (mul f p)))
+    // ?:  (gte x2 d)
+    //   (sub x2 d)
+    // (sub (add x2 p) d)
+
+    let (a, e) = x1.overflowing_add(x1 << 32);
+    let b = a.wrapping_sub(a >> 32).wrapping_sub(e as u64);
+
+    let (r, c) = x2.overflowing_sub(b);
+
+    r.wrapping_sub((1 + !PRIME) * c as u64)
+}
+
+// ::  +montiply: computes a*b = (abr^{-1} mod p); note mul, not fmul: avoids mod p reduction!
+#[inline(always)]
+pub fn montiply(a: u64, b: u64) -> u64 {
+    // |:  [a=`melt`r-mod-p b=`melt`r-mod-p]
+    // ^-  belt
+    // ~+
+    // ?>  ?&((based a) (based b))
+    // FIXME: verify based
+    mont_reduction((a as u128) * (b as u128))
+}
+
+// ::  +montify: transform to Montgomery space, i.e. compute x•r = xr mod p
+#[inline(always)]
+pub fn montify(x: u64) -> u64 {
+    // ++  r2  0xffff.fffe.0000.0001
+    let r2: u64 = 0xfffffffe00000001;
+
+    // |=  x=belt
+    // ^-  melt
+    // ~+
+    // (montiply x r2)
+    montiply(x, r2)
+}
+
 /// Reduce a 128 bit number
 #[inline(always)]
 pub fn reduce(prod: u128) -> u64 {

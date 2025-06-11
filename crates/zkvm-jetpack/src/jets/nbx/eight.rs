@@ -1,10 +1,9 @@
 use std::collections::BTreeMap;
 
-use crate::form::bpoly::{bpadd_in_place, bpdiv, bppow, bpscal_inplace, bpsub_};
 use crate::form::fext::{fmul_, fpow_};
 use crate::form::mary::MarySlice;
 use crate::form::math::poly::*;
-use crate::form::{binv, bneg, BPolyVec, FPolySlice, FPolyVec, Felt, PolySlice, PolyVec};
+use crate::form::{binv, bneg, BPolyVec, Element, ElementEx, FPolySlice, FPolyVec, Felt, Melt, PolySlice, PolyVec};
 use crate::form::{poly::Poly, BPolySlice, Belt};
 use crate::hand::handle::{finalize_poly, new_handle_mut_slice};
 use crate::hand::structs::{HoonList, HoonMap, HoonMapIter};
@@ -350,6 +349,15 @@ pub fn compute_deep(stack: &mut NockStack, inp: Noun) -> Result {
 //   ==
 
 pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
+    // NOTE: in theory, using `Melt` should be faster than `Belt`, due to efficient multiplication,
+    // however, for some reason LTO-d x86_64-v4 binary is faster with `Belt`. So here, we switch
+    // against them.
+
+    #[cfg(target_feature = "avx2")]
+    type Elem = Belt;
+    #[cfg(not(target_feature = "avx2"))]
+    type Elem = Melt;
+
     // ~/  %compute-composition-poly
     // |=  $:  omicrons=bpoly
     //         heights=(list @)
@@ -424,19 +432,19 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
 
     // |^
     // =/  boundary-zerofier  (init-bpoly ~[(bneg 1) 1])          ::  f(X)=X-1
-    let boundary_zerofier = [Belt(bneg(1)), Belt(1)];
+    let boundary_zerofier = [Elem::from_u64(bneg(1)), Elem::one()];
     let boundary_zerofier = PolySlice(&boundary_zerofier);
     // ::
     // %+  roll  (range len.omicrons)
     // |=  [i=@ acc=_zero-bpoly]
-    let mut acc = PolyVec(vec![Belt(0)]);
+    let mut acc = PolyVec(vec![Elem::zero()]);
     for i in 0..omicrons.len() {
         // =/  height=@  (snag i heights)
         let height = heights[i];
         // =/  omicron  (~(snag bop omicrons) i)
         let omicron = omicrons.0[i];
         // =/  last-row  (init-bpoly ~[(bneg (binv omicron)) 1])      ::  f(X)=X-g^{-1}
-        let last_row = [Belt(bneg(binv(omicron.0))), Belt(1)];
+        let last_row = [Elem::from_u64(bneg(binv(omicron.0))), Elem::one()];
         let last_row = PolySlice(&last_row);
         // =/  chals  (~(got by composition-chals) i)
         let chals = composition_chals
@@ -445,6 +453,10 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
         let chals2 = BPolySlice::try_from(chals)?;
         // =/  trace  (snag i tworow-trace-polys)
         let trace = tworow_trace_polys[i];
+        #[cfg(not(target_feature = "avx2"))]
+        let trace: PolyVec<Elem> = PolyVec(trace.0.to_vec()).into();
+        #[cfg(not(target_feature = "avx2"))]
+        let trace: PolySlice<Elem> = (&trace).into();
         // =/  constraints  (~(got by constraint-w-deg-map.dp) i)
         let constraints2 = constraint_w_deg_map.get(&(i as u64)).unwrap();
         // =/  counts  (~(got by constraint-counts) i)
@@ -462,13 +474,13 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
         // ::
         // =/  row-zerofier                                           ::  f(X) = (X^N-1)
         //   (bpsub (bppow id-bpoly height) one-bpoly)
-        let row_zerofier = bppow(&[Belt(0), Belt(1)], height as _);
-        let row_zerofier = bpsub_(&row_zerofier, &[Belt(1)]);
+        let row_zerofier = ppow(&[Elem::zero(), Elem::one()], height as _);
+        let row_zerofier = psub_(&row_zerofier, &[Elem::one()]);
         let row_zerofier = PolySlice(&row_zerofier);
 
         // ::  note: the transition zerofier = row-zerofier/last-row
         // ::  here, we are computing composition-constraints/transition-zerofier
-        let transition_zerofier = bpdiv(row_zerofier.0, last_row.0);
+        let transition_zerofier = pdiv(row_zerofier.0, last_row.0);
         let transition_zerofier = PolySlice(&transition_zerofier);
 
         let dividends = [
@@ -510,14 +522,18 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
             )?;
             // %-  bpdiv
             // :_  boundary-zerofier
-            let res = bpdiv(&processed_constraints.0, dividend.0);
+            #[cfg(not(target_feature = "avx2"))]
+            let dividend: PolyVec<Elem> = PolyVec(dividend.0.to_vec()).into();
+            let res = pdiv(&processed_constraints.0, &dividend.0);
             // ;:  bpadd
             //   acc
             acc.0
-                .resize(core::cmp::max(acc.0.len(), res.len()), Belt(0));
-            bpadd_in_place(&mut acc.0, &res);
+                .resize(core::cmp::max(acc.0.len(), res.len()), Elem::zero());
+            padd_in_place(&mut acc.0, &res);
         }
     }
+
+    let acc: BPolyVec = acc.into();
 
     let (ret, handle) = new_handle_mut_slice(stack, Some(acc.len()));
     handle.copy_from_slice(&acc.0);
@@ -526,16 +542,16 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
     Ok(ret)
 }
 
-fn process_composition_constraints(
+fn process_composition_constraints<E: ElementEx>(
     stack: &mut NockStack,
     constraints: &ProcessedDeg,
-    trace: BPolySlice,
+    trace: PolySlice<E>,
     weights: BPolySlice,
     dyns: BPolySlice,
     fri_deg_bound: u64,
     max_height: u64,
     chal_map: &BTreeMap<u64, Belt>, //Option<HoonMap>,
-) -> core::result::Result<BPolyVec, JetErr> {
+) -> core::result::Result<PolyVec<E>, JetErr> where Belt: Into<E> {
     // |=  $:  constraints=(list [(list @) mp-ultra])
     //         trace=bpoly
     //         weights=bpoly
@@ -548,7 +564,7 @@ fn process_composition_constraints(
     // ::  mp-substitute-ultra returns a list because the %comp
     // ::  constraint type can contain multiple mp-mega constraints.
     // ::
-    let mut acc = PolyVec(vec![Belt(0)]);
+    let mut acc = PolyVec(vec![E::zero()]);
     let mut idx = 0;
     for (degs, mp) in constraints.iter() {
         // =/  comps=(list bpoly)
@@ -576,28 +592,28 @@ fn process_composition_constraints(
             // ::  p(x)*(α*X^{D-1-D_j} + β)
             // ::  which will make the polynomial exactly degree D-1 which is what we want.
             // =/  comp-coeff  (bp-ifft comp)
-            let comp_coeff = bp_ifft(comp)?;
+            let comp_coeff = p_ifft(comp.0)?;
             // %+  bpadd  acc
             // %+  bpadd
             //   (bpscal beta comp-coeff)
             let mut beta_vec = comp_coeff.clone();
-            bpscal_inplace(beta, &mut beta_vec.0);
+            pscal_inplace(beta, &mut beta_vec);
             // %-  %~  weld  bop
             //     (init-bpoly (reap (sub fri-deg-bound.dp deg) 0))
-            let mut alpha_vec = vec![Belt(0); (fri_deg_bound - *deg) as usize];
-            alpha_vec.extend(comp_coeff.0.clone());
+            let mut alpha_vec = vec![E::zero(); (fri_deg_bound - *deg) as usize];
+            alpha_vec.extend(comp_coeff.clone());
             // (bpscal alpha comp-coeff)
-            bpscal_inplace(alpha, &mut alpha_vec);
-            bpadd_in_place(&mut alpha_vec, &beta_vec.0);
+            pscal_inplace(alpha, &mut alpha_vec);
+            padd_in_place(&mut alpha_vec, &beta_vec);
             let acc_len = acc.len();
             acc.0
-                .resize(core::cmp::max(acc_len, alpha_vec.len()), Belt(0));
-            bpadd_in_place(&mut acc.0, &alpha_vec);
+                .resize(core::cmp::max(acc_len, alpha_vec.len()), E::zero());
+            padd_in_place(&mut acc.0, &alpha_vec);
             idx += 1;
         }
     }
 
-    Ok(bpcan(acc))
+    Ok(PolyVec(pcan(acc.0)))
 }
 
 type ProcessedDeg = Vec<(Vec<u64>, Noun)>;

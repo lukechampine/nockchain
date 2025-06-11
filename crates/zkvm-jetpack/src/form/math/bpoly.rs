@@ -1,7 +1,7 @@
 use std::vec;
 
 use crate::form::math::{poly::*, FieldError};
-use crate::form::poly::*;
+use crate::form::{bpow, poly::*};
 
 pub fn bpadd(a: &[Belt], b: &[Belt], res: &mut [Belt]) {
     let min: &[Belt];

@@ -1,6 +1,6 @@
 use crate::form::mary::MarySlice;
 use crate::form::math::tip5::{self, CAPACITY, DIGEST_LENGTH, RATE, STATE_SIZE};
-use crate::form::{Element, ElementEx, FPolySlice, Felt, PolySlice};
+use crate::form::{montify, mont_reduction, Element, ElementEx, FPolySlice, Felt, PolySlice};
 use crate::form::{poly::Poly, BPolySlice, Belt};
 use crate::hand::handle::{
     finalize_mary, finalize_poly, new_handle_mut_mary, new_handle_mut_slice,

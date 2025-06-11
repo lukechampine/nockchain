@@ -1,4 +1,5 @@
 pub mod belt;
+pub mod melt;
 pub mod crypto;
 pub mod felt;
 pub mod mary;

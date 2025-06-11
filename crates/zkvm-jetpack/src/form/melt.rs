@@ -1,0 +1,119 @@
+use std::ops::{Add, Mul, Neg, Sub, Div};
+
+use nockvm::noun::Noun;
+use num_traits::Pow;
+
+use crate::form::math::base::*;
+use crate::form::poly::{Melt, Belt};
+
+impl Melt {
+    pub fn inv(self) -> Self {
+        self.pow(PRIME - 2)
+    }
+}
+
+impl From<Melt> for Belt {
+    #[inline(always)]
+    fn from(value: Melt) -> Self {
+        Belt(mont_reduction(value.0 as _))
+    }
+}
+
+impl From<Belt> for Melt {
+    #[inline(always)]
+    fn from(value: Belt) -> Self {
+        Melt(montify(value.0))
+    }
+}
+
+impl Add for Melt {
+    type Output = Self;
+
+    #[inline(always)]
+    fn add(self, rhs: Self) -> Self::Output {
+        let a = self.0;
+        let b = rhs.0;
+        Melt(badd(a, b))
+    }
+}
+
+impl Sub for Melt {
+    type Output = Self;
+
+    #[inline(always)]
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self(bsub(self.0, rhs.0))
+    }
+}
+
+impl Neg for Melt {
+    type Output = Self;
+
+    #[inline(always)]
+    fn neg(self) -> Self::Output {
+        Self(bneg(self.0))
+    }
+}
+
+impl Mul for Melt {
+    type Output = Self;
+
+    #[inline(always)]
+    fn mul(self, rhs: Self) -> Self::Output {
+        let a = self.0;
+        let b = rhs.0;
+        Melt(montiply(a, b))
+    }
+}
+
+impl Pow<u64> for Melt {
+    type Output = Self;
+
+    #[inline(always)]
+    fn pow(self, exp: u64) -> Self::Output {
+        let mut acc = Melt::from(Belt(1));
+        let bit_length = u64::BITS - exp.leading_zeros();
+        let mut i = 0;
+        while i < bit_length {
+            acc = acc * acc;
+            if exp & (1 << (bit_length - 1 - i)) != 0 {
+                acc = acc * self;
+            }
+            i += 1;
+        }
+
+        acc
+    }
+}
+
+impl Pow<usize> for Melt {
+    type Output = Self;
+
+    #[inline(always)]
+    fn pow(self, rhs: usize) -> Self::Output {
+        self.pow(rhs as u64).into()
+    }
+}
+
+impl Div for Melt {
+    type Output = Self;
+
+    #[inline(always)]
+    #[allow(clippy::suspicious_arithmetic_impl)]
+    fn div(self, rhs: Self) -> Self::Output {
+        rhs.inv() * self
+    }
+}
+
+impl TryFrom<Noun> for Melt {
+    type Error = ();
+
+    #[inline(always)]
+    fn try_from(n: Noun) -> std::result::Result<Self, Self::Error> {
+        if !n.is_atom() {
+            Err(())
+        } else {
+            Belt::try_from(&n.as_atom()?.as_u64()?).map(|v| v.into())
+        }
+    }
+}

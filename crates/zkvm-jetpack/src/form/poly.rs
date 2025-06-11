@@ -5,15 +5,20 @@ use nockvm::mem::NockStack;
 use nockvm::noun::{Atom, Noun};
 use std::fmt::Debug;
 use std::slice::Iter;
+use num_traits::Pow;
 
 use crate::hand::handle::new_handle_mut_felt;
 
-use super::fext::fpow_;
-use super::{bpow, FieldError};
+use super::fext::{finv_, fpow_};
+use super::{binv, bpow, FieldError};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Default)]
 #[repr(transparent)]
 pub struct Belt(pub u64);
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Default)]
+#[repr(transparent)]
+pub struct Melt(pub u64);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Default)]
 #[repr(transparent)]
@@ -26,6 +31,8 @@ pub trait ElementEx:
     + Mul<Output = Self>
     + Add<Output = Self>
     + Sub<Output = Self>
+    + Neg<Output = Self>
+    + Div<Output = Self>
     + TryFrom<Noun>
     + Debug
     + Ord
@@ -33,6 +40,7 @@ pub trait ElementEx:
     fn from_u64(v: u64) -> Self;
     fn epow(&self, p: u64) -> Self;
     fn ordered_root(order: u64) -> Result<Self, FieldError>;
+    fn inverse(self) -> Self;
     fn as_noun(self, stack: &mut NockStack) -> Noun;
 }
 
@@ -49,8 +57,34 @@ impl ElementEx for Belt {
         Belt(order).ordered_root()
     }
 
+    fn inverse(self) -> Self {
+        Self(binv(self.0))
+    }
+
     fn as_noun(self, stack: &mut NockStack) -> Noun {
         Atom::new(stack, self.0).as_noun()
+    }
+}
+
+impl ElementEx for Melt {
+    fn from_u64(v: u64) -> Self {
+        Belt::from_u64(v).into()
+    }
+
+    fn epow(&self, p: u64) -> Self {
+        self.pow(p)
+    }
+
+    fn ordered_root(order: u64) -> Result<Self, FieldError> {
+        Belt(order).ordered_root().map(Melt::from)
+    }
+
+    fn inverse(self) -> Self {
+        self.inv()
+    }
+
+    fn as_noun(self, stack: &mut NockStack) -> Noun {
+        Atom::new(stack, Belt::from(self).0).as_noun()
     }
 }
 
@@ -65,6 +99,10 @@ impl ElementEx for Felt {
 
     fn ordered_root(order: u64) -> Result<Self, FieldError> {
         Felt::ordered_root(order)
+    }
+
+    fn inverse(self) -> Self {
+        finv_(&self)
     }
 
     fn as_noun(self, stack: &mut NockStack) -> Noun {
@@ -116,6 +154,25 @@ impl Element for Belt {
     #[inline(always)]
     fn one() -> Self {
         Belt::one()
+    }
+}
+
+impl Element for Melt {
+    #[inline(always)]
+    fn is_zero(&self) -> bool {
+        self.0 == Melt::zero().0
+    }
+    #[inline(always)]
+    fn zero() -> Self {
+        Belt::zero().into()
+    }
+    #[inline(always)]
+    fn len() -> usize {
+        1
+    }
+    #[inline(always)]
+    fn one() -> Self {
+        Belt::one().into()
     }
 }
 
@@ -234,6 +291,10 @@ pub type BPolyVec = PolyVec<Belt>;
 pub type BPolySlice<'a> = PolySlice<'a, Belt>;
 pub type BPolySliceMut<'a> = PolySliceMut<'a, Belt>;
 
+pub type MPolyVec = PolyVec<Melt>;
+pub type MPolySlice<'a> = PolySlice<'a, Melt>;
+pub type MPolySliceMut<'a> = PolySliceMut<'a, Melt>;
+
 pub type FPolyVec = PolyVec<Felt>;
 pub type FPolySlice<'a> = PolySlice<'a, Felt>;
 pub type FPolySliceMut<'a> = PolySliceMut<'a, Felt>;
@@ -315,6 +376,20 @@ impl<'a, T> From<&'a PolyVec<T>> for PolySlice<'a, T> {
 impl<'a, T> From<&'a mut PolyVec<T>> for PolySliceMut<'a, T> {
     fn from(p: &'a mut PolyVec<T>) -> Self {
         Self(&mut p.0)
+    }
+}
+
+impl From<PolyVec<Melt>> for PolyVec<Belt> {
+    fn from(mut v: PolyVec<Melt>) -> Self {
+        v.0.iter_mut().for_each(|v| *v = Melt(Belt::from(*v).0));
+        unsafe { core::mem::transmute(v) }
+    }
+}
+
+impl From<PolyVec<Belt>> for PolyVec<Melt> {
+    fn from(mut v: PolyVec<Belt>) -> Self {
+        v.0.iter_mut().for_each(|v| *v = Belt(Melt::from(*v).0));
+        unsafe { core::mem::transmute(v) }
     }
 }
 
