@@ -111,29 +111,6 @@ pub fn init_tip5_state(domain: u64) -> [Melt; STATE_SIZE] {
     }
 }
 
-pub fn hash_noun_varlen(n: Noun) -> core::result::Result<NounDigest, JetErr> {
-    // ~/  %hash-noun-varlen
-    // |=  n=*
-    // ^-  noun-digest
-    // =/  leaf=(list @)  (leaf-sequence:shape n)
-    let leaf = leaf_sequence_impl::<Belt>(n)?;
-
-    // =/  dyck=(list @)  (dyck:shape n)
-    let dyck = dyck(n)?;
-
-    // =/  size  (lent leaf)
-    let size = leaf.len();
-
-    // (hash-belts-list [size (weld leaf dyck)])
-    let belts = [Belt(size as u64)]
-        .into_iter()
-        .chain(leaf)
-        .chain(dyck)
-        .collect::<Vec<_>>();
-
-    Ok(hash_varlen(&belts))
-}
-
 pub fn new_sponge(variable: bool) -> [Melt; tip5::STATE_SIZE] {
     let mode = if variable {
         tas!(b"variable")
@@ -335,6 +312,29 @@ impl ReduceStage {
         });
         self.out
     }
+
+    fn push_variable(&mut self, a: usize, len: usize) -> usize {
+        let ret = self.out.len();
+        self.out.resize(ret + DIGEST_LENGTH, Melt(0));
+        self.ops.push(ReduceOp {
+            source: a,
+            ty: ReduceTy::Variable(len),
+            destination: ret,
+        });
+        ret
+    }
+
+    fn push_fixed(&mut self, a: usize, b: usize) -> usize {
+        assert_eq!(a + DIGEST_LENGTH, b);
+        let ret = self.out.len();
+        self.out.resize(ret + DIGEST_LENGTH, Melt(0));
+        self.ops.push(ReduceOp {
+            source: a,
+            ty: ReduceTy::Fixed,
+            destination: ret,
+        });
+        ret
+    }
 }
 
 #[derive(Default)]
@@ -355,7 +355,7 @@ impl HashEngine {
         ret
     }
 
-    fn push_noun(&mut self, stage: usize, n: Noun) -> usize {
+    fn push_noun(&mut self, stage: usize, n: Noun) -> core::result::Result<usize, JetErr> {
         if self.stages.len() <= stage {
             assert_eq!(self.stages.len(), stage);
             self.stages.push(ReduceStage::default());
@@ -365,10 +365,10 @@ impl HashEngine {
         // |=  n=*
         // ^-  noun-digest
         // =/  leaf=(list @)  (leaf-sequence:shape n)
-        let leaf = leaf_sequence_impl::<Belt>(n).unwrap();
+        let leaf = leaf_sequence_impl::<Belt>(n)?;
 
         // =/  dyck=(list @)  (dyck:shape n)
-        let dyck = dyck(n).unwrap();
+        let dyck = dyck(n);
 
         // =/  size  (lent leaf)
         let size = leaf.len();
@@ -384,19 +384,16 @@ impl HashEngine {
 
         let source = self.push_varlen(stage + 1, melts);
         let stage = self.stages.get_mut(stage).unwrap();
-        let ret = stage.out.len();
-        stage.out.resize(ret + DIGEST_LENGTH, Melt(0));
+        let ret = stage.push_variable(source, len);
 
-        stage.ops.push(ReduceOp {
-            source,
-            ty: ReduceTy::Variable(len),
-            destination: ret,
-        });
-
-        ret
+        Ok(ret)
     }
 
-    fn push_list_inner(&mut self, stage: usize, l: &[Hashable]) -> usize {
+    fn push_list_inner(
+        &mut self,
+        stage: usize,
+        l: impl Iterator<Item = Noun>,
+    ) -> core::result::Result<(usize, usize), JetErr> {
         if self.stages.len() <= stage {
             assert_eq!(self.stages.len(), stage);
             self.stages.push(ReduceStage::default());
@@ -404,24 +401,25 @@ impl HashEngine {
 
         let stage0 = self.stages.get_mut(stage).unwrap();
         let ret = stage0.out.len();
-        stage0.out.push(Melt::from_u64(l.len() as _));
+        stage0.out.push(Melt(0));
 
         let mut next = ret + 1;
+        let mut len = 0;
         for h in l {
-            let out = self.push(stage, h);
+            let out = self.push(stage, h)?;
+            len += 1;
             assert_eq!(out, next);
             next = out + DIGEST_LENGTH;
         }
 
         let stage = self.stages.get_mut(stage).unwrap();
+        stage.out[ret] = Melt::from_u64((len * 5 + 1) as _);
         // Push dyck shape
         stage.out.push(Melt::zero());
         let shape = [0, 0, 1, 0, 1, 0, 1, 0, 1, 1].map(Melt::from_u64);
-        stage
-            .out
-            .extend(core::iter::repeat_n(shape, l.len()).flatten());
+        stage.out.extend(core::iter::repeat_n(shape, len).flatten());
 
-        ret
+        Ok((ret, len))
     }
 
     fn reduce(mut self) -> Vec<NounDigest> {
@@ -442,224 +440,103 @@ impl HashEngine {
         unsafe { Vec::from_raw_parts(p as *mut NounDigest, l, c) }
     }
 
-    fn push(&mut self, stage: usize, h: &Hashable) -> usize {
+    fn push_mary(&mut self, stage: usize, ma: MarySlice) -> usize {
         if self.stages.len() <= stage {
             assert_eq!(self.stages.len(), stage);
             self.stages.push(ReduceStage::default());
         }
-        match h {
-            Hashable::Hash(d) => {
-                // ?:  ?=(%hash -.h)
-                //   p.h
-                let stage = self.stages.get_mut(stage).unwrap();
-                let ret = stage.out.len();
-                stage.out.extend_from_slice(&d[..]);
-                ret
-            }
-            Hashable::Leaf(n) => {
-                // ?:  ?=(%leaf -.h)
-                //   (hash-noun-varlen p.h)
-                self.push_noun(stage, *n)
-            }
-            Hashable::List(l) => {
-                // ?:  ?=(%list -.h)
-                //   (hash-noun-varlen (turn p.h hash-hashable))
-                /*let mut v = vec![Melt::from_u64((l.len() * 5 + 1) as _)];
-                for e in l {
-                    let d = hash_hashable_impl(stack, e)?;
-                    v.extend_from_slice(&d);
-                }
-                v.push(Melt::zero());
-                for _ in 0..l.len() {
-                    let shape = [0, 0, 1, 0, 1, 0, 1, 0, 1, 1].map(Melt::from_u64);
-                    v.extend_from_slice(&shape);
-                }
-                Ok(hash_varlen(&v))*/
-                let source = self.push_list_inner(stage + 1, l);
 
-                let stage = self.stages.get_mut(stage).unwrap();
-                let ret = stage.out.len();
-                stage.out.resize(ret + DIGEST_LENGTH, Melt(0));
+        //   %-  hash-hashable
 
-                stage.ops.push(ReduceOp {
-                    source,
-                    ty: ReduceTy::Variable(2 + (DIGEST_LENGTH + 10) * l.len()),
-                    destination: ret,
-                });
+        //   :-  leaf+step.p.h
+        let step = self.push_noun(stage + 1, D(ma.step as _)).unwrap();
 
-                ret
-            }
-            Hashable::Mary(ma) => {
-                //   %-  hash-hashable
+        //   :-  leaf+len.array.p.h
+        let len = self.push_noun(stage + 2, D(ma.len as _)).unwrap();
 
-                //   :-  leaf+step.p.h
-                let step = self.push_noun(stage + 1, D(ma.step as _));
+        //   hash+(hash-belts-list (bpoly-to-list array:(~(change-step ave p.h) 1)))
+        let hash_src = self.push_varlen(stage + 3, ma.dat.iter().copied().map(Melt::from_u64));
+        let stage2 = self.stages.get_mut(stage + 2).unwrap();
+        let hash = stage2.push_variable(hash_src, ma.dat.len());
 
-                //   :-  leaf+len.array.p.h
-                let len = self.push_noun(stage + 2, D(ma.len as _));
+        let stage1 = self.stages.get_mut(stage + 1).unwrap();
+        let arr = stage1.push_fixed(len, hash);
 
-                //   hash+(hash-belts-list (bpoly-to-list array:(~(change-step ave p.h) 1)))
-                let hash_src =
-                    self.push_varlen(stage + 3, ma.dat.iter().copied().map(Melt::from_u64));
-                let stage2 = self.stages.get_mut(stage + 2).unwrap();
-                let hash = stage2.out.len();
-                stage2.out.resize(hash + DIGEST_LENGTH, Melt(0));
-                stage2.ops.push(ReduceOp {
-                    source: hash_src,
-                    ty: ReduceTy::Variable(ma.dat.len()),
-                    destination: hash,
-                });
-                assert_eq!(len + DIGEST_LENGTH, hash);
+        let stage = self.stages.get_mut(stage).unwrap();
+        let ret = stage.push_fixed(step, arr);
 
-                let stage1 = self.stages.get_mut(stage + 1).unwrap();
-                let arr = stage1.out.len();
-                stage1.out.resize(arr + DIGEST_LENGTH, Melt(0));
-                stage1.ops.push(ReduceOp {
-                    source: len,
-                    ty: ReduceTy::Fixed,
-                    destination: arr,
-                });
-                assert_eq!(step + DIGEST_LENGTH, arr);
-
-                let stage = self.stages.get_mut(stage).unwrap();
-                let ret = stage.out.len();
-                stage.out.resize(ret + DIGEST_LENGTH, Melt(0));
-                stage.ops.push(ReduceOp {
-                    source: step,
-                    ty: ReduceTy::Fixed,
-                    destination: ret,
-                });
-
-                ret
-            }
-            Hashable::Pair(a, b) => {
-                // %-  hash-ten-cell
-                // [$(h p.h) $(h q.h)]
-                let a = self.push(stage + 1, a);
-                let b = self.push(stage + 1, b);
-                assert_eq!(a + DIGEST_LENGTH, b);
-                let stage = self.stages.get_mut(stage).unwrap();
-                let ret = stage.out.len();
-                stage.out.resize(ret + DIGEST_LENGTH, Melt(0));
-                stage.ops.push(ReduceOp {
-                    source: a,
-                    ty: ReduceTy::Fixed,
-                    destination: ret,
-                });
-                ret
-            }
-        }
+        ret
     }
-}
 
-enum Hashable<'a> {
-    // [p=hashable q=hashable]
-    Pair(Box<Hashable<'a>>, Box<Hashable<'a>>),
-    // [%leaf p=*]
-    Leaf(Noun),
-    // [%hash p=noun-digest]
-    Hash(NounDigest),
-    // [%list p=(list hashable)]
-    List(Vec<Hashable<'a>>),
-    // [%mary p=mary]
-    Mary(MarySlice<'a>),
-}
+    fn push(&mut self, stage: usize, h: Noun) -> core::result::Result<usize, JetErr> {
+        if self.stages.len() <= stage {
+            assert_eq!(self.stages.len(), stage);
+            self.stages.push(ReduceStage::default());
+        }
 
-impl<'a> Hashable<'a> {
-    unsafe fn from_noun(h: Noun) -> core::result::Result<Self, JetErr> {
         let h = h.as_cell()?;
         let ty = h.head().as_direct().map(|v| v.data());
 
         match ty {
             Ok(tas!(b"hash")) => {
-                //trace!("hash");
                 // ?:  ?=(%hash -.h)
                 //   p.h
-                Ok(Self::Hash(
-                    h.tail()
-                        .uncell()?
-                        .map(|v| Belt(v.as_atom().unwrap().as_u64().unwrap()))
-                        .map(Melt::from),
-                ))
+                let stage = self.stages.get_mut(stage).unwrap();
+                let ret = stage.out.len();
+
+                let d: NounDigest = h
+                    .tail()
+                    .uncell()?
+                    .map(|v| Belt(v.as_atom().unwrap().as_u64().unwrap()))
+                    .map(Melt::from);
+
+                stage.out.extend_from_slice(&d[..]);
+                Ok(ret)
             }
             Ok(tas!(b"leaf")) => {
                 // ?:  ?=(%leaf -.h)
                 //   (hash-noun-varlen p.h)
-                Ok(Self::Leaf(h.tail()))
+                self.push_noun(stage, h.tail())
             }
             Ok(tas!(b"list")) => {
-                //trace!("list");
                 // ?:  ?=(%list -.h)
                 //   (hash-noun-varlen (turn p.h hash-hashable))
-                let mut v = vec![];
+                let l = HoonList::try_from(h.tail()).ok().into_iter().flatten();
+                let (source, len) = self.push_list_inner(stage + 1, l)?;
 
-                for e in HoonList::try_from(h.tail()).ok().into_iter().flatten() {
-                    v.push(Self::from_noun(e)?);
-                }
+                let stage = self.stages.get_mut(stage).unwrap();
+                let ret = stage.push_variable(source, 2 + (DIGEST_LENGTH + 10) * len);
 
-                Ok(Self::List(v))
+                Ok(ret)
             }
             Ok(tas!(b"mary")) => {
                 let Ok(ma) = MarySlice::try_from(h.tail()) else {
                     return jet_err();
                 };
-                Ok(Self::Mary(ma))
+                Ok(self.push_mary(stage, ma))
             }
             _ => {
-                let left = Self::from_noun(h.head())?;
-                let right = Self::from_noun(h.tail())?;
-                Ok(Self::Pair(left.into(), right.into()))
+                // %-  hash-ten-cell
+                // [$(h p.h) $(h q.h)]
+                let a = self.push(stage + 1, h.head())?;
+                let b = self.push(stage + 1, h.tail())?;
+                let stage = self.stages.get_mut(stage).unwrap();
+                let ret = stage.push_fixed(a, b);
+                Ok(ret)
             }
         }
-    }
-}
-
-impl<'a> TryFrom<&'a Noun> for Hashable<'a> {
-    type Error = JetErr;
-
-    fn try_from(value: &'a Noun) -> std::result::Result<Self, Self::Error> {
-        unsafe { Self::from_noun(*value) }
     }
 }
 
 pub fn hash_hashable(stack: &mut NockStack, h: Noun) -> Result {
-    let h = Hashable::try_from(&h)?;
-    let r = hash_hashable_impl(&h);
+    let mut engine = HashEngine::default();
+    engine.push(0, h)?;
+    let r = engine.reduce()[0];
     let r = r.map(Belt::from).map(|v| Atom::new(stack, v.0).as_noun());
     Ok(T(stack, &r))
 }
 
-fn hash_hashable_impl(h: &Hashable) -> NounDigest {
-    // ~/  %hash-hashable
-    // |=  h=hashable
-    // ^-  noun-digest
-    let mut engine = HashEngine::default();
-    engine.push(0, h);
-    engine.reduce()[0]
-}
-
-/// Inplace modify list to a tuple.
-/// If you wish to make this jettable, create a copy of the list, and then call this func.
-pub fn list_to_tuple_inplace(n: Noun) -> Result {
-    let mut prev = None;
-    let mut cell = n.as_cell()?;
-
-    loop {
-        if let Ok(tail) = cell.tail().as_cell() {
-            prev = Some(cell);
-            cell = tail;
-        } else {
-            if let Some(mut prev) = prev {
-                unsafe { (*prev.to_raw_pointer_mut()).tail = cell.head() };
-                return Ok(n);
-            } else {
-                return Ok(cell.head());
-            }
-        }
-    }
-}
-
-pub fn dyck(t: Noun) -> core::result::Result<Vec<Belt>, JetErr> {
+pub fn dyck(t: Noun) -> Vec<Belt> {
     // ~/  %dyck
     // |=  t=*
     // %-  flop
@@ -682,7 +559,7 @@ pub fn dyck(t: Noun) -> core::result::Result<Vec<Belt>, JetErr> {
     }
     let mut res = recurse(t, vec![]);
     res.reverse();
-    Ok(res)
+    res
 }
 
 pub fn bp_build_merk_heap(stack: &mut NockStack, ma: Noun) -> Result {
@@ -739,13 +616,7 @@ pub fn build_merk_heap_impl<T: ElementEx>(stack: &mut NockStack, ma: Noun) -> Re
     for i in 0..m.len {
         let t = snag_as_poly_mary::<T>(m, i as usize);
         let hbp = hashable_poly(t);
-        //let hh1 = hash_hashable_impl(stack, &hbp)?;
-        //let mut engine = HashEngine::default();
-        engine.push(0, &hbp);
-        //let hh2 = engine.reduce();
-        //assert_eq!(hh2.len(), 1);
-        //assert_eq!(hh1, hh2[0]);
-        //res_l.push(hh2);
+        engine.push_mary(0, hbp);
     }
     let res_l = engine.reduce();
     assert_eq!(res_l.len(), m.len as usize);
@@ -816,14 +687,14 @@ pub fn build_merk_heap_impl<T: ElementEx>(stack: &mut NockStack, ma: Noun) -> Re
     Ok(T(stack, &[D(height as u64), digest, heap_mary]))
 }
 
-fn hashable_poly<'a, T: ElementEx>(p: PolySlice<'a, T>) -> Hashable<'a> {
+fn hashable_poly<'a, T: ElementEx>(p: PolySlice<'a, T>) -> MarySlice<'a> {
     let dat =
         unsafe { core::slice::from_raw_parts(p.0.as_ptr() as *const u64, p.0.len() * T::len()) };
-    Hashable::Mary(MarySlice {
+    MarySlice {
         step: T::len() as _,
         len: p.len() as _,
         dat,
-    })
+    }
 }
 
 fn snag_as_digest(stack: &mut NockStack, m: Noun, i: usize) -> Result {
