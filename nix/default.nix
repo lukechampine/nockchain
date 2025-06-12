@@ -49,6 +49,7 @@ in
   hoonc = hoonc.hoonc;
   nockchain = (nockchain-base "release");
   nockchain-v4 = (nockchain-base "release-v4");
+  nockchain-native = (nockchain-base "release-native");
   nockchain-wallet = wallet-base;
   nockchain-metrics-exporter = metrics-exporter-base;
 }
