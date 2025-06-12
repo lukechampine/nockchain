@@ -327,7 +327,7 @@ impl<'a> Hashable<'a> {
                 //   (hash-noun-varlen (turn p.h hash-hashable))
                 let mut v = vec![];
 
-                for e in HoonList::try_from(h.tail())? {
+                for e in HoonList::try_from(h.tail()).ok().into_iter().flatten() {
                     v.push(Self::from_noun(e)?);
                 }
 
@@ -385,16 +385,17 @@ fn hash_hashable_impl(
         Hashable::List(l) => {
             // ?:  ?=(%list -.h)
             //   (hash-noun-varlen (turn p.h hash-hashable))
-            let mut v = vec![];
+            let mut v = vec![Melt::from_u64((l.len() * 5 + 1) as _)];
             for e in l {
                 let d = hash_hashable_impl(stack, e)?;
-                let d = d.map(Belt::from).map(|v| Atom::new(stack, v.0).as_noun());
-                let c = T(stack, &d);
-                v.push(c);
+                v.extend_from_slice(&d);
             }
-            v.push(D(0));
-            let v = T(stack, &v);
-            hash_noun_varlen(v)
+            v.push(Melt::zero());
+            for _ in 0..l.len() {
+                let shape = [0, 0, 1, 0, 1, 0, 1, 0, 1, 1].map(Melt::from_u64);
+                v.extend_from_slice(&shape);
+            }
+            hash_varlen(&v)
         }
         Hashable::Mary(ma) => {
             //   %-  hash-hashable
