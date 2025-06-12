@@ -97,45 +97,18 @@ fn leaf_sequence_impl<T: FromAtom>(mut t: Noun) -> core::result::Result<Vec<T>, 
     Ok(ret)
 }
 
-pub fn init_tip5_state(domain: DirectAtom) -> core::result::Result<[Melt; STATE_SIZE], JetErr> {
-    match domain.data() {
+pub fn init_tip5_state(domain: u64) -> [Melt; STATE_SIZE] {
+    match domain {
         // ^~((reap state-size 0))
-        tas!(b"variable") => Ok([Melt(0); STATE_SIZE]),
+        tas!(b"variable") => [Melt(0); STATE_SIZE],
         // ^~((weld (reap rate 0) (reap capacity (montify 1))))
         tas!(b"fixed") => {
             let zero = [Melt(0); RATE];
             let mont = [Melt::one(); CAPACITY];
-            Ok(concat_arrays!(zero, mont))
+            concat_arrays!(zero, mont)
         }
-        _ => Err(BAIL_EXIT),
+        _ => panic!("Unsupported tip5 state"),
     }
-}
-
-pub fn hash_10(input: [Melt; 10]) -> core::result::Result<NounDigest, JetErr> {
-    // ::  +hash-10: hash list of 10 belts into a list of 5 belts
-    // |=  input=(list belt)
-    // ::  output length is 5
-    // ^-  (list belt)
-
-    // Verify that this list has length 10 and all elems are direct:
-    // ?>  =((lent input) rate)
-    // ?>  (levy input based)
-    // FIXME: acc verify this
-
-    // =.  input   (turn input montify)
-    // let input = input.map(|v| montify(v.0));
-
-    // =/  sponge  (init-tip5-state %fixed)
-    let mut sponge = init_tip5_state(DirectAtom::new(tas!(b"fixed"))?)?;
-
-    // =.  sponge  (permutation (weld input (slag rate sponge)))
-    sponge[..RATE].copy_from_slice(&input);
-    tip5::permute(&mut sponge);
-
-    // (turn (scag digest-length sponge) mont-reduction)
-    let ret: [Melt; DIGEST_LENGTH] = sponge[..DIGEST_LENGTH].try_into().unwrap();
-
-    Ok(ret)
 }
 
 pub fn hash_noun_varlen(n: Noun) -> core::result::Result<NounDigest, JetErr> {
@@ -158,17 +131,22 @@ pub fn hash_noun_varlen(n: Noun) -> core::result::Result<NounDigest, JetErr> {
         .chain(dyck)
         .collect::<Vec<_>>();
 
-    hash_varlen(&belts)
+    Ok(hash_varlen(&belts))
 }
 
-pub fn new_sponge() -> core::result::Result<[Melt; tip5::STATE_SIZE], JetErr> {
-    init_tip5_state(DirectAtom::new(tas!(b"variable"))?)
+pub fn new_sponge(variable: bool) -> [Melt; tip5::STATE_SIZE] {
+    let mode = if variable {
+        tas!(b"variable")
+    } else {
+        tas!(b"fixed")
+    };
+    init_tip5_state(mode)
 }
 
-pub fn absorb_sponge<T: Into<Melt> + Copy>(
+pub fn absorb_sponge<const PAD: bool, T: Into<Melt> + Copy>(
     sponge: &mut [Melt; tip5::STATE_SIZE],
     input: &[T],
-) -> core::result::Result<(), JetErr> {
+) {
     // |=  input=(list belt)
     // ^+  +>.$
     // =*  rng  +>.$
@@ -187,14 +165,14 @@ pub fn absorb_sponge<T: Into<Melt> + Copy>(
     // ::  bring input into montgomery space
     // =.  input  (turn input montify)
     let (input, end) = input.split_at(RATE * q);
-    let mut input = input
+    let input = input
         .chunks_exact(RATE)
         .map(|i| {
             <[T; RATE]>::try_from(i)
                 .unwrap()
                 .map(<T as Into<Melt>>::into)
         })
-        .chain([{
+        .chain(if PAD {
             let mut r = [MaybeUninit::uninit(); RATE];
             let (a, b) = r.split_at_mut(end.len());
             a.iter_mut()
@@ -209,55 +187,77 @@ pub fn absorb_sponge<T: Into<Melt> + Copy>(
             a[0] = MaybeUninit::new(Melt::one());
             b.iter_mut()
                 .for_each(|v| *v = MaybeUninit::new(Melt::zero()));
-            r.map(|v| unsafe { MaybeUninit::assume_init(v) })
-        }]);
+            Some(r.map(|v| unsafe { MaybeUninit::assume_init(v) }))
+        } else {
+            assert_eq!(r, 0);
+            None
+        });
 
     // |-
     // ?:  =(q 0)
     //   rng
-    for _ in (0..=q).rev() {
+    for input_head in input {
         // =.  sponge  (absorb-rate (scag rate input))
 
         // ++  absorb-rate
         //   ?>  =((lent input) rate)
-        let input_head = input.next().unwrap();
-
         //   =.  sponge  (weld input (slag rate sponge))
         sponge[..RATE].copy_from_slice(&input_head);
         //   $:permute
         tip5::permute(sponge);
     }
-
-    Ok(())
 }
 
-pub fn squeeze_sponge(spo: &mut [Melt; tip5::STATE_SIZE]) -> [Melt; RATE] {
+pub fn squeeze_sponge(spo: [Melt; tip5::STATE_SIZE]) -> [Melt; RATE] {
     // |.  ^+  [*(list belt) +.$]
     // =*  rng  +.$
     // ::  squeeze out the full rate and bring out of montgomery space
     // =/  output  (turn (scag rate sponge) mont-reduction)
     let ret = <[Melt; RATE]>::try_from(&spo[..RATE]).unwrap();
-
-    tip5::permute(spo);
-
+    // NOTE: we do not permute the sponge, because that's inefficient
+    // =.  sponge  $:permute
     ret
 }
 
-pub fn hash_varlen<T: Into<Melt> + Copy>(input: &[T]) -> core::result::Result<NounDigest, JetErr> {
+pub fn hash_10(input: [Melt; 10]) -> NounDigest {
+    // ::  +hash-10: hash list of 10 belts into a list of 5 belts
+    // |=  input=(list belt)
+    // ::  output length is 5
+    // ^-  (list belt)
+
+    // Verify that this list has length 10 and all elems are direct:
+    // ?>  =((lent input) rate)
+    // ?>  (levy input based)
+    // FIXME: acc verify this
+
+    // =.  input   (turn input montify)
+    // let input = input.map(|v| montify(v.0));
+    // =/  sponge  (init-tip5-state %fixed)
+    // =.  sponge  (permutation (weld input (slag rate sponge)))
+    // (turn (scag digest-length sponge) mont-reduction)
+
+    hash_any::<false, _>(&input)
+}
+
+pub fn hash_varlen<T: Into<Melt> + Copy>(input: &[T]) -> NounDigest {
+    hash_any::<true, T>(input)
+}
+
+pub fn hash_any<const PAD: bool, T: Into<Melt> + Copy>(input: &[T]) -> NounDigest {
     // |=  input=(list belt)
     // ^-  (list belt)
     // =/  spo  (new:sponge)
-    let mut spo = new_sponge()?;
+    let mut spo = new_sponge(PAD);
 
     // =.  spo  (absorb:spo input)
-    absorb_sponge(&mut spo, input).inspect_err(|e| println!("1: {e:?}"))?;
+    absorb_sponge::<PAD, T>(&mut spo, input);
 
     // =^  output  spo
     //   (squeeze:spo)
-    let output = squeeze_sponge(&mut spo);
+    let output = squeeze_sponge(spo);
 
     // (scag digest-length output)
-    Ok(output[..DIGEST_LENGTH].try_into().unwrap())
+    output[..DIGEST_LENGTH].try_into().unwrap()
 }
 
 pub fn hash_pairs(inp: &[NounDigest]) -> core::result::Result<Vec<NounDigest>, JetErr> {
@@ -275,9 +275,7 @@ pub fn hash_pairs(inp: &[NounDigest]) -> core::result::Result<Vec<NounDigest>, J
         // :: (weld <...>)
         let welded = concat_arrays!(first, second);
         // hash-10:tip5
-        let hashed = hash_10(welded)
-            .inspect_err(|e| println!("hash_10 failed: {e:?}"))
-            .map_err(|_| JetErr::Punt)?;
+        let hashed = hash_10(welded);
         ret.push(hashed);
     }
 
@@ -395,7 +393,7 @@ fn hash_hashable_impl(
                 let shape = [0, 0, 1, 0, 1, 0, 1, 0, 1, 1].map(Melt::from_u64);
                 v.extend_from_slice(&shape);
             }
-            hash_varlen(&v)
+            Ok(hash_varlen(&v))
         }
         Hashable::Mary(ma) => {
             //   %-  hash-hashable
@@ -409,7 +407,7 @@ fn hash_hashable_impl(
             //   hash+(hash-belts-list (bpoly-to-list array:(~(change-step ave p.h) 1)))
             let dat = &ma.dat;
             let dat = unsafe { core::mem::transmute::<&[u64], &[Belt]>(dat) };
-            let hash = hash_varlen(dat).inspect_err(|e| trace!("hbl {e:?}"))?;
+            let hash = hash_varlen(dat);
             let hash = Hashable::Hash(hash);
 
             let f = Hashable::Pair(len.into(), hash.into());
@@ -423,7 +421,7 @@ fn hash_hashable_impl(
             let p = hash_hashable_impl(stack, a)?;
             let q = hash_hashable_impl(stack, b)?;
             let b = concat_arrays!(p, q);
-            hash_10(b)
+            Ok(hash_10(b))
         }
     }
 }
