@@ -11,7 +11,7 @@ pub enum FieldError {
     OrderedRootError,
 }
 
-pub fn based_check(a: u64) -> bool {
+pub const fn based_check(a: u64) -> bool {
     a < PRIME
 }
 
@@ -27,7 +27,7 @@ macro_rules! based {
 }
 
 #[inline(always)]
-pub fn badd(a: u64, b: u64) -> u64 {
+pub const fn badd(a: u64, b: u64) -> u64 {
     based!(a);
     based!(b);
     // NOTE: see https://docs.rs/twenty-first/latest/src/twenty_first/math/b_field_element.rs.html#686-707

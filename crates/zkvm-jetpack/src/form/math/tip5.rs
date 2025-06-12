@@ -1,9 +1,10 @@
 use num_traits::Pow;
+use const_for::const_for;
 
 use crate::form::math::PRIME_128;
 use crate::form::Melt;
 
-use super::montify;
+use super::{badd, montify, montiply};
 
 pub const DIGEST_LENGTH: usize = 5;
 pub const STATE_SIZE: usize = 16;
@@ -160,45 +161,46 @@ const ROUND_CONSTANTS2: [Melt; NUM_ROUNDS * STATE_SIZE] = const {
     ret
 };
 
-pub fn permute(sponge: &mut [Melt; 16]) {
-    for i in 0..NUM_ROUNDS {
-        let a = sbox_layer(array_ref![sponge, 0, STATE_SIZE]);
+pub const fn permute(sponge: &mut [Melt; 16]) {
+    const_for!(i in 0..NUM_ROUNDS => {
+        let a = sbox_layer(sponge);
         let b = linear_layer(&a);
 
-        for j in 0..STATE_SIZE {
+        const_for!(j in 0..STATE_SIZE => {
             let r_cons = ROUND_CONSTANTS2[i * STATE_SIZE + j];
-            sponge[j] = r_cons + b[j];
-        }
-    }
+            sponge[j] = Melt(badd(r_cons.0, b[j].0));
+        });
+    });
 }
 
-fn sbox_layer(state: &[Melt; STATE_SIZE]) -> [Melt; STATE_SIZE] {
+const fn sbox_layer(state: &[Melt; STATE_SIZE]) -> [Melt; STATE_SIZE] {
     let mut res: [Melt; STATE_SIZE] = [Melt(0); STATE_SIZE];
 
-    for i in 0..NUM_SPLIT_AND_LOOKUP {
+    const_for!(i in 0..NUM_SPLIT_AND_LOOKUP => {
         let mut bytes = state[i].0.to_le_bytes();
-        for i in 0..8 {
+        const_for!(i in 0..8 => {
             bytes[i] = LOOKUP_TABLE[bytes[i] as usize];
-        }
+        });
         res[i] = Melt(u64::from_le_bytes(bytes));
-    }
+    });
 
-    for j in NUM_SPLIT_AND_LOOKUP..STATE_SIZE {
-        res[j] = state[j].pow(7u64);
-    }
+    const_for!(j in NUM_SPLIT_AND_LOOKUP..STATE_SIZE => {
+        res[j] = state[j].pow(7);
+    });
+
     res
 }
 
-fn linear_layer(state: &[Melt; 16]) -> [Melt; 16] {
+const fn linear_layer(state: &[Melt; 16]) -> [Melt; 16] {
     let mut result = [Melt(0u64); 16];
 
-    for i in 0..16 {
-        for j in 0..16 {
+    const_for!(i in 0..16 => {
+        const_for!(j in 0..16 => {
             let matrix_element = MDS_MATRIX_MONT[i][j];
-            let product = matrix_element * state[j];
-            result[i] = result[i] + product;
-        }
-    }
+            let product = montiply(matrix_element.0, state[j].0);
+            result[i] = Melt(badd(result[i].0, product));
+        });
+    });
 
     result
 }
