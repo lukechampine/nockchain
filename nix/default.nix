@@ -48,7 +48,7 @@ in
 {
   hoonc = hoonc.hoonc;
   nockchain = (nockchain-base "release");
-  nockchain-v4 = (nockchain-base "release-v4");
+  nockchain-v4 = if lib.strings.hasInfix pkgs.system "x86_64-" then (nockchain-base "release-v4") else throw "release-v4 is only supported on x86_64 targets!";
   nockchain-native = (nockchain-base "release-native");
   nockchain-wallet = wallet-base;
   nockchain-metrics-exporter = metrics-exporter-base;
