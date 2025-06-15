@@ -35,19 +35,28 @@
     ::
     ::  use this for production
     |=  arg=load-kernel-state:dk
+    ~&  [%nockchain-state-version -.arg]
     ::  cut
-    |^  ~>  %bout  (check-checkpoints (state-n-to-1 arg))
+    |^
+    ~>  %bout  (check-checkpoints (state-n-to-1 arg))
     ::  this arm should be renamed each state upgrade to state-n-to-[latest] and extended to loop through all upgrades
     ++  state-n-to-1
       |=  arg=load-kernel-state:dk
       ^-  kernel-state:dk
-      ?.  ?=(%1 -.arg)
+      ?.  ?=(%2 -.arg)
         ~>  %slog.[0 leaf+"state upgrade required"]
         ?-  -.arg
             ::
           %0  $(arg (state-0-to-1 arg))
+          %1  $(arg (state-1-to-2 arg))
         ==
       arg
+    ::  upgrade kernel-state-1 to kernel-state-2
+    ++  state-1-to-2
+      |=  arg=kernel-state-1:dk
+      ^-  kernel-state-2:dk
+      ~>  %slog.[0 leaf+"state version 0 to version 1"]
+      [%2 c.arg p.arg a.arg m.arg d.arg constants.arg]
     ::  upgrade kernel-state-0 to kernel-state-1
     ++  state-0-to-1
       |=  arg=kernel-state-0:dk
@@ -73,6 +82,12 @@
       ==
     ++  check-checkpoints
       |=  arg=kernel-state:dk
+      =/  mainnet=(unit ?)  (~(is-mainnet dumb-derived d.arg constants.arg) c.arg)
+      ~&  check-checkpoints-mainnet+mainnet
+      ?~  mainnet
+        arg
+      ?:  u.mainnet
+        arg
       =/  checkpoints  ~(tap z-by checkpointed-digests:con)
       |-  ^-  kernel-state:dk
       ?~  checkpoints  arg
@@ -96,6 +111,12 @@
     ^-  (unit (unit *))
     =/  =(pole)  arg
     ?+  pole  ~
+    ::
+        [%mainnet ~]
+      `(is-mainnet:der c.k)
+    ::
+        [%genesis-seal-set ~]
+      ``?=(^ genesis-seal.c.k)
     ::
         [%blocks ~]
       ^-  (unit (unit (z-map block-id:t page:t)))
@@ -306,6 +327,7 @@
       ::
       ::  the crash case is when we get a bad block from the npc driver or
       ::  from the kernel itself.
+      ::
       =/  check-page-without-txs=(reason:dk ~)
         (validate-page-without-txs-da:con pag now)
       ?:  ?=(%.n -.check-page-without-txs)
@@ -316,6 +338,7 @@
         ::  since its possible for another poke to be processed after %track %add
         ::  but before %liar-block-id, so more peers may be added to tracking
         ::  before %liar-block-id is processed.
+        ~&  >>  page-failed+check-page-without-txs
         %+  snoc  block-effs
         [%liar-block-id digest.pag +.check-page-without-txs]
       ::
@@ -464,7 +487,8 @@
      ::
      ::  check that the message matches what's in the seal
      =/  check-msg=?
-       ?~  genesis-seal  %.y
+       ?~  genesis-seal
+         ~>  %slog.[0 leaf+"fatal: genesis seal not set, cannot check genesis block"]  !!
        =((hash:page-msg:t msg.pag) msg-hash.u.genesis-seal)
      ~&  :*  check-digest+check-digest
              check-pow-hash+check-pow-hash
@@ -519,7 +543,7 @@
       ?.  ?=(%puzzle -.puzzle)
         %.n
       ?&  =((block-commitment:page:t pag) commitment.puzzle)
-          =(pow-len.zeke len.puzzle)
+          =(pow-len:t len.puzzle)
       ==
     ::
     ++  heard-tx
@@ -680,14 +704,15 @@
       ::  page is validated, update consensus and derived state
       =.  c.k  (add-page:con pag acc now)
       =/  print-var
+        ?>  ?=(^ pow.pag)
         %-  trip
         ^-  @t
         %+  rap  3
         :~  'block '  (to-b58:hash:t digest.pag)
             ' added to validated blocks at '  (scot %u height.pag)
+            ' with proof version '  (scot %u version.u.pow.pag)
         ==
       ~>  %slog.[0 %leaf^print-var]
-      ::
       =/  effs=(list effect:dk)
         ::  request block N+1 on each peer's heaviest chain
         :+  [%request %block %by-height +(height.pag)]
@@ -697,8 +722,10 @@
       ::
       =/  old-heavy  heaviest-block.c.k
       =.  c.k  (update-heaviest:con pag)
+      ::
+      =/  is-new-heaviest=?  !=(old-heavy heaviest-block.c.k)
       ::  if block is the new heaviest block, gossip it to peers
-      =?  effs  !=(old-heavy heaviest-block.c.k)
+      =?  effs  is-new-heaviest
         ~>  %slog.[0 %leaf^"dumbnet: new heaviest block!"]
         =/  span=span-effect:dk
           :+  %span  %new-heaviest-chain
@@ -707,6 +734,37 @@
             span
             effs
         ==
+      ::  case (a): block validated but not new heaviest - it's on a side chain
+      =?  effs  !is-new-heaviest
+          :_  effs
+          :+  %span  %orphaned-block
+          :~  'block_id'^s+(to-b58:hash:t digest.pag)
+              'block_height'^n+height.pag
+              'event_type'^s+'side-chain-orphan'
+          ==
+      ::
+      =/  is-reorg=?
+        ?~  old-heavy  %.n  ::  first block after genesis, not a reorg
+        !=(parent.pag u.old-heavy)
+      ::  case (b): new heaviest block - check if it's a reorganization
+      =?  effs  is-reorg
+        ?~  old-heavy  effs
+        ::  reorganization detected - previous heaviest block is now orphaned
+        =/  orphaned-block-span=span-effect:dk
+          :+  %span  %orphaned-block
+          :~  'block_id'^s+(to-b58:hash:t u.old-heavy)
+              'new_heaviest_block'^s+(to-b58:hash:t digest.pag)
+              'new_height'^n+height.pag
+              'event_type'^s+'reorg-orphan'
+          ==
+        =/  reorg-span=span-effect:dk
+          :+  %span  %chain-reorg
+          :~  'block_id'^s+(to-b58:hash:t u.old-heavy)
+              'new_heaviest_height'^n+height.pag
+              'event_type'^s+'reorg'
+          ==
+        [orphaned-block-span reorg-span effs]
+      ::
       ::  refresh pending state
       =.  p.k  (refresh-after-new-block:pen c.k retain.a.k)
       ::
@@ -800,6 +858,8 @@
           %btc-data
         do-btc-data
       ::
+      ::  !!! COMMANDS BELOW ARE ONLY FOR TESTING. NEVER CALL IF RUNNING MAINNET !!!
+      ::
           %set-constants
         `k(constants p.command)
       ==
@@ -841,18 +901,22 @@
         =/  commit=block-commitment:t
           (block-commitment:page:t candidate-block.m.k)
         ?.  =(bc.command commit)
-          ~&  "mined for wrong (old) block commitment"  `k
+          ~&  "mined for wrong (old) block commitment"
+          (do-mine nonce.command)
         :: ?.  =(nonce.command next-nonce.m.k)
-        ::   ~&  "mined wrong (old) nonce"  `k
-        ?:  ?:  =(*page-number:t candidate-block.m.k)
-              %+  check-target:mine  dig.command
-                (~(got z-by targets.c.k) parent.candidate-block.m.k)
-              :: If this is the genesis block, we need to check its validity this way
-              %+  check-target:mine  (proof-to-pow:zeke prf.command)
-                  target.candidate-block.m.k
-          ~&  "lucky proof! calling heard block"
+        ::   ~&  "mined wrong (old) nonce"
+        ::   =/  version=proof-version:sp
+        ::     (height-to-proof-version:con height.candidate-block.m.k)
+        ::   :_  k
+        ::   ?-  version
+        ::     %0  [%mine %0 commit next-nonce.m.k pow-len:t]~
+        ::     %1  [%mine %1 commit next-nonce.m.k pow-len:t]~
+        ::   ==
+        ?:  %+  check-target:mine  dig.command
+            (~(got z-by targets.c.k) parent.candidate-block.m.k)
           =.  m.k  (set-pow:min prf.command)
           =.  m.k  set-digest:min
+          ~&  "lucky proof! calling heard block"
           (heard-block /poke/miner now candidate-block.m.k eny)
         :: mine the next nonce
         ~&  "unlucky :( calling do-mine"
@@ -1005,7 +1069,7 @@
         =.  next-nonce.m.k  nonce
         ~&  mining-on+nonce
         :_  k
-        [%mine pow-len:zeke commit nonce]~
+        [%mine %0 commit nonce pow-len:t]~
       ::
       ::  only send a %elders request for reasonable heights
       ++  missing-parent-effects

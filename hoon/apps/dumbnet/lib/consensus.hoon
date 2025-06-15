@@ -21,6 +21,16 @@
       [%0 (from-b58:hash:t '7pR2bvzoMvfFcxXaHv4ERm8AgEnExcZLuEsjNgLkJziBkqBLidLg39Y')]
   ==
 ::
+::  map a block heigh to a corresponding proof version
+++  height-to-proof-version
+  |=  height=page-number:t
+  ^-  proof-version:sp
+  ?:  (gte height proof-version-1-start)
+    %1
+  %0
+::  What block to start using proof version 1
+++  proof-version-1-start  6.750
+::
 ::  +set-genesis-seal: set .genesis-seal
 ++  set-genesis-seal
   |=  [height=page-number:t msg-hash=@t]
@@ -219,6 +229,10 @@
 ++  validate-page-without-txs
   |=  [pag=page:t now-secs=@]
   ^-  (reason:dk ~)
+  =/  version  (height-to-proof-version height.pag)
+  ?.  =(version version:(need pow.pag))
+    ~&  [%expected-vs-actual version version:(need pow.pag)]
+    [%.n %proof-version-invalid]
   =/  par=page:t  (to-page:local-page:t (~(got z-by blocks.c) parent.pag))
   ::  this is already checked in +heard-block but is done here again
   ::  to avoid a footgun
@@ -266,10 +280,15 @@
   ?.  =(height.pag +(height.par))
     [%.n %page-height-invalid]
   ::
-  ::  check if digest matches checkpointed history
-  ?.  ?|  ?!((~(has z-by checkpointed-digests) height.pag))
+  ::  check if digest matches checkpointed history, skip check if fakenet
+  ?~  genesis-seal.c
+    ~>  %slog.[0 leaf+"fatal: genesis seal not set!"]
+    [%.n %genesis-seal-not-set]
+  ?.  ?|  !=(realnet-genesis-msg:dk msg-hash.u.genesis-seal.c)
+          ?!((~(has z-by checkpointed-digests) height.pag))
           =(digest.pag (~(got z-by checkpointed-digests) height.pag))
       ==
+    ~&  %checkpoint-match-failed
     [%.n %checkpoint-match-failed]
   ::
   =/  check-heaviness=?

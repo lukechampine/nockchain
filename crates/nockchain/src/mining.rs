@@ -11,7 +11,7 @@ use nockapp::nockapp::wire::Wire;
 use nockapp::nockapp::NockAppError;
 use nockapp::noun::slab::NounSlab;
 use nockapp::noun::{AtomExt, NounExt};
-use nockvm::noun::{Atom, FullDebugCell, D, T};
+use nockvm::noun::{Atom, FullDebugCell, D, NO, T, YES};
 use nockvm_macros::tas;
 use tokio::time::sleep;
 use std::sync::Arc;
@@ -199,7 +199,7 @@ pub async fn mining_attempt(
     let mut jset = JoinSet::new();
 
     let r = unsafe { candidate.root() };
-    let Ok([length, block_commitment, nonce]) = r.uncell() else {
+    let Ok([version, block_commitment, nonce, length]) = r.uncell() else {
         error!("Invalid mining request sent!");
         return;
     };
@@ -225,7 +225,7 @@ pub async fn mining_attempt(
         let mut nonce = nonce;
         nonce[pnid] = Atom::new(&mut slab, n).as_noun();
         let nonce = T(&mut slab, &nonce);
-        let candidate = T(&mut slab, &[length, block_commitment, nonce]);
+        let candidate = T(&mut slab, &[version, block_commitment, nonce, length]);
         slab.copy_into(candidate);
         slabs.push(slab);
     }
@@ -398,7 +398,7 @@ async fn enable_mining(handle: &NockAppHandle, enable: bool) -> Result<PokeResul
         .expect("Failed to create enable-mining atom");
     let enable_mining_poke = T(
         &mut enable_mining_slab,
-        &[D(tas!(b"command")), enable_mining.as_noun(), D(if enable { 0 } else { 1 })],
+        &[D(tas!(b"command")), enable_mining.as_noun(), if enable { YES } else { NO }],
     );
     enable_mining_slab.set_root(enable_mining_poke);
     handle

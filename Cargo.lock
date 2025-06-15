@@ -3974,10 +3974,10 @@ dependencies = [
  "equix",
  "futures",
  "hoonc",
+ "ibig",
  "kernels",
  "libp2p",
  "nockapp",
- "nockchain-bitcoin-sync",
  "nockchain-libp2p-io",
  "nockvm",
  "nockvm_macros",
@@ -3987,20 +3987,6 @@ dependencies = [
  "tracing",
  "tracing-test",
  "vergen",
- "zkvm-jetpack",
-]
-
-[[package]]
-name = "nockchain-bitcoin-sync"
-version = "0.1.0"
-dependencies = [
- "bitcoincore-rpc",
- "ibig",
- "nockapp",
- "nockvm",
- "nockvm_macros",
- "tokio",
- "tracing",
  "zkvm-jetpack",
 ]
 
@@ -4050,6 +4036,7 @@ dependencies = [
  "nockapp",
  "nockvm",
  "nockvm_macros",
+ "rand 0.8.5",
  "serde",
  "serde_bytes",
  "tokio",
