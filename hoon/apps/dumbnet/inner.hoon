@@ -1068,8 +1068,13 @@
           (block-commitment:page:t candidate-block.m.k)
         =.  next-nonce.m.k  nonce
         ~&  mining-on+nonce
+        =/  version=proof-version:sp
+          (height-to-proof-version:con height.candidate-block.m.k)
         :_  k
-        [%mine %0 commit nonce pow-len:t]~
+        ?-  version
+          %0  [%mine %0 commit nonce pow-len:t]~
+          %1  [%mine %1 commit nonce pow-len:t]~
+        ==
       ::
       ::  only send a %elders request for reasonable heights
       ++  missing-parent-effects
