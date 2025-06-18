@@ -4060,6 +4060,7 @@ dependencies = [
  "either",
  "getrandom 0.2.16",
  "gnort",
+ "ibig",
  "image",
  "metrics",
  "metrics-exporter-prometheus",

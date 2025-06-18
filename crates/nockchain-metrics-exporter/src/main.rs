@@ -1,5 +1,6 @@
 #![allow(clippy::doc_overindented_list_items)]
 
+use ibig::UBig;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use metrics_util::MetricKindMask;
 use nockapp::kernel::boot::{default_boot_cli, init_default_tracing};
@@ -186,11 +187,51 @@ impl NpcHandle {
     }
 }
 
+fn target_to_difficulty(target: UBig) -> f64 {
+    let p = UBig::from(0xffffffff00000001u64);
+    let p1: UBig = p.clone() - 1;
+    let mut max_target = p1.clone();
+    for i in 1..=4 {
+        max_target += p1.clone() * p.pow(i);
+    }
+
+    (max_target / target).to_f64()
+}
+
+fn parse_bn(mut n: Noun) -> UBig {
+    let mut cnt = 0;
+    let mut val = UBig::default();
+
+    while let Ok(c) = n.as_cell() {
+        let Ok(h) = c.head().as_atom().and_then(|v| v.as_direct()) else {
+            // TODO: throw error?
+            break;
+        };
+        let v = h.data();
+        if cnt > 0 {
+            let v = UBig::from(v);
+            let v2 = v.clone() << (32 * (cnt - 1));
+            val += v2;
+        }
+        cnt += 1;
+        n = c.tail();
+    }
+
+    val
+}
+
 struct Exporter {
     npc: NpcHandle,
     npc_handler: tokio::task::JoinHandle<()>,
     npc_client: tokio::task::JoinHandle<Result<(), NockAppError>>,
     id: String,
+}
+
+impl Drop for Exporter {
+    fn drop(&mut self) {
+        self.npc_handler.abort();
+        self.npc_client.abort();
+    }
 }
 
 impl Exporter {
@@ -257,7 +298,7 @@ impl Exporter {
         };
         let eff = unsafe { poke.root() };
         let [_, _, _, _, summary] = pull_args(*eff)?;
-        let [_digest, timestamp, epoch_counter, _target, _accumulated_work, height, _parent] =
+        let [_digest, timestamp, epoch_counter, target, accumulated_work, height, _parent] =
             pull_args(summary)?;
 
         // TODO: unix timestamp conversion
@@ -270,10 +311,16 @@ impl Exporter {
 
         let height = height.as_direct()?.data() as f64;
         let epoch_counter = epoch_counter.as_direct()?.data() as f64;
+        let target = parse_bn(target);
+        let difficulty = target_to_difficulty(target);
+        let accumulated_work = parse_bn(accumulated_work);
+        let accumulated_work = accumulated_work.to_f64();
 
         gauge!("nockchain_block_timestamp").set(timestamp);
         gauge!("nockchain_block_height").set(height);
         gauge!("nockchain_block_epoch_counter").set(epoch_counter);
+        gauge!("nockchain_block_difficulty").set(difficulty);
+        gauge!("nockchain_block_accumulated_work").set(accumulated_work);
 
         Ok(())
     }
@@ -355,23 +402,21 @@ async fn main() -> Result<(), NockAppError> {
     let mut error_cnt = 0;
 
     loop {
-        let Some(e) = exporter.acquire().await else {
-            return Ok(());
-        };
-
-        match e.update().await {
-            Err(NockAppError::Timeout) => {
-                exporter.disconnect();
-            }
-            Err(e) => {
-                debug!("Exporter error: {e:?}");
-                error_cnt += 1;
-                if error_cnt > 5 {
-                    error_cnt = 1;
+        if let Some(e) = exporter.acquire().await {
+            match e.update().await {
+                Err(NockAppError::Timeout) => {
                     exporter.disconnect();
                 }
+                Err(e) => {
+                    debug!("Exporter error: {e:?}");
+                    error_cnt += 1;
+                    if error_cnt > 5 {
+                        error_cnt = 1;
+                        exporter.disconnect();
+                    }
+                }
+                _ => error_cnt = 0,
             }
-            _ => error_cnt = 0,
         }
 
         interval.tick().await;

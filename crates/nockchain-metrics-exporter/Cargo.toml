@@ -24,3 +24,4 @@ metrics.workspace = true
 metrics-util.workspace = true
 metrics-exporter-prometheus.workspace = true
 gnort.workspace = true
+ibig.workspace = true
