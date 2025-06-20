@@ -1,7 +1,7 @@
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
+use futures::future::join_all;
 use kernels::miner::KERNEL;
 use nockapp::kernel::boot::TraceOpts;
 use nockapp::kernel::checkpoint::JamPaths;
@@ -13,11 +13,11 @@ use nockapp::noun::slab::NounSlab;
 use nockapp::noun::{AtomExt, NounExt};
 use nockvm::noun::{Atom, FullDebugCell, D, NO, T, YES};
 use nockvm_macros::tas;
-use tokio::time::sleep;
 use std::sync::Arc;
-use tempfile::tempdir;
+use tempfile::{tempdir, TempDir};
+use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::Notify;
-use tokio::task::JoinSet;
+use tokio::task::JoinHandle;
 use tracing::{debug, error, instrument, trace, warn};
 use zkvm_jetpack::noun::noun_ext::NounExt as ZNounExt;
 
@@ -123,13 +123,15 @@ pub fn create_mining_driver(
                 return Ok(());
             }
             let mut next_attempt: Option<NounSlab> = None;
-            let mut current_attempt: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
+            let mut current_attempt: tokio::task::JoinSet<MiningPool> = tokio::task::JoinSet::new();
             let mut cur_notify: Option<Arc<Notify>> = None;
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("time went backwards");
             let run_id = now.as_secs().to_string();
             let mut run_cnt = 0;
+
+            let mut pool = Some(MiningPool::new(miners, trc).await);
 
             loop {
                 tokio::select! {
@@ -156,15 +158,17 @@ pub fn create_mining_driver(
                                 let (cur_handle, attempt_handle) = handle.dup();
                                 handle = cur_handle;
                                 let notif = Arc::new(Notify::new());
-                                current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle, notif.clone(), trc.clone(), run_id.clone(), fakenet, run_cnt, miners));
+                                current_attempt.spawn(pool.take().unwrap().mining_attempt(candidate_slab, attempt_handle, run_id.clone(), fakenet, run_cnt));
                                 run_cnt += 1;
                                 cur_notify = Some(notif);
                             }
                         }
                     },
-                    mining_attempt_res = current_attempt.join_next(), if !current_attempt.is_empty()  => {
-                        if let Some(Err(e)) = mining_attempt_res {
-                            warn!("Error during mining attempt: {e:?}");
+                    mining_attempt_res = current_attempt.join_next(), if !current_attempt.is_empty() => {
+                        match mining_attempt_res {
+                            Some(Err(e)) => warn!("Error during mining attempt: {e:?}"),
+                            Some(Ok(p)) => pool = Some(p),
+                            _ => (),
                         }
                         let Some(candidate_slab) = next_attempt else {
                             continue;
@@ -173,7 +177,7 @@ pub fn create_mining_driver(
                         let (cur_handle, attempt_handle) = handle.dup();
                         handle = cur_handle;
                         let notif = Arc::new(Notify::new());
-                        current_attempt.spawn(mining_attempt(candidate_slab, attempt_handle, notif.clone(), trc.clone(), run_id.clone(), fakenet, run_cnt, miners));
+                        current_attempt.spawn(pool.take().unwrap().mining_attempt(candidate_slab, attempt_handle, run_id.clone(), fakenet, run_cnt));
                         run_cnt += 1;
                         cur_notify = Some(notif);
 
@@ -184,150 +188,182 @@ pub fn create_mining_driver(
     })
 }
 
-pub async fn mining_attempt(
-    candidate: NounSlab,
-    mut handle: NockAppHandle,
-    cancel_notify: Arc<Notify>,
-    trc: TraceOpts,
-    run_id: String,
-    fakenet: bool,
-    run_cnt: usize,
-    miners: usize,
-) -> () {
-    debug!("New mining attempt");
-
-    let mut jset = JoinSet::new();
-
-    let r = unsafe { candidate.root() };
-    let Ok([version, block_commitment, nonce, length]) = r.uncell() else {
-        error!("Invalid mining request sent!");
-        return;
-    };
-
-    let Ok(nonce) = nonce.uncell::<5>() else {
-        error!("Invalid nonce sent!");
-        return;
-    };
-
-    let mut slabs = vec![];
-
-    for id in 0..miners {
-        // Modify the nonce for the attempt
-        let mut slab = candidate.clone();
-        // Permute the nonce
-        let pnid = id % 5;
-        let n = nonce[pnid];
-        let Ok(n) = n.as_atom().and_then(|n| n.as_u64()) else {
-            error!("Cannot parse nonce part {pnid} as atom! ({n:?})");
-            return;
-        };
-        let n = n ^ (id as u64);
-        let mut nonce = nonce;
-        nonce[pnid] = Atom::new(&mut slab, n).as_noun();
-        let nonce = T(&mut slab, &nonce);
-        let candidate = T(&mut slab, &[version, block_commitment, nonce, length]);
-        slab.copy_into(candidate);
-        slabs.push(slab);
-    }
-
-    let mined = Arc::new(AtomicBool::new(false));
-
-    for (id, slab) in slabs.into_iter().enumerate() {
-        let (h, ah) = handle.dup();
-        handle = h;
-        jset.spawn(mining_attempt_inner(
-            slab,
-            ah,
-            cancel_notify.clone(),
-            mined.clone(),
-            trc.clone(),
-            run_id.clone(),
-            fakenet,
-            run_cnt,
-            id,
-        ));
-    }
-
-    jset.join_all().await;
+struct MiningPool {
+    miner_loops: Vec<JoinHandle<()>>,
+    tx: Vec<Sender<NounSlab>>,
+    rx: Vec<Receiver<NounSlab>>,
 }
 
-pub async fn mining_attempt_inner(
-    candidate: NounSlab,
-    handle: NockAppHandle,
-    cancel_notify: Arc<Notify>,
-    mined: Arc<AtomicBool>,
-    trc: TraceOpts,
-    run_id: String,
-    fakenet: bool,
-    run_cnt: usize,
-    miner_id: usize,
-) -> () {
-    let snapshot_dir =
-        tokio::task::spawn_blocking(|| tempdir().expect("Failed to create temporary directory"))
-            .await
-            .expect("Failed to create temporary directory");
-    let hot_state = zkvm_jetpack::hot::produce_prover_hot_state();
-    let snapshot_path_buf = snapshot_dir.path().to_path_buf();
-    let jam_paths = JamPaths::new(snapshot_dir.path());
-    // Spawns a new std::thread for this mining attempt
-    let kernel =
-        Kernel::load_with_hot_state(snapshot_path_buf, jam_paths, KERNEL, &hot_state, trc.into())
-            .await
-            .expect("Could not load mining kernel");
-
-    let cancel_task = async {
-        cancel_notify.notified().await;
-        cancel_notify.notify_one();
-        // FIXME HACK: allowing other miners 10 seconds to finish proofs before cancelling
-        if mined.load(Ordering::Relaxed) {
-            debug!("Waiting 10 secs for proof to finish...");
-            sleep(Duration::from_secs(10)).await;
+impl Drop for MiningPool {
+    fn drop(&mut self) {
+        for l in &self.miner_loops {
+            l.abort();
         }
-        debug!("Cancelling mining attempt for {miner_id}");
-    };
+    }
+}
 
-    let main_task = async {
-        let candidate_jam = candidate.jam();
-        let effects_slab = kernel
-            .poke(MiningWire::Candidate.to_wire(), candidate)
-            .await
-            .expect("Could not poke mining kernel with candidate");
-        for effect in effects_slab.to_vec() {
-            let Ok(effect_cell) = (unsafe { effect.root().as_cell() }) else {
-                drop(effect);
-                continue;
+impl MiningPool {
+    pub async fn new(miners: usize, trc: TraceOpts) -> Self {
+        let mut miner_loops = vec![];
+        let mut tx = vec![];
+        let mut rx = vec![];
+        for _ in 0..miners {
+            let (out, r) = mpsc::channel(1);
+            let (t, inp) = mpsc::channel(1);
+            let miner = Miner::new(trc.clone()).await;
+            miner_loops.push(tokio::spawn(miner.mine_loop(inp, out)));
+            tx.push(t);
+            rx.push(r);
+        }
+        Self {
+            miner_loops,
+            tx,
+            rx,
+        }
+    }
+
+    pub async fn mining_attempt(
+        mut self,
+        candidate: NounSlab,
+        handle: NockAppHandle,
+        run_id: String,
+        fakenet: bool,
+        run_cnt: usize,
+    ) -> Self {
+        self.mining_attempt_inner(candidate, handle, run_id, fakenet, run_cnt)
+            .await;
+        self
+    }
+
+    async fn mining_attempt_inner(
+        &mut self,
+        candidate: NounSlab,
+        handle: NockAppHandle,
+        run_id: String,
+        fakenet: bool,
+        run_cnt: usize,
+    ) {
+        debug!("New mining attempt");
+
+        let mut jset = vec![];
+
+        let r = unsafe { candidate.root() };
+        let Ok([version, block_commitment, nonce, length]) = r.uncell() else {
+            error!("Invalid mining request sent!");
+            return;
+        };
+
+        let Ok(nonce) = nonce.uncell::<5>() else {
+            error!("Invalid nonce sent!");
+            return;
+        };
+
+        for (id, (tx, rx)) in self.tx.iter().zip(self.rx.iter_mut()).enumerate() {
+            // Modify the nonce for the attempt
+            let mut slab = candidate.clone();
+            // Permute the nonce
+            let pnid = id % 5;
+            let n = nonce[pnid];
+            let Ok(n) = n.as_atom().and_then(|n| n.as_u64()) else {
+                error!("Cannot parse nonce part {pnid} as atom! ({n:?})");
+                return;
             };
-            unsafe {
-                trace!(
-                    "Miner {miner_id} effect {:?}",
-                    effect.root().as_cell().as_ref().map(FullDebugCell)
-                );
-            }
-            if effect_cell.head().eq_bytes("command") {
-                if miner_id == 0 {
-                    let dir = std::path::Path::new("miner_jams")
-                        .join(if fakenet { "fakenet" } else { "mainnet" })
-                        .join(&run_id)
-                        .join(run_cnt.to_string());
-                    tokio::fs::create_dir_all(&dir).await.unwrap();
-                    let _ = tokio::fs::write(dir.join("event.jam"), candidate_jam.clone()).await;
-                    let _ = tokio::fs::write(dir.join("effect.jam"), effect.jam()).await;
+            let n = n ^ (id as u64);
+            let mut nonce = nonce;
+            nonce[pnid] = Atom::new(&mut slab, n).as_noun();
+            let nonce = T(&mut slab, &nonce);
+            let candidate = T(&mut slab, &[version, block_commitment, nonce, length]);
+            slab.copy_into(candidate);
+            jset.push(async move {
+                let jam = slab.jam();
+                tx.send(slab).await.ok()?;
+                rx.recv().await.zip(Some((id, jam)))
+            });
+        }
+
+        let ret = join_all(jset).await;
+
+        for (effects_slab, (miner_id, candidate_jam)) in ret.into_iter().filter_map(|v| v) {
+            for effect in effects_slab.to_vec() {
+                let Ok(effect_cell) = (unsafe { effect.root().as_cell() }) else {
+                    drop(effect);
+                    continue;
+                };
+                unsafe {
+                    trace!(
+                        "Miner {miner_id} effect {:?}",
+                        effect.root().as_cell().as_ref().map(FullDebugCell)
+                    );
                 }
-                mined.fetch_or(true, Ordering::Relaxed);
-                handle
-                    .poke(MiningWire::Mined.to_wire(), effect)
-                    .await
-                    .expect("Could not poke nockchain with mined PoW");
+                if effect_cell.head().eq_bytes("command") {
+                    if miner_id == 0 {
+                        let dir = std::path::Path::new("miner_jams")
+                            .join(if fakenet { "fakenet" } else { "mainnet" })
+                            .join(&run_id)
+                            .join(run_cnt.to_string());
+                        tokio::fs::create_dir_all(&dir).await.unwrap();
+                        let _ =
+                            tokio::fs::write(dir.join("event.jam"), candidate_jam.clone()).await;
+                        let _ = tokio::fs::write(dir.join("effect.jam"), effect.jam()).await;
+                    }
+                    handle
+                        .poke(MiningWire::Mined.to_wire(), effect)
+                        .await
+                        .expect("Could not poke nockchain with mined PoW");
+                }
             }
         }
-    };
+    }
+}
 
-    tokio::select! {
-        _ = main_task => (),
-        _ = cancel_task => {
-            let _ = kernel.stop().await;
-        },
-    };
+struct Miner {
+    kernel: Kernel,
+    snapshot_dir: TempDir,
+}
+
+impl Miner {
+    pub async fn new(trc: TraceOpts) -> Self {
+        let snapshot_dir = tokio::task::spawn_blocking(|| {
+            tempdir().expect("Failed to create temporary directory")
+        })
+        .await
+        .expect("Failed to create temporary directory");
+        let hot_state = zkvm_jetpack::hot::produce_prover_hot_state();
+        let snapshot_path_buf = snapshot_dir.path().to_path_buf();
+        let jam_paths = JamPaths::new(snapshot_dir.path());
+        // Spawns a new std::thread for this mining attempt
+        let kernel = Kernel::load_with_hot_state(
+            snapshot_path_buf,
+            jam_paths,
+            KERNEL,
+            &hot_state,
+            trc.into(),
+        )
+        .await
+        .expect("Could not load mining kernel");
+
+        Self {
+            kernel,
+            snapshot_dir,
+        }
+    }
+
+    pub async fn mine_loop(self, mut inp: Receiver<NounSlab>, out: Sender<NounSlab>) {
+        let Self {
+            kernel,
+            snapshot_dir: _,
+        } = self;
+
+        while let Some(candidate) = inp.recv().await {
+            let effects_slab = kernel
+                .poke(MiningWire::Candidate.to_wire(), candidate)
+                .await
+                .expect("Could not poke mining kernel with candidate");
+            if out.send(effects_slab).await.is_err() {
+                break;
+            }
+        }
+    }
 }
 
 #[instrument(skip(handle, pubkey))]
@@ -342,7 +378,11 @@ async fn set_mining_key(
         Atom::from_value(&mut set_mining_key_slab, pubkey).expect("Failed to create pubkey atom");
     let set_mining_key_poke = T(
         &mut set_mining_key_slab,
-        &[D(tas!(b"command")), set_mining_key.as_noun(), pubkey_cord.as_noun()],
+        &[
+            D(tas!(b"command")),
+            set_mining_key.as_noun(),
+            pubkey_cord.as_noun(),
+        ],
     );
     set_mining_key_slab.set_root(set_mining_key_poke);
 
@@ -381,7 +421,11 @@ async fn set_mining_key_advanced(
 
     let set_mining_key_poke = T(
         &mut set_mining_key_slab,
-        &[D(tas!(b"command")), set_mining_key_adv.as_noun(), configs_list],
+        &[
+            D(tas!(b"command")),
+            set_mining_key_adv.as_noun(),
+            configs_list,
+        ],
     );
     set_mining_key_slab.set_root(set_mining_key_poke);
 
@@ -398,7 +442,11 @@ async fn enable_mining(handle: &NockAppHandle, enable: bool) -> Result<PokeResul
         .expect("Failed to create enable-mining atom");
     let enable_mining_poke = T(
         &mut enable_mining_slab,
-        &[D(tas!(b"command")), enable_mining.as_noun(), if enable { YES } else { NO }],
+        &[
+            D(tas!(b"command")),
+            enable_mining.as_noun(),
+            if enable { YES } else { NO },
+        ],
     );
     enable_mining_slab.set_root(enable_mining_poke);
     handle
