@@ -257,8 +257,11 @@ impl MiningPool {
         for _ in 0..miners {
             let (out, r) = mpsc::channel(1);
             let (t, inp) = mpsc::channel(1);
-            let miner = Miner::new(trc.clone()).await;
-            miner_loops.push(tokio::spawn(miner.mine_loop(inp, out)));
+            let trc = trc.clone();
+            miner_loops.push(tokio::spawn(async move {
+                let miner = Miner::new(trc).await;
+                miner.mine_loop(inp, out).await
+            }));
             tx.push(t);
             rx.push(r);
         }
