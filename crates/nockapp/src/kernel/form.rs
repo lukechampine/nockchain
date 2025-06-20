@@ -89,6 +89,11 @@ pub enum SerfAction {
         metrics: Arc<NockAppMetrics>,
         result: oneshot::Sender<()>,
     },
+    // Set the thread affinity
+    SetAffinity {
+        affinity: Vec<usize>,
+        result: oneshot::Sender<()>,
+    },
     // Stop the loop
     Stop,
 }
@@ -314,6 +319,17 @@ impl SerfThread {
             Ok(result_fut.await?)
         }
     }
+
+    pub(crate) fn set_affinity(&self, affinity: Vec<usize>) -> impl Future<Output = Result<()>> {
+        let (result, result_fut) = oneshot::channel();
+        let action_sender = self.action_sender.clone();
+        async move {
+            action_sender
+                .send(SerfAction::SetAffinity { affinity, result })
+                .await?;
+            Ok(result_fut.await?)
+        }
+    }
 }
 
 fn load_state_from_bytes(serf: &mut Serf, state_bytes: &[u8]) -> Result<()> {
@@ -499,6 +515,13 @@ fn serf_loop(
                         .serf_loop_provide_metrics
                         .add_timing(&action_elapsed);
                 };
+            }
+            SerfAction::SetAffinity { affinity, result } => {
+                if let Err(e) = affinity::set_thread_affinity(affinity) {
+                    warn!("Failed to set affinity on serf: {e:?}");
+                } else {
+                    let _ = result.send(());
+                }
             }
         };
         let elapsed = start.elapsed();
@@ -794,6 +817,11 @@ impl Kernel {
     /// Produces a checkpoint of the kernel state.
     pub fn checkpoint(&self) -> impl Future<Output = Result<JammedCheckpoint>> {
         self.serf.checkpoint()
+    }
+
+    /// Sets thread affinity for serf
+    pub fn set_affinity(&self, affinity: Vec<usize>) -> impl Future<Output = Result<()>> {
+        self.serf.set_affinity(affinity)
     }
 
     // We are very carefully ensuring the future does not contain the "self" reference to ensure no lifetime issues when spawning tasks

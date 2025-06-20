@@ -55,6 +55,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "affinity"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "763e484feceb7dd021b21c5c6f81aee06b1594a743455ec7efbf72e6355e447b"
+dependencies = [
+ "cfg-if",
+ "errno",
+ "libc",
+ "num_cpus",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3919,6 +3931,7 @@ checksum = "b93853da6d84c2e3c7d730d6473e8817692dd89be387eb01b94d7f108ecb5b8c"
 name = "nockapp"
 version = "0.1.0"
 dependencies = [
+ "affinity",
  "anyhow",
  "async-trait",
  "axum 0.8.4",

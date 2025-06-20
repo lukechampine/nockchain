@@ -438,6 +438,7 @@ pub async fn init_with_kernel(
         mine,
         Some(mining_init_tx),
         cli.as_ref().map(|v| v.num_miners).unwrap_or(1),
+        cli.as_ref().map(|v| v.miner_pin_threads.clone()).unwrap_or(vec![]),
         cli.as_ref()
             .map(|v| v.nockapp_cli.trace_opts.clone())
             .unwrap_or_default(),

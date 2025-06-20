@@ -49,6 +49,8 @@ pub struct NockchainCli {
     pub mine: bool,
     #[arg(long, help = "Number of miners", default_value = "1")]
     pub num_miners: usize,
+    #[arg(long, help = "Pin miner threads to specific threads")]
+    pub miner_pin_threads: Vec<usize>,
     #[arg(
         long,
         help = "Pubkey to mine to (mutually exclusive with --mining-key-adv)"

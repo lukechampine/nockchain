@@ -45,6 +45,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing-test = { workspace = true }
 yaque = { workspace = true }
+affinity = { workspace = true }
 
 # Let's Encrypt and HTTPS support
 axum-server = { workspace = true }

@@ -85,6 +85,7 @@ pub fn create_mining_driver(
     mine: bool,
     init_complete_tx: Option<tokio::sync::oneshot::Sender<()>>,
     miners: usize,
+    pin_miner_threads: Vec<usize>,
     trc: TraceOpts,
     fakenet: bool,
 ) -> IODriverFn {
@@ -135,7 +136,7 @@ pub fn create_mining_driver(
             let run_id = now.as_secs().to_string();
             let mut run_cnt = 0;
 
-            let mut pool = Some(MiningPool::new(miners, trc).await);
+            let mut pool = Some(MiningPool::new(miners, trc, pin_miner_threads).await);
 
             loop {
                 tokio::select! {
@@ -250,16 +251,23 @@ impl Drop for MiningPool {
 }
 
 impl MiningPool {
-    pub async fn new(miners: usize, trc: TraceOpts) -> Self {
+    pub async fn new(miners: usize, trc: TraceOpts, pin_miner_threads: Vec<usize>) -> Self {
         let mut miner_loops = vec![];
         let mut tx = vec![];
         let mut rx = vec![];
-        for _ in 0..miners {
+        for i in 0..miners {
             let (out, r) = mpsc::channel(1);
             let (t, inp) = mpsc::channel(1);
             let trc = trc.clone();
+            let pin_thread = if pin_miner_threads.is_empty() {
+                None
+            } else if pin_miner_threads.len() == 1 {
+                Some(pin_miner_threads[0] + i)
+            } else {
+                Some(pin_miner_threads[i])
+            };
             miner_loops.push(tokio::spawn(async move {
-                let miner = Miner::new(trc).await;
+                let miner = Miner::new(trc, pin_thread).await;
                 miner.mine_loop(inp, out).await
             }));
             tx.push(t);
@@ -338,7 +346,7 @@ struct Miner {
 }
 
 impl Miner {
-    pub async fn new(trc: TraceOpts) -> Self {
+    pub async fn new(trc: TraceOpts, pin_thread: Option<usize>) -> Self {
         let snapshot_dir = tokio::task::spawn_blocking(|| {
             tempdir().expect("Failed to create temporary directory")
         })
@@ -357,6 +365,13 @@ impl Miner {
         )
         .await
         .expect("Could not load mining kernel");
+
+        if let Some(pin_thread) = pin_thread {
+            kernel
+                .set_affinity(vec![pin_thread])
+                .await
+                .expect("Unable to set affinity for miner");
+        }
 
         Self {
             kernel,
