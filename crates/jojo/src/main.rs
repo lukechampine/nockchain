@@ -19,13 +19,14 @@ use nockvm::jets::util::slot;
 use nockvm::mem::NockStack;
 use nockvm::mug::mug;
 use nockvm::noun::{Cell, DirectAtom, IndirectAtom, D, T};
-use nockvm::serialization::cue;
+use nockvm::serialization::{cue, jam};
 use nockvm::trace::path_to_cord;
 use nockvm::unifying_equality::unifying_equality;
 use nockvm_macros::tas;
 use std::path::Path;
 use std::pin::Pin;
 use tempfile::tempdir;
+use tokio::fs;
 use tracing::{debug, info};
 use zkvm_jetpack::hot::produce_prover_hot_state;
 
@@ -141,6 +142,8 @@ pub struct Jettest {
     snapshot_dir: Option<String>,
     #[arg(long)]
     cold_jam: Option<String>,
+    #[arg(long)]
+    dump_dir: Option<String>,
 }
 
 impl Jettest {
@@ -151,6 +154,7 @@ impl Jettest {
             jet_run,
             snapshot_dir,
             cold_jam,
+            dump_dir,
         } = self;
 
         let hot_state = produce_prover_hot_state();
@@ -271,6 +275,17 @@ impl Jettest {
                 Err(e) => {
                     eprintln!("ERROR INTERPRETING: {e:?}");
                 }
+            }
+        }
+
+        if let Some(dir) = dump_dir {
+            for ((res, _mug), name) in [jet_res.zip(Some("jet.jam")), int_res.zip(Some("int.jam"))]
+                .into_iter()
+                .flatten()
+            {
+                fs::create_dir_all(&dir).await?;
+                let atom = jam(&mut context.stack, res);
+                fs::write(Path::new(&dir).join(name), atom.as_ne_bytes()).await?;
             }
         }
 

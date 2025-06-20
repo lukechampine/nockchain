@@ -111,6 +111,16 @@ impl NounExt for Noun {
     }
 }
 
+impl<'a> From<&'a Mary> for MarySlice<'a> {
+    fn from(ma: &'a Mary) -> Self {
+        Self {
+            step: ma.step,
+            len: ma.len,
+            dat: &ma.dat,
+        }
+    }
+}
+
 impl TryFrom<Noun> for MarySlice<'_> {
     type Error = ();
 
@@ -180,9 +190,7 @@ impl TryFrom<Cell> for Table<'_> {
     }
 }
 
-// TODO: use Ares::noun::Result or Error somehow for the methods that
-// convert our structs from nouns
-impl TryFrom<Noun> for BPolySlice<'_> {
+impl<T: Element> TryFrom<Noun> for PolySlice<'_, T> {
     type Error = JetErr;
 
     #[inline(always)]
@@ -190,34 +198,21 @@ impl TryFrom<Noun> for BPolySlice<'_> {
         if n.is_atom() {
             jet_err()
         } else {
-            BPolySlice::try_from(n.as_cell()?)
+            PolySlice::try_from(n.as_cell()?)
         }
     }
 }
 
-impl TryFrom<Noun> for FPolySlice<'_> {
+impl<T: Element> TryFrom<Noun> for PolyVec<T> {
     type Error = JetErr;
 
     #[inline(always)]
     fn try_from(n: Noun) -> std::result::Result<Self, Self::Error> {
-        if n.is_atom() {
-            jet_err()
-        } else {
-            FPolySlice::try_from(n.as_cell()?)
-        }
+        PolySlice::try_from(n).map(|v| PolyVec(v.0.to_vec()))
     }
 }
 
-impl TryFrom<Noun> for FPolyVec {
-    type Error = JetErr;
-
-    #[inline(always)]
-    fn try_from(n: Noun) -> std::result::Result<Self, Self::Error> {
-        FPolySlice::try_from(n).map(|v| PolyVec(v.0.to_vec()))
-    }
-}
-
-impl TryFrom<&Noun> for FPolySlice<'_> {
+impl<T: Element> TryFrom<&Noun> for PolySlice<'_, T> {
     type Error = JetErr;
 
     #[inline(always)]
@@ -225,21 +220,21 @@ impl TryFrom<&Noun> for FPolySlice<'_> {
         if n.is_atom() {
             jet_err()
         } else {
-            FPolySlice::try_from(n.as_cell()?)
+            PolySlice::try_from(n.as_cell()?)
         }
     }
 }
 
-impl TryFrom<&Noun> for FPolyVec {
+impl<T: Element> TryFrom<&Noun> for PolyVec<T> {
     type Error = JetErr;
 
     #[inline(always)]
     fn try_from(n: &Noun) -> std::result::Result<Self, Self::Error> {
-        FPolySlice::try_from(n).map(|v| PolyVec(v.0.to_vec()))
+        PolySlice::try_from(n).map(|v| PolyVec(v.0.to_vec()))
     }
 }
 
-impl TryFrom<Cell> for BPolySlice<'_> {
+impl<T: Element> TryFrom<Cell> for PolySlice<'_, T> {
     type Error = JetErr;
 
     #[inline(always)]
@@ -248,31 +243,9 @@ impl TryFrom<Cell> for BPolySlice<'_> {
         let tail = c.tail().as_atom();
         if let (Ok(head), Ok(tail)) = (head, tail) {
             let len32 = head.as_u32()?;
-            let dat_slice: BPolySlice = unsafe {
+            let dat_slice: PolySlice<T> = unsafe {
                 PolySlice(std::slice::from_raw_parts(
-                    tail.data_pointer() as *const Belt,
-                    len32 as usize,
-                ))
-            };
-            Ok(dat_slice)
-        } else {
-            jet_err()
-        }
-    }
-}
-
-impl TryFrom<Cell> for FPolySlice<'_> {
-    type Error = JetErr;
-
-    #[inline(always)]
-    fn try_from(c: Cell) -> std::result::Result<Self, Self::Error> {
-        let head = c.head().as_atom();
-        let tail = c.tail().as_atom();
-        if let (Ok(head), Ok(tail)) = (head, tail) {
-            let len32 = head.as_u32()?;
-            let dat_slice: FPolySlice = unsafe {
-                PolySlice(std::slice::from_raw_parts(
-                    tail.data_pointer() as *const Felt,
+                    tail.data_pointer() as *const T,
                     len32 as usize,
                 ))
             };

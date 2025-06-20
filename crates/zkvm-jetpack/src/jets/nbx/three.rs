@@ -1,7 +1,8 @@
 use std::mem::MaybeUninit;
 
-use crate::form::mary::MarySlice;
+use crate::form::mary::{Mary, MarySlice};
 use crate::form::math::tip5::{self, CAPACITY, DIGEST_LENGTH, RATE, STATE_SIZE};
+use crate::form::tip5::permute;
 use crate::form::{
     mont_reduction, montify, BPolyVec, Element, ElementEx, FPolySlice, Felt, Melt, PolySlice,
     PolyVec,
@@ -259,7 +260,49 @@ pub fn hash_pairs(inp: &[NounDigest]) -> core::result::Result<Vec<NounDigest>, J
     Ok(ret)
 }
 
-type NounDigest = [Melt; 5];
+pub struct Tip5Tog {
+    pub sponge: [Melt; tip5::STATE_SIZE],
+}
+
+// NOTE: no to_noun, since this requires us to include the whole core
+impl Tip5Tog {
+    pub fn belts(&mut self, n: usize) -> Vec<Belt> {
+        // |=  n=@
+        // ^+  [*(list belt) +>.$]
+        // =*  rng  +>.$
+        // =/  sponge  ~(. sponge spo)
+        // =/  [q=@ r=@]  (dvr n rate)
+        let q = n / RATE;
+        let r = n % RATE;
+
+        // =|  output=(list belt)
+        let mut output = vec![];
+
+        // |-
+        // =^  out  sponge
+        //   (squeeze:sponge)
+        // =.  spo  sponge:sponge
+        // ?:  =(q 0)
+        //   [(weld output (scag r out)) rng]
+        // $(q (dec q), output (weld output out))
+        for _ in 0..q {
+            output.extend(squeeze_sponge(self.sponge).map(Belt::from));
+            permute(&mut self.sponge);
+        }
+        let last = squeeze_sponge(self.sponge);
+        permute(&mut self.sponge);
+        output.extend(last[..r].iter().map(|v| Belt::from(*v)));
+
+        output
+    }
+
+    pub fn felt(&mut self) -> Felt {
+        let belts = self.belts(3);
+        Felt(belts.try_into().unwrap())
+    }
+}
+
+pub type NounDigest<T = Melt> = [T; 5];
 
 #[derive(Debug)]
 enum ReduceTy {
@@ -338,12 +381,28 @@ impl ReduceStage {
 }
 
 #[derive(Default)]
-struct HashEngine {
+pub struct HashEngine {
     stages: Vec<ReduceStage>,
 }
 
+trait Pushable {
+    fn push(self, engine: &mut HashEngine, stage: usize) -> core::result::Result<usize, JetErr>;
+}
+
+impl Pushable for Noun {
+    fn push(self, engine: &mut HashEngine, stage: usize) -> core::result::Result<usize, JetErr> {
+        engine.push(stage, self)
+    }
+}
+
+impl<T: Into<Melt>> Pushable for NounDigest<T> {
+    fn push(self, engine: &mut HashEngine, stage: usize) -> core::result::Result<usize, JetErr> {
+        Ok(engine.push_hash(stage, self))
+    }
+}
+
 impl HashEngine {
-    fn push_varlen(&mut self, stage: usize, m: impl Iterator<Item = Melt>) -> usize {
+    pub fn push_varlen(&mut self, stage: usize, m: impl Iterator<Item = Melt>) -> usize {
         if self.stages.len() <= stage {
             assert_eq!(self.stages.len(), stage);
             self.stages.push(ReduceStage::default());
@@ -355,7 +414,7 @@ impl HashEngine {
         ret
     }
 
-    fn push_noun(&mut self, stage: usize, n: Noun) -> core::result::Result<usize, JetErr> {
+    pub fn push_noun(&mut self, stage: usize, n: Noun) -> core::result::Result<usize, JetErr> {
         if self.stages.len() <= stage {
             assert_eq!(self.stages.len(), stage);
             self.stages.push(ReduceStage::default());
@@ -389,10 +448,10 @@ impl HashEngine {
         Ok(ret)
     }
 
-    fn push_list_inner(
+    fn push_list_inner<T: Pushable>(
         &mut self,
         stage: usize,
-        l: impl Iterator<Item = Noun>,
+        l: impl Iterator<Item = T>,
     ) -> core::result::Result<(usize, usize), JetErr> {
         if self.stages.len() <= stage {
             assert_eq!(self.stages.len(), stage);
@@ -406,7 +465,7 @@ impl HashEngine {
         let mut next = ret + 1;
         let mut len = 0;
         for h in l {
-            let out = self.push(stage, h)?;
+            let out = h.push(self, stage)?;
             len += 1;
             assert_eq!(out, next);
             next = out + DIGEST_LENGTH;
@@ -422,7 +481,7 @@ impl HashEngine {
         Ok((ret, len))
     }
 
-    fn reduce(mut self) -> Vec<NounDigest> {
+    pub fn reduce(mut self) -> Vec<NounDigest> {
         let mut cur = vec![];
         //let mut cnt = 0;
         while let Some(stage) = self.stages.pop() {
@@ -440,7 +499,7 @@ impl HashEngine {
         unsafe { Vec::from_raw_parts(p as *mut NounDigest, l, c) }
     }
 
-    fn push_mary(&mut self, stage: usize, ma: MarySlice) -> usize {
+    pub fn push_mary(&mut self, stage: usize, ma: MarySlice) -> usize {
         if self.stages.len() <= stage {
             assert_eq!(self.stages.len(), stage);
             self.stages.push(ReduceStage::default());
@@ -468,7 +527,41 @@ impl HashEngine {
         ret
     }
 
-    fn push(&mut self, stage: usize, h: Noun) -> core::result::Result<usize, JetErr> {
+    pub fn push_hash<T: Into<Melt>>(&mut self, stage: usize, h: NounDigest<T>) -> usize {
+        let stage = self.stages.get_mut(stage).unwrap();
+        let ret = stage.out.len();
+
+        let d = h.map(Into::into);
+
+        stage.out.extend_from_slice(&d[..]);
+        ret
+    }
+
+    pub fn push_list<T: Pushable>(
+        &mut self,
+        stage: usize,
+        l: impl Iterator<Item = T>,
+    ) -> core::result::Result<usize, JetErr> {
+        let (source, len) = self.push_list_inner(stage + 1, l)?;
+
+        let stage = self.stages.get_mut(stage).unwrap();
+        let ret = stage.push_variable(source, 2 + (DIGEST_LENGTH + 10) * len);
+
+        Ok(ret)
+    }
+
+    pub fn ensure_stages(&mut self, stage: usize) {
+        while self.stages.len() <= stage {
+            self.stages.push(ReduceStage::default());
+        }
+    }
+
+    pub fn push_pair(&mut self, stage: usize, a: usize, b: usize) -> usize {
+        let stage = self.stages.get_mut(stage).unwrap();
+        stage.push_fixed(a, b)
+    }
+
+    pub fn push(&mut self, stage: usize, h: Noun) -> core::result::Result<usize, JetErr> {
         if self.stages.len() <= stage {
             assert_eq!(self.stages.len(), stage);
             self.stages.push(ReduceStage::default());
@@ -481,17 +574,12 @@ impl HashEngine {
             Ok(tas!(b"hash")) => {
                 // ?:  ?=(%hash -.h)
                 //   p.h
-                let stage = self.stages.get_mut(stage).unwrap();
-                let ret = stage.out.len();
-
-                let d: NounDigest = h
-                    .tail()
-                    .uncell()?
-                    .map(|v| Belt(v.as_atom().unwrap().as_u64().unwrap()))
-                    .map(Melt::from);
-
-                stage.out.extend_from_slice(&d[..]);
-                Ok(ret)
+                Ok(self.push_hash(
+                    stage,
+                    h.tail()
+                        .uncell()?
+                        .map(|v| Belt(v.as_atom().unwrap().as_u64().unwrap())),
+                ))
             }
             Ok(tas!(b"leaf")) => {
                 // ?:  ?=(%leaf -.h)
@@ -502,12 +590,7 @@ impl HashEngine {
                 // ?:  ?=(%list -.h)
                 //   (hash-noun-varlen (turn p.h hash-hashable))
                 let l = HoonList::try_from(h.tail()).ok().into_iter().flatten();
-                let (source, len) = self.push_list_inner(stage + 1, l)?;
-
-                let stage = self.stages.get_mut(stage).unwrap();
-                let ret = stage.push_variable(source, 2 + (DIGEST_LENGTH + 10) * len);
-
-                Ok(ret)
+                self.push_list(stage, l)
             }
             Ok(tas!(b"mary")) => {
                 let Ok(ma) = MarySlice::try_from(h.tail()) else {
@@ -520,9 +603,7 @@ impl HashEngine {
                 // [$(h p.h) $(h q.h)]
                 let a = self.push(stage + 1, h.head())?;
                 let b = self.push(stage + 1, h.tail())?;
-                let stage = self.stages.get_mut(stage).unwrap();
-                let ret = stage.push_fixed(a, b);
-                Ok(ret)
+                Ok(self.push_pair(stage, a, b))
             }
         }
     }
@@ -563,14 +644,48 @@ pub fn dyck(t: Noun) -> Vec<Belt> {
 }
 
 pub fn bp_build_merk_heap(stack: &mut NockStack, ma: Noun) -> Result {
-    build_merk_heap_impl::<Belt>(stack, ma)
+    let Ok(ma) = MarySlice::try_from(ma) else {
+        return jet_err();
+    };
+    let (height, mh) = build_merk_heap_impl::<Belt>(ma)?;
+    let height = Atom::new(stack, height as _).as_noun();
+    let mh = mh.to_noun(stack);
+    Ok(T(stack, &[height, mh]))
 }
 
 pub fn build_merk_heap(stack: &mut NockStack, ma: Noun) -> Result {
-    build_merk_heap_impl::<Felt>(stack, ma)
+    let Ok(ma) = MarySlice::try_from(ma) else {
+        return jet_err();
+    };
+    let (height, mh) = build_merk_heap_impl::<Felt>(ma)?;
+    let height = Atom::new(stack, height as _).as_noun();
+    let mh = mh.to_noun(stack);
+    Ok(T(stack, &[height, mh]))
 }
 
-pub fn build_merk_heap_impl<T: ElementEx>(stack: &mut NockStack, ma: Noun) -> Result {
+pub struct MerkHeap {
+    pub h: NounDigest,
+    pub m: Mary,
+}
+
+impl MerkHeap {
+    pub fn to_noun(self, stack: &mut NockStack) -> Noun {
+        let (ret, handle) = new_handle_mut_mary(stack, self.m.step as _, self.m.len as _);
+        handle.dat.copy_from_slice(&self.m.dat);
+        let ma = finalize_mary(stack, self.m.step as _, self.m.len as _, ret);
+        let h = self
+            .h
+            .map(Belt::from)
+            .map(|v| Atom::new(stack, v.0))
+            .map(Atom::as_noun);
+        let h = T(stack, &h);
+        T(stack, &[h, ma])
+    }
+}
+
+pub fn build_merk_heap_impl<T: ElementEx>(
+    m: MarySlice,
+) -> core::result::Result<(usize, MerkHeap), JetErr> {
     // Definitions:
     // +$  mary  [step=@ =array]
     //    An array where each element is step size (in u64 words). This can be used to build
@@ -586,9 +701,6 @@ pub fn build_merk_heap_impl<T: ElementEx>(stack: &mut NockStack, ma: Noun) -> Re
 
     // ~/  %bp-build-merk-heap-hoon
     // |=  m=mary
-    let Ok(m) = MarySlice::try_from(ma) else {
-        return jet_err();
-    };
 
     // ::
     // ::  +heapify-mary
@@ -664,6 +776,13 @@ pub fn build_merk_heap_impl<T: ElementEx>(stack: &mut NockStack, ma: Noun) -> Re
         curr = hash_pairs(&curr)?;
     }
     assert_eq!(res.len(), size as usize);
+
+    // :-  (xeb len.array.m)          :: compute height of heap
+    // :-  %+  snag-as-digest:tip5      :: retrieve the 0th entry of the heap and return it
+    //       heap-mary                  ::   as a tip5 hash digest
+    //     0
+    let digest = res[0];
+
     let rl = res.len() * 5;
     let rc = res.capacity() * 5;
     let r = res.as_mut_ptr() as *mut Melt;
@@ -673,18 +792,16 @@ pub fn build_merk_heap_impl<T: ElementEx>(stack: &mut NockStack, ma: Noun) -> Re
     let res: BPolyVec = PolyVec(res).into();
     // SAFETY: Same here
     let d = unsafe { core::slice::from_raw_parts(res.0.as_ptr() as *const u64, res.len()) };
-    let (res, res_ma) = new_handle_mut_mary(stack, 5, res.len() / 5);
-    res_ma.dat.copy_from_slice(d);
-    let heap_mary = finalize_mary(stack, res_ma.step as _, res_ma.len as _, res);
+    let m = Mary {
+        step: 5,
+        len: (res.len() / 5) as _,
+        dat: d.to_vec(),
+    };
 
-    // :-  (xeb len.array.m)          :: compute height of heap
-    // :-  %+  snag-as-digest:tip5      :: retrieve the 0th entry of the heap and return it
-    //       heap-mary                  ::   as a tip5 hash digest
-    //     0
-    let digest = snag_as_digest(stack, heap_mary, 0)?;
+    let merk_heap = MerkHeap { h: digest, m };
 
     // heap-mary
-    Ok(T(stack, &[D(height as u64), digest, heap_mary]))
+    Ok((height, merk_heap))
 }
 
 fn hashable_poly<'a, T: ElementEx>(p: PolySlice<'a, T>) -> MarySlice<'a> {

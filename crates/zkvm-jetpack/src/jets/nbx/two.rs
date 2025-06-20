@@ -94,6 +94,37 @@ pub fn bpeval_lift(bp: BPolySlice, x: Felt) -> Felt {
     })
 }
 
+// ::  fpeval: evaluate a polynomial with Horner's method.
+pub fn fpeval(fp: FPolySlice, x: Felt) -> Felt {
+    // |:  [fp=`fpoly`one-fpoly x=`felt`(lift 1)]
+    // ^-  felt
+    // ~+
+    // ?:  (fp-is-zero fp)  (lift 0)
+    if fp.is_zero() {
+        return Felt::lift(Belt(0));
+    }
+    // ?:  =(len.fp 1)  (~(snag fop fp) 0)
+    if fp.len() == 1 {
+        return fp.0[0];
+    }
+    // =/  p  ~(to-poly fop fp)
+    // =.  p  (flop p)
+    // =/  res=@  (lift 0)
+    let mut res = Felt::zero();
+
+    // |-
+    // ?~  p    !!
+    // ?~  t.p
+    //   (fadd (fmul res x) i.p)
+    // ::  based on p(x) = (...((a_n)x + a_{n-1})x + a_{n-2})x + ... )
+    // $(res (fadd (fmul res x) i.p), p t.p)
+    for p in fp.0.iter().rev() {
+        res = res * x + *p;
+    }
+
+    res
+}
+
 pub fn fpadd<'a>(fp: FPolyVec, fq: FPolySlice) -> FPolyVec {
     // ~/  %fpadd
     // |:  [fp=`fpoly`zero-fpoly fq=`fpoly`zero-fpoly]

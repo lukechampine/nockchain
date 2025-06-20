@@ -4,21 +4,25 @@ use either::Either::*;
 use nockvm::interpreter::Context;
 use nockvm::jets::hot::{HotEntry, K_138};
 use nockvm::jets::util::slot;
-use nockvm::jets::{Result, JetErr};
+use nockvm::jets::{JetErr, Result};
 use nockvm::noun::*;
 
 mod eight;
 mod five;
+mod four;
 mod one;
 mod prover_memory;
+mod six;
 mod three;
 mod two;
 mod utils;
 
 use eight::*;
 use five::*;
+use four::*;
 use one::*;
 use prover_memory::*;
+use six::*;
 use three::*;
 use two::*;
 
@@ -178,6 +182,9 @@ sam_jet! {
     precompute_ntts_jet => precompute_ntts,
     turn_coseword_jet => turn_coseword,
     pad_jet => pad,
+    prove_fri_door_jet => prove_fri_door 'raw 'jam 'create_jam_dir,
+    prove_commit_jet => prove_commit 'raw,// 'jam 'create_jam_dir,
+    //absorb_proof_objects_jet => absorb_proof_objects //'jam 'create_jam_dir,
 }
 
 pub const NBX_ONE_JETS: &[HotEntry] = &[
@@ -405,6 +412,25 @@ pub const NBX_THREE_JETS: &[HotEntry] = &[
     ),
 ];
 
+// TODO: figure out how to build a core for `tog`, and enable this.
+pub const NBX_FOUR_JETS: &[HotEntry] = &[/*(
+    &[
+        K_138,
+        Left(b"one"),
+        Left(b"two"),
+        Left(b"tri"),
+        Left(b"qua"),
+        Left(b"pen"),
+        Left(b"zeke"),
+        Left(b"ext-field"),
+        Left(b"misc-lib"),
+        Left(b"proof-lib"),
+        Left(b"absorb-proof-objects"),
+    ],
+    1,
+    absorb_proof_objects_jet,
+)*/];
+
 pub const NBX_FIVE_JETS: &[HotEntry] = &[(
     &[
         K_138,
@@ -425,6 +451,49 @@ pub const NBX_FIVE_JETS: &[HotEntry] = &[(
     1,
     pstack_push_all_jet,
 )];
+
+pub const NBX_SIX_JETS: &[HotEntry] = &[
+    /*(
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"misc-lib"),
+            Left(b"proof-lib"),
+            Left(b"utils"),
+            Left(b"fri"),
+            Left(b"fri-door"),
+            Left(b"prove"),
+        ],
+        1,
+        prove_fri_door_jet,
+    ),*/
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"misc-lib"),
+            Left(b"proof-lib"),
+            Left(b"utils"),
+            Left(b"fri"),
+            Left(b"fri-door"),
+            Left(b"prove-commit"),
+        ],
+        1,
+        prove_commit_jet,
+    ),
+];
 
 pub const NBX_EIGHT_JETS: &[HotEntry] = &[
     (
@@ -544,7 +613,9 @@ pub fn nbx_jets() -> impl Iterator<Item = HotEntry> {
         NBX_ONE_JETS,
         NBX_TWO_JETS,
         NBX_THREE_JETS,
+        NBX_FOUR_JETS,
         NBX_FIVE_JETS,
+        NBX_SIX_JETS,
         NBX_EIGHT_JETS,
         NBX_MEMORY_JETS,
     ]

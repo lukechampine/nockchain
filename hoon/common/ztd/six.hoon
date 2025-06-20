@@ -59,7 +59,7 @@
     ~/  %prove
     |=  [codeword=fpoly stream=proof]
     ^-  [fri-indices=(list @) stream=proof]
-    |^
+    :: |^
     ::  commit phase
     =^  codewords=(list codeword-data)  stream
       (commit codeword stream)
@@ -71,6 +71,7 @@
     +$  codeword-data  [codeword=mary merk=(unit [depth=@ heap=merk-heap])]
     ::
     ++  query
+      ~/  %prove-query
       |=  [codewords=(list codeword-data) stream=proof]
       ^-  [fri-indices=(list @) stream=proof]
       ::
@@ -102,6 +103,7 @@
       (~(push proof-stream stream) [%m-path leaf path.opening])
     ::
     ++  commit
+      ~/  %prove-commit
       |=  [codeword=fpoly stream=proof]
       ^-  [codewords=(list codeword-data) stream=proof]
       =-  [(flop codewords) stream]
@@ -156,7 +158,7 @@
           (fpow round-offset folding-deg)
           stream
       ==
-    --
+    :: --
   ::
   ++  verify
     ~/  %verify
