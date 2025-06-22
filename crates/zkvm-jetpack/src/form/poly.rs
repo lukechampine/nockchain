@@ -36,6 +36,8 @@ pub trait ElementEx:
     + TryFrom<Noun>
     + Debug
     + Ord
+    + Send
+    + Sync
 {
     fn from_u64(v: u64) -> Self;
     fn epow(&self, p: u64) -> Self;

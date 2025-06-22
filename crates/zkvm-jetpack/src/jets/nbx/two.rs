@@ -22,6 +22,7 @@ use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::noun::*;
 use nockvm_macros::tas;
+use rayon::prelude::*;
 
 use tracing::log::*;
 
@@ -818,13 +819,13 @@ impl<'a, E: ElementEx> SubstituteIter<'a, E> {
 }
 
 impl<E: ElementEx> SubstituteIter<'_, E> {
-    #[tracing::instrument(skip_all)]
     fn reduce(self, inp: &[PolyVec<E>], out: PolyVec<E>) -> PolyVec<E> {
         let out_len = out.len();
         core::iter::once(out)
             .chain(self.muls.into_iter().map(|m| {
                 let acc = PolyVec(vec![m.scal; out_len]);
 
+                // NOTE: never parallel iter here, because it is slow
                 m.coms
                     .into_iter()
                     .map(|(i, exp)| (&inp[i].0[..], exp))
@@ -833,22 +834,26 @@ impl<E: ElementEx> SubstituteIter<'_, E> {
                         let var = &var[..out_len];
                         (var, exp)
                     }))
-                    .flat_map(|(inp, exp)| core::iter::repeat_n(inp, exp as usize))
-                    .fold(acc, |mut acc, o| {
+                    .fold(acc, |mut acc, (o, exp)| {
                         debug_assert_eq!(o.len(), acc.0.len());
                         debug_assert!(o.len() % 16 == 0);
                         debug_assert!(acc.0.len() % 16 == 0);
                         let acc_len = acc.0.len() & !0xf;
                         let a = acc.0.split_at_mut(acc_len).0;
                         let b = o.split_at(acc_len).0;
-                        p_hadamard_inplace(a, b);
+                        for _ in 0..exp {
+                            p_hadamard_inplace(a, b);
+                        }
                         acc
                     })
             }))
-            .reduce(|mut acc, o| {
-                padd_in_place(&mut acc.0, &o.0);
-                acc
-            })
+            .reduce(
+                /*|| PolyVec(vec![E::zero(); out_len]),*/
+                |mut acc, o| {
+                    padd_in_place(&mut acc.0, &o.0);
+                    acc
+                },
+            )
             .unwrap()
     }
 }
