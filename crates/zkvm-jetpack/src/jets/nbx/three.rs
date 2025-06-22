@@ -197,12 +197,42 @@ pub fn squeeze_sponge(spo: [Melt; tip5::STATE_SIZE]) -> [Melt; RATE] {
     ret
 }
 
-pub fn hash_10(input: [Melt; 10]) -> NounDigest {
+pub fn hash_ten_cell(stack: &mut NockStack, sam: Noun) -> Result {
+    // |=  =ten-cell
+    let input: [Noun; 2] = sam.uncell()?;
+    let input: [[Noun; 5]; 2] = input.map(|v| v.uncell().unwrap());
+    // SAFETY: we are merely transposing the array
+    let input: [Noun; 10] = unsafe { core::mem::transmute(input) };
+    let input = input
+        .map(|v| v.as_atom().unwrap().as_u64().unwrap())
+        .map(Melt::from_u64);
+    // ^-  noun-digest
+    let output = hash_10(input);
+    let output = output
+        .map(Belt::from)
+        .map(|v| Atom::new(stack, v.0).as_noun());
+    Ok(T(stack, &output))
+}
+
+pub fn hash_10_sam(stack: &mut NockStack, sam: Noun) -> Result {
     // ::  +hash-10: hash list of 10 belts into a list of 5 belts
     // |=  input=(list belt)
+    let input: [Noun; 11] = sam.uncell()?;
+    let input: [Noun; 10] = input[..10].try_into().unwrap();
+    let input = input
+        .map(|v| v.as_atom().unwrap().as_u64().unwrap())
+        .map(Melt::from_u64);
     // ::  output length is 5
     // ^-  (list belt)
+    let output = hash_10(input);
+    let output = output
+        .map(Belt::from)
+        .map(|v| Atom::new(stack, v.0).as_noun());
+    let output: [Noun; 6] = concat_arrays!(output, [D(0)]);
+    Ok(T(stack, &output))
+}
 
+pub fn hash_10(input: [Melt; 10]) -> NounDigest {
     // Verify that this list has length 10 and all elems are direct:
     // ?>  =((lent input) rate)
     // ?>  (levy input based)
@@ -215,6 +245,35 @@ pub fn hash_10(input: [Melt; 10]) -> NounDigest {
     // (turn (scag digest-length sponge) mont-reduction)
 
     hash_any::<false, _>(&input)
+}
+
+pub fn hash_noun_varlen(stack: &mut NockStack, sam: Noun) -> Result {
+    // |=  n=*
+    // ^-  noun-digest
+    let mut engine = HashEngine::default();
+    engine.push_noun(0, sam)?;
+    let output = engine.reduce()[0]
+        .map(Belt::from)
+        .map(|v| Atom::new(stack, v.0).as_noun());
+    Ok(T(stack, &output))
+}
+
+pub fn hash_varlen_sam(stack: &mut NockStack, sam: Noun) -> Result {
+    // |=  input=(list belt)
+    let input = HoonList::try_from(sam)
+        .ok()
+        .into_iter()
+        .flatten()
+        .map(|v| v.as_atom().unwrap().as_u64().unwrap())
+        .map(Melt::from_u64)
+        .collect::<Vec<_>>();
+    // ^-  (list belt)
+    let output = hash_varlen(&input);
+    let output = output
+        .map(Belt::from)
+        .map(|v| Atom::new(stack, v.0).as_noun());
+    let output: [Noun; 6] = concat_arrays!(output, [D(0)]);
+    Ok(T(stack, &output))
 }
 
 pub fn hash_varlen<T: Into<Melt> + Copy>(input: &[T]) -> NounDigest {
