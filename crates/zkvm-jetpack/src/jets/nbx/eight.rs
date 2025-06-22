@@ -3,7 +3,9 @@ use std::collections::BTreeMap;
 use crate::form::fext::{fmul_, fpow_};
 use crate::form::mary::MarySlice;
 use crate::form::math::poly::*;
-use crate::form::{binv, bneg, BPolyVec, Element, ElementEx, FPolySlice, FPolyVec, Felt, Melt, PolySlice, PolyVec};
+use crate::form::{
+    binv, bneg, BPolyVec, Element, ElementEx, FPolySlice, FPolyVec, Felt, Melt, PolySlice, PolyVec,
+};
 use crate::form::{poly::Poly, BPolySlice, Belt};
 use crate::hand::handle::{finalize_poly, new_handle_mut_slice};
 use crate::hand::structs::{HoonList, HoonMap, HoonMapIter};
@@ -348,6 +350,7 @@ pub fn compute_deep(stack: &mut NockStack, inp: Noun) -> Result {
 //       extra=@
 //   ==
 
+#[tracing::instrument(skip_all)]
 pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
     // NOTE: in theory, using `Melt` should be faster than `Belt`, due to efficient multiplication,
     // however, for some reason LTO-d x86_64-v4 binary is faster with `Belt`. So here, we switch
@@ -542,6 +545,7 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
     Ok(ret)
 }
 
+#[tracing::instrument(skip_all)]
 fn process_composition_constraints<E: ElementEx>(
     stack: &mut NockStack,
     constraints: &ProcessedDeg,
@@ -551,7 +555,10 @@ fn process_composition_constraints<E: ElementEx>(
     fri_deg_bound: u64,
     max_height: u64,
     chal_map: &BTreeMap<u64, Belt>, //Option<HoonMap>,
-) -> core::result::Result<PolyVec<E>, JetErr> where Belt: Into<E> {
+) -> core::result::Result<PolyVec<E>, JetErr>
+where
+    Belt: Into<E>,
+{
     // |=  $:  constraints=(list [(list @) mp-ultra])
     //         trace=bpoly
     //         weights=bpoly
@@ -566,10 +573,32 @@ fn process_composition_constraints<E: ElementEx>(
     // ::
     let mut acc = PolyVec(vec![E::zero()]);
     let mut idx = 0;
-    for (degs, mp) in constraints.iter() {
+
+    let mut engine = SubstituteEngine::default();
+    let mut comp_cnts = vec![];
+
+    for (_, mp) in constraints.iter() {
         // =/  comps=(list bpoly)
         //   (mp-substitute-ultra mp trace max-height chal-map dyns)
-        let comps = mp_substitute_ultra_impl(stack, *mp, trace, max_height, chal_map, dyns)?;
+        comp_cnts.push(mp_substitute_ultra_impl(
+            stack,
+            &mut engine,
+            0,
+            *mp,
+            trace,
+            max_height,
+            chal_map,
+            dyns,
+        )?);
+    }
+
+    let mut all_comps = engine.reduce();
+
+    for ((degs, _), comps) in constraints.iter().zip(comp_cnts) {
+        let rest = all_comps.split_off(comps);
+        let comps = all_comps;
+        all_comps = rest;
+
         // NOTE: zip-up expects equal lengths
         // %+  roll
         //   (zip-up degs comps)
@@ -618,6 +647,7 @@ fn process_composition_constraints<E: ElementEx>(
 
 type ProcessedDeg = Vec<(Vec<u64>, Noun)>;
 
+#[tracing::instrument(skip_all)]
 fn degree_processing(
     stack: &mut NockStack,
     heights: &[u64],
