@@ -16,6 +16,7 @@ mod six;
 mod three;
 mod two;
 mod utils;
+mod zoon;
 
 use eight::*;
 use five::*;
@@ -25,6 +26,7 @@ use prover_memory::*;
 use six::*;
 use three::*;
 use two::*;
+use zoon::*;
 
 use super::utils::jet_err;
 
@@ -185,6 +187,7 @@ sam_jet! {
     prove_fri_door_jet => prove_fri_door 'raw 'jam 'create_jam_dir,
     prove_commit_jet => prove_commit 'raw,// 'jam 'create_jam_dir,
     //absorb_proof_objects_jet => absorb_proof_objects //'jam 'create_jam_dir,
+    zby_key_jet => zby_key 'raw,
 }
 
 pub const NBX_ONE_JETS: &[HotEntry] = &[
@@ -676,6 +679,22 @@ pub const NBX_MEMORY_JETS: &[HotEntry] = &[
     ),
 ];
 
+pub const NBX_ZOON_JETS: &[HotEntry] = &[(
+    &[
+        K_138,
+        Left(b"one"),
+        Left(b"two"),
+        Left(b"tri"),
+        Left(b"qua"),
+        Left(b"pen"),
+        Left(b"zoon"),
+        Left(b"z-by"),
+        Left(b"key"),
+    ],
+    1,
+    zby_key_jet,
+)];
+
 pub fn nbx_jets() -> impl Iterator<Item = HotEntry> {
     [
         NBX_ONE_JETS,
@@ -686,6 +705,7 @@ pub fn nbx_jets() -> impl Iterator<Item = HotEntry> {
         NBX_SIX_JETS,
         NBX_EIGHT_JETS,
         NBX_MEMORY_JETS,
+        NBX_ZOON_JETS,
     ]
     .map(|v| v.iter().copied())
     .into_iter()

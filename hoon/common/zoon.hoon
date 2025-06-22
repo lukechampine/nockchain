@@ -1,5 +1,6 @@
 ::  /lib/zoon: vendored types from hoon.hoon
 /=  z  /common/zeke
+~%  %zoon  ..ut  ~
 |%
 ::
 +|  %map
@@ -9,6 +10,7 @@
   |=(a=(tree (pair)) ?:(=(~ a) & ~(apt z-by a)))
 ::
 ++  z-by                                                  ::  z-map engine
+  ~/  %z-by
   =|  a=(tree (pair))  ::  (z-map)
   |@
   ++  all                                               ::  logical AND
@@ -267,6 +269,7 @@
   ::
   ++  key                                               ::  z-set of keys
     =<  $
+    ~/  %key
     =+  b=`(z-set _?>(?=(^ a) p.n.a))`~
     |.  ^+  b
     ?~  a   b
