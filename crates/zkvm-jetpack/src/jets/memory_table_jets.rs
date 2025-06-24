@@ -19,6 +19,7 @@ use crate::jets::table_utils::*;
 use crate::jets::utils::jet_err;
 
 pub fn memory_extend_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+
     let sam = slot(subject, 6)?;
     let table_mary = slot(sam, 2)?;
     let chals_rd1 = slot(sam, 6)?;
@@ -127,9 +128,10 @@ pub fn memory_extend_jet(context: &mut Context, subject: Noun) -> Result<Noun, J
         write_pelt(&mut res_mary, &inv, &row_idx, &Col(ext_idx(INV_IDX)));
     });
 
-    // padded columns are all 0 except for %inv which is -1
+    // padded columns are all 0 except for %inv which is -1, and %input
     let neg_one: Felt = fsub_(&Felt::zero(), &Felt::one());
     for i in build_and_bft.len()..(table.len as usize) {
+        write_pelt(&mut res_mary, &subj_pc1, &Row(i), &Col(ext_idx(INPUT_IDX)));
         write_pelt(&mut res_mary, &neg_one, &Row(i), &Col(ext_idx(INV_IDX)));
     }
 
