@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use crate::form::{Belt, ElementEx, FieldError, Poly};
+use crate::form::{Belt, ElementEx, FieldError, Poly, PolySlice};
 
 use super::binv;
 
@@ -477,4 +477,85 @@ pub fn pdvr_vec<T: ElementEx>(a: &[T], b: &[T]) -> (Vec<T>, Vec<T>) {
 #[inline(always)]
 pub fn pdiv<T: ElementEx>(a: &[T], b: &[T]) -> Vec<T> {
     pdvr_vec(&a, &b).0
+}
+
+// ::
+// ::  +bp-decompose
+// ::
+// ::  given a polynomial f(X) of degree at most D*N, decompose into D polynomials
+// ::  {h_i(X) : 0 <= i < D} each of degree at most N such that
+// ::
+// ::  f(X) = h_0(X^D) + X*h_1(X^D) + X^2*h_2(X^D) + ... + X^{D-1}*h_{D-1}(X^D)
+// ::
+// ::  This is just a generalization of splitting a polynomial into even and odd terms
+// ::  as the FFT does.
+// ::  h_i(X) is the terms whose degree is congruent to i modulo D.
+// ::
+// ::  Passing in d=2 will split into even and odd terms.
+// ::
+pub fn p_decompose<T: ElementEx>(p: PolySlice<T>, d: usize) -> Vec<Vec<T>> {
+    // |=  [p=bpoly d=@]
+    // ^-  (list bpoly)
+    // =/  total-deg=@  (bdegree (bpoly-to-list p))
+    let total_deg = p.degree() as usize;
+    // =/  deg=@
+    //   =/  dvr  (dvr total-deg d)
+    let dvr_p = total_deg / d;
+    let dvr_q = total_deg % d;
+    //   ?:(=(q.dvr 0) p.dvr (add p.dvr 1))
+    let deg = dvr_p + (dvr_q != 0) as usize;
+    // =/  acc=(list (list belt))  (reap d ~)
+    let mut acc = vec![vec![]; d];
+    // =-
+    //   %+  turn  -
+    //   |=  poly=(list belt)
+    //   ?~  poly  zero-bpoly
+    //   (init-bpoly (flop poly))
+    // %+  roll  (range (add 1 deg))
+    // |=  [n=@ acc=_acc]
+    for n in 0..=deg {
+        // %+  iturn  acc
+        // |=  [i=@ l=(list belt)]
+        for i in 0..d {
+            // =/  idx  (add (mul n d) i)
+            let idx = n * d + i;
+            // ?:  (gth idx total-deg)  l
+            if idx <= total_deg {
+                // [(~(snag bop p) idx) l]
+                acc[i].push(p.0[idx]);
+            }
+        }
+    }
+    acc
+}
+
+// ::  fpeval: evaluate a polynomial with Horner's method.
+pub fn peval<T: ElementEx>(p: PolySlice<T>, x: T) -> T {
+    // |:  [fp=`fpoly`one-fpoly x=`felt`(lift 1)]
+    // ^-  felt
+    // ~+
+    // ?:  (fp-is-zero fp)  (lift 0)
+    if p.is_zero() {
+        return T::from_u64(0);
+    }
+    // ?:  =(len.fp 1)  (~(snag fop fp) 0)
+    if p.len() == 1 {
+        return p.0[0];
+    }
+    // =/  p  ~(to-poly fop fp)
+    // =.  p  (flop p)
+    // =/  res=@  (lift 0)
+    let mut res = T::zero();
+
+    // |-
+    // ?~  p    !!
+    // ?~  t.p
+    //   (fadd (fmul res x) i.p)
+    // ::  based on p(x) = (...((a_n)x + a_{n-1})x + a_{n-2})x + ... )
+    // $(res (fadd (fmul res x) i.p), p t.p)
+    for p in p.0.iter().rev() {
+        res = res * x + *p;
+    }
+
+    res
 }

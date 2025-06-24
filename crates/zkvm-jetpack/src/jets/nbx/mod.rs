@@ -190,6 +190,10 @@ sam_jet! {
     zby_key_jet => zby_key 'raw,
     tog_belts_jet => tog_belts 'raw,
     tog_felts_jet => tog_felts 'raw,
+    bp_decompose_jet => bp_decompose,
+    bpeval_jet => bpeval,
+    fp_decompose_jet => fp_decompose,
+    fpeval_jet => fpeval,
 }
 
 pub const NBX_ONE_JETS: &[HotEntry] = &[
@@ -250,6 +254,34 @@ pub const NBX_ONE_JETS: &[HotEntry] = &[
         ],
         1,
         do_init_mary_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"bp-decompose"),
+        ],
+        1,
+        bp_decompose_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"bpeval"),
+        ],
+        1,
+        bpeval_jet,
     ),
 ];
 
@@ -343,6 +375,34 @@ pub const NBX_TWO_JETS: &[HotEntry] = &[
         ],
         1,
         turn_coseword_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"fp-decompose"),
+        ],
+        1,
+        fp_decompose_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"fpeval"),
+        ],
+        1,
+        fpeval_jet,
     ),
 ];
 

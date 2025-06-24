@@ -28,6 +28,7 @@ use tracing::log::*;
 
 use crate::jets::utils::jet_err;
 
+use super::one::{p_decompose_impl, peval_impl};
 use super::utils::*;
 
 pub fn new_fpoly<'a>(d: &[Felt]) -> FPolyVec {
@@ -94,37 +95,6 @@ pub fn bpeval_lift(bp: BPolySlice, x: Felt) -> Felt {
         // $(res (fadd (fmul res x) (lift i.p)), p t.p)
         fadd_(&fmul_(&res, &x), &Felt::lift(*p))
     })
-}
-
-// ::  fpeval: evaluate a polynomial with Horner's method.
-pub fn fpeval(fp: FPolySlice, x: Felt) -> Felt {
-    // |:  [fp=`fpoly`one-fpoly x=`felt`(lift 1)]
-    // ^-  felt
-    // ~+
-    // ?:  (fp-is-zero fp)  (lift 0)
-    if fp.is_zero() {
-        return Felt::lift(Belt(0));
-    }
-    // ?:  =(len.fp 1)  (~(snag fop fp) 0)
-    if fp.len() == 1 {
-        return fp.0[0];
-    }
-    // =/  p  ~(to-poly fop fp)
-    // =.  p  (flop p)
-    // =/  res=@  (lift 0)
-    let mut res = Felt::zero();
-
-    // |-
-    // ?~  p    !!
-    // ?~  t.p
-    //   (fadd (fmul res x) i.p)
-    // ::  based on p(x) = (...((a_n)x + a_{n-1})x + a_{n-2})x + ... )
-    // $(res (fadd (fmul res x) i.p), p t.p)
-    for p in fp.0.iter().rev() {
-        res = res * x + *p;
-    }
-
-    res
 }
 
 pub fn fpadd<'a>(fp: FPolyVec, fq: FPolySlice) -> FPolyVec {
@@ -1251,4 +1221,12 @@ pub fn turn_coseword(stack: &mut NockStack, sam: Noun) -> Result {
         });
 
     Ok(finalize_mary(stack, order as _, polys.len as _, ret_ma))
+}
+
+pub fn fp_decompose(stack: &mut NockStack, sam: Noun) -> Result {
+    p_decompose_impl::<Felt>(stack, sam)
+}
+
+pub fn fpeval(stack: &mut NockStack, sam: Noun) -> Result {
+    peval_impl::<Felt>(stack, sam)
 }

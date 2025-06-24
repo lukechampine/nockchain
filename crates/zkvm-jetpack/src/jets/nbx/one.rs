@@ -1,7 +1,12 @@
+use std::iter::once;
+
 use crate::form::mary::{Mary, MarySlice};
-use crate::form::{BPolySlice, Belt, Element, FPolySlice, Felt};
+use crate::form::math::poly::{p_decompose, peval};
+use crate::form::{BPolySlice, Belt, Element, ElementEx, FPolySlice, Felt};
 use crate::form::{BPolyVec, PolySlice};
-use crate::hand::handle::{finalize_mary, new_handle_mut_mary};
+use crate::hand::handle::{
+    finalize_mary, finalize_poly, new_handle_mut_mary, new_handle_mut_slice,
+};
 use crate::jets::utils::jet_err;
 use crate::noun::noun_ext::NounExt;
 use either::Either;
@@ -272,4 +277,47 @@ pub fn bpcan(mut p: BPolyVec) -> BPolyVec {
         p.0.push(Belt(0));
     }
     p
+}
+
+pub fn p_decompose_impl<T: ElementEx>(stack: &mut NockStack, sam: Noun) -> Result {
+    let [p, d] = sam.uncell()?;
+    let Ok(p) = PolySlice::try_from(p) else {
+        return jet_err();
+    };
+    let d = d.as_atom()?.as_u64()? as usize;
+
+    let r = p_decompose::<T>(p, d);
+    let r = r
+        .into_iter()
+        .map(|v| {
+            let (elem, p) = new_handle_mut_slice(stack, Some(v.len()));
+            p.copy_from_slice(&v);
+            finalize_poly(stack, Some(v.len()), elem)
+        })
+        .chain(once(D(0)))
+        .collect::<Vec<_>>();
+
+    Ok(T(stack, &r))
+}
+
+pub fn bp_decompose(stack: &mut NockStack, sam: Noun) -> Result {
+    p_decompose_impl::<Belt>(stack, sam)
+}
+
+pub fn peval_impl<T: ElementEx>(stack: &mut NockStack, sam: Noun) -> Result {
+    let [p, d] = sam.uncell()?;
+    let Ok(p) = PolySlice::try_from(p) else {
+        return jet_err();
+    };
+    let Ok(d) = T::try_from(d) else {
+        return jet_err();
+    };
+
+    let r = peval::<T>(p, d);
+
+    Ok(r.as_noun(stack))
+}
+
+pub fn bpeval(stack: &mut NockStack, sam: Noun) -> Result {
+    peval_impl::<Belt>(stack, sam)
 }
