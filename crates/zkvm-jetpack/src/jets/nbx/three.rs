@@ -1,3 +1,4 @@
+use std::iter::once;
 use std::mem::MaybeUninit;
 
 use crate::form::mary::{Mary, MarySlice};
@@ -15,6 +16,8 @@ use crate::hand::structs::HoonList;
 use crate::noun::noun_ext::NounExt;
 use array_concat::concat_arrays;
 use either::Either;
+use nockvm::interpreter::Context;
+use nockvm::jets::util::slot;
 use nockvm::jets::{util::BAIL_EXIT, JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::noun::{Atom, DirectAtom, Noun, D, T};
@@ -355,10 +358,71 @@ impl Tip5Tog {
         output
     }
 
+    pub fn felts(&mut self, n: usize) -> Vec<Felt> {
+        let belts = self.belts(n * 3);
+        let belts_ptr = belts.as_ptr();
+        unsafe { core::slice::from_raw_parts(belts_ptr as *const Felt, n) }.to_vec()
+    }
+
     pub fn felt(&mut self) -> Felt {
         let belts = self.belts(3);
         Felt(belts.try_into().unwrap())
     }
+}
+
+pub fn with_tog(
+    context: &mut Context,
+    subj: Noun,
+    func: impl FnOnce(&mut NockStack, &mut Tip5Tog, Noun) -> Result,
+) -> Result {
+    let stack = &mut context.stack;
+
+    let parent = slot(subj, 7)?;
+    let [_2, _3] = parent.uncell()?;
+    let [state, _7] = _3.uncell()?;
+
+    let state: [Noun; tip5::STATE_SIZE + 1] = state.uncell()?;
+    let state: [Noun; tip5::STATE_SIZE] = unsafe { core::mem::transmute_copy(&state) };
+    let sponge = state.map(|v| Melt(v.as_atom().unwrap().as_u64().unwrap()));
+    let mut tog = Tip5Tog { sponge };
+    let sam = slot(subj, 6)?;
+
+    let ret = func(stack, &mut tog, sam)?;
+
+    let sponge: [Noun; tip5::STATE_SIZE] = tog.sponge.map(|v| Atom::new(stack, v.0).as_noun());
+    let state: [Noun; tip5::STATE_SIZE + 1] = concat_arrays!(sponge, [D(0)]);
+    let state = T(stack, &state);
+
+    let _3 = T(stack, &[state, _7]);
+    let parent = T(stack, &[_2, _3]);
+
+    Ok(T(stack, &[ret, parent]))
+}
+
+pub fn tog_belts(context: &mut Context, subj: Noun) -> Result {
+    with_tog(context, subj, |stack, tog, n| {
+        let n = n.as_direct()?.data() as usize;
+        let belts = tog.belts(n);
+        let belts = belts
+            .into_iter()
+            .map(|b| Atom::new(stack, b.0).as_noun())
+            .chain(once(D(0)))
+            .collect::<Vec<_>>();
+        Ok(T(stack, &belts))
+    })
+}
+
+pub fn tog_felts(context: &mut Context, subj: Noun) -> Result {
+    with_tog(context, subj, |stack, tog, n| {
+        let n = n.as_direct()?.data() as usize;
+        let felts = tog.felts(n);
+        let felts = felts
+            .into_iter()
+            .map(|f| f.as_noun(stack))
+            .chain(once(D(0)))
+            .collect::<Vec<_>>();
+        Ok(T(stack, &felts))
+    })
 }
 
 pub type NounDigest<T = Melt> = [T; 5];

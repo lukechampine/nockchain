@@ -188,6 +188,8 @@ sam_jet! {
     prove_commit_jet => prove_commit 'raw,// 'jam 'create_jam_dir,
     //absorb_proof_objects_jet => absorb_proof_objects //'jam 'create_jam_dir,
     zby_key_jet => zby_key 'raw,
+    tog_belts_jet => tog_belts 'raw,
+    tog_felts_jet => tog_felts 'raw,
 }
 
 pub const NBX_ONE_JETS: &[HotEntry] = &[
@@ -446,6 +448,42 @@ pub const NBX_THREE_JETS: &[HotEntry] = &[
         ],
         1,
         hash_hashable_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"misc-lib"),
+            Left(b"tip5-lib"),
+            Left(b"tog"),
+            Left(b"belts"),
+        ],
+        1,
+        tog_belts_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"misc-lib"),
+            Left(b"tip5-lib"),
+            Left(b"tog"),
+            Left(b"felts"),
+        ],
+        1,
+        tog_felts_jet,
     ),
     (
         &[
