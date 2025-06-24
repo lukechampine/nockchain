@@ -52,7 +52,7 @@ impl TraceEntry {
         // TODO: figure out why passing path as `file` metadata field messes up function names in
         // tracy. For now, let's extract gate/core, and pass it as name.
         let name = path.trim_start_matches('/');
-        let mut cnt = 0;
+        /*let mut cnt = 0;
         let name = name
             .split_once(|v| {
                 if v == '/' {
@@ -63,7 +63,7 @@ impl TraceEntry {
                 }
             })
             .map(|(v, _)| v)
-            .unwrap_or(name);
+            .unwrap_or(name);*/
 
         let metadata = Box::leak(Box::new(Metadata::new(
             name,
