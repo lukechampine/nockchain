@@ -194,6 +194,7 @@ sam_jet! {
     bpeval_jet => bpeval,
     fp_decompose_jet => fp_decompose,
     fpeval_jet => fpeval,
+    lift_to_fpoly_jet => lift_to_fpoly,
 }
 
 pub const NBX_ONE_JETS: &[HotEntry] = &[
@@ -405,6 +406,21 @@ pub const NBX_TWO_JETS: &[HotEntry] = &[
         ],
         1,
         fpeval_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"lift-to-fpoly"),
+        ],
+        1,
+        lift_to_fpoly_jet,
     ),
 ];
 

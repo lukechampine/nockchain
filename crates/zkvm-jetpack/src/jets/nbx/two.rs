@@ -1230,3 +1230,20 @@ pub fn fp_decompose(stack: &mut NockStack, sam: Noun) -> Result {
 pub fn fpeval(stack: &mut NockStack, sam: Noun) -> Result {
     peval_impl::<Felt>(stack, sam)
 }
+
+pub fn lift_to_fpoly(stack: &mut NockStack, sam: Noun) -> Result {
+    // |=  poly=(list belt)
+    // ^-  fpoly
+    // ?>  (levy poly based)
+    // (init-fpoly (turn poly lift))
+    let mut felts = vec![];
+
+    for b in HoonList::try_from(sam).ok().into_iter().flatten() {
+        felts.push(Felt::lift(Belt(b.as_atom()?.as_u64()?)));
+    }
+
+    let (ret, slc) = new_handle_mut_slice(stack, Some(felts.len()));
+    slc.copy_from_slice(&felts);
+
+    Ok(finalize_poly(stack, Some(felts.len()), ret))
+}
