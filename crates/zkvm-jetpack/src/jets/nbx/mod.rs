@@ -12,6 +12,7 @@ mod five;
 mod four;
 mod one;
 mod prover_memory;
+mod prover_compute;
 mod six;
 mod three;
 mod two;
@@ -22,7 +23,8 @@ use eight::*;
 use five::*;
 use four::*;
 use one::*;
-use prover_memory::*;
+use prover_memory::{*, build as memory_build};
+use prover_compute::{*, build as compute_build};
 use six::*;
 use three::*;
 use two::*;
@@ -180,7 +182,8 @@ sam_jet! {
     fstack_push_jet => fstack_push 'raw,
     pstack_push_jet => pstack_push 'raw,
     rna_bfta_jet => rna_bfta_sam,
-    build_jet => build,
+    memory_build_jet => memory_build,
+    compute_build_jet => compute_build,
     precompute_ntts_jet => precompute_ntts,
     turn_coseword_jet => turn_coseword,
     pad_jet => pad,
@@ -776,7 +779,7 @@ pub const NBX_MEMORY_JETS: &[HotEntry] = &[
             Left(b"build"),
         ],
         1,
-        build_jet,
+        memory_build_jet,
     ),
     (
         &[
@@ -792,6 +795,24 @@ pub const NBX_MEMORY_JETS: &[HotEntry] = &[
         ],
         1,
         pad_jet,
+    ),
+];
+
+pub const NBX_COMPUTE_JETS: &[HotEntry] = &[
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"compute-table"),
+            Left(b"funcs"),
+            Left(b"build"),
+        ],
+        1,
+        compute_build_jet,
     ),
 ];
 
@@ -821,6 +842,7 @@ pub fn nbx_jets() -> impl Iterator<Item = HotEntry> {
         NBX_SIX_JETS,
         NBX_EIGHT_JETS,
         NBX_MEMORY_JETS,
+        NBX_COMPUTE_JETS,
         NBX_ZOON_JETS,
     ]
     .map(|v| v.iter().copied())
