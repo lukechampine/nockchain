@@ -133,6 +133,7 @@ macro_rules! jet_option {
 /// This is so that we can have callable implementations for composing jets.
 macro_rules! sam_jet {
     ($name:ident => $imp:ident 'raw $($l:lifetime)*$(,)?) => {
+        #[tracing::instrument(skip_all)]
         pub fn $name(context: &mut Context, subject: Noun) -> Result {
             jet_option!($imp => $($l)*: {
                 $imp(context, subject)
@@ -140,6 +141,7 @@ macro_rules! sam_jet {
         }
     };
     ($name:ident => $imp:ident $($l:lifetime)*$(,)?) => {
+        #[tracing::instrument(skip_all)]
         pub fn $name(context: &mut Context, subject: Noun) -> Result {
             jet_option!($imp => $($l)*: {
                 let sam = slot(subject, 6)?;

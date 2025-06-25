@@ -101,27 +101,16 @@ fn leaf_sequence_impl<T: FromAtom>(mut t: Noun) -> core::result::Result<Vec<T>, 
     Ok(ret)
 }
 
-pub fn init_tip5_state(domain: u64) -> [Melt; STATE_SIZE] {
-    match domain {
-        // ^~((reap state-size 0))
-        tas!(b"variable") => [Melt(0); STATE_SIZE],
-        // ^~((weld (reap rate 0) (reap capacity (montify 1))))
-        tas!(b"fixed") => {
-            let zero = [Melt(0); RATE];
-            let mont = [Melt::one(); CAPACITY];
-            concat_arrays!(zero, mont)
-        }
-        _ => panic!("Unsupported tip5 state"),
-    }
-}
-
 pub fn new_sponge(variable: bool) -> [Melt; tip5::STATE_SIZE] {
-    let mode = if variable {
-        tas!(b"variable")
+    if variable {
+        // ^~((reap state-size 0))
+        [Melt(0); STATE_SIZE]
     } else {
-        tas!(b"fixed")
-    };
-    init_tip5_state(mode)
+        // ^~((weld (reap rate 0) (reap capacity (montify 1))))
+        let zero = [Melt(0); RATE];
+        let mont = [Melt::one(); CAPACITY];
+        concat_arrays!(zero, mont)
+    }
 }
 
 pub fn absorb_sponge<const PAD: bool, T: Into<Melt> + Copy>(
@@ -170,7 +159,7 @@ pub fn absorb_sponge<const PAD: bool, T: Into<Melt> + Copy>(
                 .for_each(|v| *v = MaybeUninit::new(Melt::zero()));
             Some(r.map(|v| unsafe { MaybeUninit::assume_init(v) }))
         } else {
-            assert_eq!(r, 0);
+            debug_assert_eq!(r, 0);
             None
         });
 
@@ -428,30 +417,28 @@ pub fn tog_felts(context: &mut Context, subj: Noun) -> Result {
 pub type NounDigest<T = Melt> = [T; 5];
 
 #[derive(Debug)]
-enum ReduceTy {
-    Variable(usize),
-    Fixed,
-}
-
-#[derive(Debug)]
 struct ReduceOp {
     source: usize,
-    ty: ReduceTy,
     destination: usize,
 }
 
 impl ReduceOp {
-    fn reduce(self, input: &[Melt], out_ptr: *mut Melt, out_len: usize) {
-        let dig = match self.ty {
-            ReduceTy::Variable(len) => hash_varlen(&input[self.source..(self.source + len)]),
-            ReduceTy::Fixed => hash_10(
-                input[self.source..(self.source + DIGEST_LENGTH * 2)]
-                    .try_into()
-                    .unwrap(),
-            ),
-        };
+    fn reduce_variable(self, in_len: usize, input: &[Melt], out_ptr: *mut Melt, out_len: usize) {
+        let dig = hash_varlen(&input[self.source..(self.source + in_len)]);
 
-        assert!(out_len >= self.destination + DIGEST_LENGTH);
+        debug_assert!(out_len >= self.destination + DIGEST_LENGTH);
+        unsafe { core::slice::from_raw_parts_mut(out_ptr.add(self.destination), DIGEST_LENGTH) }
+            .copy_from_slice(&dig);
+    }
+
+    fn reduce_fixed(self, input: &[Melt], out_ptr: *mut Melt, out_len: usize) {
+        let dig = hash_10(
+            input[self.source..(self.source + DIGEST_LENGTH * 2)]
+                .try_into()
+                .unwrap(),
+        );
+
+        debug_assert!(out_len >= self.destination + DIGEST_LENGTH);
         unsafe { core::slice::from_raw_parts_mut(out_ptr.add(self.destination), DIGEST_LENGTH) }
             .copy_from_slice(&dig);
     }
@@ -459,11 +446,13 @@ impl ReduceOp {
 
 #[derive(Default)]
 struct ReduceStage {
-    ops: Vec<ReduceOp>,
+    ops_variable: Vec<(ReduceOp, usize)>,
+    ops_fixed: Vec<ReduceOp>,
     out: Vec<Melt>,
 }
 
 impl ReduceStage {
+    #[tracing::instrument(skip_all)]
     fn reduce(mut self, inp: &[Melt]) -> Vec<Melt> {
         // TODO: multithread/GPU this.
         //use rayon::prelude::*;
@@ -472,9 +461,13 @@ impl ReduceStage {
         unsafe impl Sync for MeltSlice {}
         let out_ptr = MeltSlice(self.out.as_mut_ptr());
         let out_len = self.out.len();
-        self.ops.into_iter().for_each(|op| {
+        self.ops_fixed.into_iter().for_each(|op| {
             let out = &out_ptr;
-            op.reduce(inp, out.0, out_len);
+            op.reduce_fixed(inp, out.0, out_len);
+        });
+        self.ops_variable.into_iter().for_each(|(op, len)| {
+            let out = &out_ptr;
+            op.reduce_variable(len, inp, out.0, out_len);
         });
         self.out
     }
@@ -482,11 +475,13 @@ impl ReduceStage {
     fn push_variable(&mut self, a: usize, len: usize) -> usize {
         let ret = self.out.len();
         self.out.resize(ret + DIGEST_LENGTH, Melt(0));
-        self.ops.push(ReduceOp {
-            source: a,
-            ty: ReduceTy::Variable(len),
-            destination: ret,
-        });
+        self.ops_variable.push((
+            ReduceOp {
+                source: a,
+                destination: ret,
+            },
+            len,
+        ));
         ret
     }
 
@@ -494,9 +489,8 @@ impl ReduceStage {
         assert_eq!(a + DIGEST_LENGTH, b);
         let ret = self.out.len();
         self.out.resize(ret + DIGEST_LENGTH, Melt(0));
-        self.ops.push(ReduceOp {
+        self.ops_fixed.push(ReduceOp {
             source: a,
-            ty: ReduceTy::Fixed,
             destination: ret,
         });
         ret
@@ -518,7 +512,7 @@ impl Pushable for Noun {
     }
 }
 
-impl<T: Into<Melt>> Pushable for NounDigest<T> {
+impl<T: Into<Melt> + Copy> Pushable for NounDigest<T> {
     fn push(self, engine: &mut HashEngine, stage: usize) -> core::result::Result<usize, JetErr> {
         Ok(engine.push_hash(stage, self))
     }
@@ -604,6 +598,7 @@ impl HashEngine {
         Ok((ret, len))
     }
 
+    #[tracing::instrument(skip_all)]
     pub fn reduce(mut self) -> Vec<NounDigest> {
         let mut cur = vec![];
         //let mut cnt = 0;
@@ -620,6 +615,34 @@ impl HashEngine {
         let c = cur.capacity() / DIGEST_LENGTH;
         core::mem::forget(cur);
         unsafe { Vec::from_raw_parts(p as *mut NounDigest, l, c) }
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub fn reduce_with_intermediates(
+        mut self,
+    ) -> (impl Iterator<Item = Vec<NounDigest>> + DoubleEndedIterator) {
+        let mut ret: Vec<Vec<Melt>> = vec![];
+        //let mut cnt = 0;
+        while let Some(stage) = self.stages.pop() {
+            //println!("Layer {cnt}: {} {}", stage.ops.len(), stage.out.len());
+            //cnt += 1;
+            //let t = std::time::Instant::now();
+            let cur = stage.reduce(if ret.is_empty() {
+                &[]
+            } else {
+                &ret[ret.len() - 1]
+            });
+            ret.push(cur);
+            //println!("{:.02}s", t.elapsed().as_secs_f64())
+        }
+        ret.into_iter().map(|mut cur| {
+            assert_eq!(cur.len() % DIGEST_LENGTH, 0);
+            let p = cur.as_mut_ptr();
+            let l = cur.len() / DIGEST_LENGTH;
+            let c = cur.capacity() / DIGEST_LENGTH;
+            core::mem::forget(cur);
+            unsafe { Vec::from_raw_parts(p as *mut NounDigest, l, c) }
+        })
     }
 
     pub fn push_mary(&mut self, stage: usize, ma: MarySlice) -> usize {
@@ -650,13 +673,19 @@ impl HashEngine {
         ret
     }
 
-    pub fn push_hash<T: Into<Melt>>(&mut self, stage: usize, h: NounDigest<T>) -> usize {
+    pub fn push_hash<T: Into<Melt> + Copy>(&mut self, stage: usize, h: NounDigest<T>) -> usize {
+        self.push_hashes(stage, &[h])
+    }
+
+    pub fn push_hashes<T: Into<Melt> + Copy>(
+        &mut self,
+        stage: usize,
+        h: &[NounDigest<T>],
+    ) -> usize {
         let stage = self.stages.get_mut(stage).unwrap();
         let ret = stage.out.len();
 
-        let d = h.map(Into::into);
-
-        stage.out.extend_from_slice(&d[..]);
+        stage.out.extend(h.iter().flat_map(|v| v.map(Into::into)));
         ret
     }
 
@@ -884,20 +913,22 @@ pub fn build_merk_heap_impl<T: ElementEx>(
     // ... then assemble the list into an atom
     // ... then add the high bit to the result
     // ... then build a mary out of the result
-    let mut res = vec![];
-    let mut curr = res_l;
-    loop {
-        let osize = res.len();
-        res.resize(osize + curr.len(), NounDigest::default());
-        res.copy_within(0..osize, curr.len());
-        res[..curr.len()].copy_from_slice(&curr);
+    let mut engine = HashEngine::default();
 
-        if curr.len() == 1 {
-            break;
+    engine.ensure_stages(height - 1);
+    for l in 0..(height - 1) {
+        for i in 0..(1 << l) {
+            engine.push_pair(l, i * 2 * DIGEST_LENGTH, (i * 2 + 1) * DIGEST_LENGTH);
         }
-
-        curr = hash_pairs(&curr)?;
     }
+    engine.push_hashes(height - 1, &res_l);
+
+    let mut res = engine
+        .reduce_with_intermediates()
+        .rev()
+        .flatten()
+        .collect::<Vec<_>>();
+
     assert_eq!(res.len(), size as usize);
 
     // :-  (xeb len.array.m)          :: compute height of heap
