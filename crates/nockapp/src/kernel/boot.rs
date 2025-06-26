@@ -240,7 +240,8 @@ pub fn init_default_tracing(cli: &Cli) {
     let use_ansi = cli.color == ColorChoice::Auto || cli.color == ColorChoice::Always;
 
     let tracy = if std::env::var("USE_TRACY").unwrap_or_else(|_| "false".to_string()) == "true" {
-        let nockcode_filter = tracing_subscriber::filter::filter_fn(|meta| meta.target() == "nockcode");
+        let only_nockcode = std::env::var("TRACY_FILTER_ONLY_NOCKCODE").unwrap_or_else(|_| "true".to_string()) == "true";
+        let nockcode_filter = tracing_subscriber::filter::filter_fn(move |meta| !only_nockcode || meta.target() == "nockcode");
         let tracy = tracing_tracy::TracyLayer::default();
         Some((nockcode_filter, tracy))
     } else {

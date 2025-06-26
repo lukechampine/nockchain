@@ -177,7 +177,7 @@ async fn run_kernel(
     let snapshot_path_buf = snapshot_dir.path().to_path_buf();
     let jam_paths = JamPaths::new(snapshot_dir.path());
 
-    let kernel = Kernel::load_with_hot_state_huge(
+    let kernel = Kernel::load_with_hot_state(
         snapshot_path_buf,
         jam_paths,
         kernels::miner::KERNEL,

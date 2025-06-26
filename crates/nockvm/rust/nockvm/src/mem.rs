@@ -300,7 +300,7 @@ impl NockStack {
         let result = Self::new_(size, top_slots);
         match result {
             Ok((stack, _)) => stack,
-            Err(e) => std::panic::panic_any(e),
+            Err(e) => panic!("{e:?}"),
         }
     }
 
