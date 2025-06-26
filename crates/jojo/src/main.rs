@@ -8,7 +8,7 @@ use futures::{stream::iter, StreamExt};
 use nockapp::kernel::boot::{self, Cli};
 use nockapp::kernel::checkpoint::JamPaths;
 use nockapp::kernel::form::Kernel;
-use nockapp::utils::{create_context, NOCK_STACK_SIZE_HUGE};
+use nockapp::utils::{create_context, NOCK_STACK_SIZE, NOCK_STACK_SIZE_HUGE};
 use nockapp::wire::Wire;
 use nockapp::{noun::slab::NounSlab, Noun, NounExt};
 use nockvm::interpreter::{Context, Error as IntError, Mote, Slogger};
@@ -160,7 +160,7 @@ impl Jettest {
         let hot_state = produce_prover_hot_state();
         let hot_state = [URBIT_HOT_STATE, &hot_state].concat();
 
-        let mut stack = NockStack::new(NOCK_STACK_SIZE_HUGE, 0);
+        let mut stack = NockStack::new(NOCK_STACK_SIZE, 0);
 
         let p = Path::new(&jamdir);
         let subject = load_jam(&mut stack, p.join("subject.jam"))?;
@@ -322,7 +322,7 @@ async fn run_kernel(
     let snapshot_path_buf = snapshot_dir.path().to_path_buf();
     let jam_paths = JamPaths::new(snapshot_dir.path());
 
-    let kernel = Kernel::load_with_hot_state_huge(
+    let kernel = Kernel::load_with_hot_state(
         snapshot_path_buf,
         jam_paths,
         KERNEL,

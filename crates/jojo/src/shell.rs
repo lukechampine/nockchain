@@ -50,6 +50,7 @@ struct ShellCommand {
     jam_out: Option<String>,
     cue_inp: Option<(String, usize)>,
     list_vars: bool,
+    debug_print: bool,
 }
 
 impl ShellCommand {
@@ -61,6 +62,7 @@ impl ShellCommand {
         let mut cue_inp = None;
         let mut list_vars = false;
         let mut file_hoon = false;
+        let mut debug_print = false;
 
         let hoon = if line.starts_with('/') {
             line = line.split_once('/').unwrap().1;
@@ -91,6 +93,7 @@ impl ShellCommand {
 /+ v s hoon - evaluate `hoon` on subject `s`, and assign output to `v`. Subject can be constructed from variable assignments.
 /| v s func - evaluate `func` with the given sample `s` and assign output to `v`.
 /p sam      - print given sample `sam`. Note: if single variable is provided, it is pretty-printed, but mutliple variables are printed as raw nouns.
+/D sam      - (fast) debug print given sample `sam`. This will print the noun on rust side.
 /v          - list defined variables.
 /c var path - cue a jamfile at `path` and assign it to `var`.
 /s var path - cue a subject jamfile at `path`, take the sample at axis 6, and assign it to `var`.
@@ -132,6 +135,11 @@ hoon - evaluate `hoon` and print the result out to screen.
                     }
                     "p" => {
                         (in_sample, _) = parse_vars(&mut rest)?;
+                        break None;
+                    }
+                    "D" => {
+                        (in_sample, _) = parse_vars(&mut rest)?;
+                        debug_print = true;
                         break None;
                     }
                     "v" => {
@@ -186,6 +194,7 @@ hoon - evaluate `hoon` and print the result out to screen.
             jam_out,
             cue_inp,
             list_vars,
+            debug_print,
         })
     }
 }
@@ -201,6 +210,7 @@ enum Command {
     Jam(Bytes, String),
     Cue(String, usize),
     ListVars(Vec<String>),
+    DebugPrint(Noun),
 }
 
 impl Shell {
@@ -213,6 +223,7 @@ impl Shell {
             jam_out,
             cue_inp,
             list_vars,
+            debug_print,
         } = ShellCommand::parse(line)?;
 
         let prt = D(out_sample.is_some() as u64);
@@ -279,6 +290,9 @@ impl Shell {
             return Ok(Command::Cue(cue, axis));
         } else if list_vars {
             return Ok(Command::ListVars(self.samples.keys().cloned().collect()));
+        } else if debug_print {
+            let sam = vased_sample.unwrap();
+            return Ok(Command::DebugPrint(slot(sam, 3).unwrap()));
         }
 
         let hoon = hoon.as_deref().map(|v| unsafe {
@@ -370,6 +384,13 @@ impl Shell {
                     println!("Defined variables:");
                     for v in vars {
                         println!("{v}");
+                    }
+                }
+                Command::DebugPrint(noun) => {
+                    if let Ok(c) = noun.as_cell() {
+                        println!("Cell: {:?}", FullDebugCellDepth(&c, 3));
+                    } else {
+                        println!("Noun: {noun:?}");
                     }
                 }
                 Command::Eval(slab) => {

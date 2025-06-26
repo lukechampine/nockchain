@@ -1,4 +1,4 @@
-/=  z  /common/zeke
+/=  z  /apps/jojo-imports
 /=  *  /common/wrapper
 =<  ((moat |) inner)  :: wrapped kernel
 =>
