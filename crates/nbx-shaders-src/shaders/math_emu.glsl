@@ -1,4 +1,5 @@
-void umulExtended(uint a, uint b, out uint result_lo, out uint result_hi) {
+// x, y, msb, lsb
+void umulExtended(uint a, uint b, out uint result_hi, out uint result_lo) {
     uint a_low = a & 0xFFFFu;
     uint a_high = a >> 16;
     uint b_low = b & 0xFFFFu;

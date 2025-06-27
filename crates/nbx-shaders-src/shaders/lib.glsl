@@ -12,13 +12,13 @@ struct uint128_t {
     uint64_t hi;
 };
 
-void umul32(uint a, uint b, out uint clo, out uint chi) {
-    umulExtended(a, b, clo, chi);//clo = a * b;
+void umul32(uint a, uint b, out uint chi, out uint clo) {
+    umulExtended(a, b, chi, clo);//clo = a * b;
 }
 
 uint64_t mul32(uint a, uint b) {
   uint lo, hi;
-  umulExtended(a, b, lo, hi);
+  umulExtended(a, b, hi, lo);
   return uint64_t(hi) << 32 | uint64_t(lo);
 }
 
