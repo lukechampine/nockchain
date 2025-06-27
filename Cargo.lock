@@ -2421,6 +2421,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "hoon"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "hoonc",
+ "nockapp",
+ "nockvm",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "zkvm-jetpack",
+]
+
+[[package]]
 name = "hoonc"
 version = "0.2.0"
 dependencies = [

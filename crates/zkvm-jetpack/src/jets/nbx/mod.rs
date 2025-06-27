@@ -845,7 +845,7 @@ pub fn nbx_jets() -> impl Iterator<Item = HotEntry> {
         NBX_EIGHT_JETS,
         NBX_MEMORY_JETS,
         NBX_COMPUTE_JETS,
-        NBX_ZOON_JETS,
+        //NBX_ZOON_JETS,
     ]
     .map(|v| v.iter().copied())
     .into_iter()

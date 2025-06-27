@@ -5,6 +5,7 @@ members = [
     "crates/equix-latency",
     "crates/kernels",
     "crates/hoonc",
+    "crates/hoon",
     "crates/nockapp",
     "crates/nockchain-libp2p-io",
     "crates/nockchain-metrics-exporter",

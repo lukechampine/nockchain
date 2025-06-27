@@ -268,12 +268,10 @@
     ?~(a 0 +((add $(a l.a) $(a r.a))))
   ::
   ++  key                                               ::  z-set of keys
-    =<  $
     ~/  %key
-    =+  b=`(z-set _?>(?=(^ a) p.n.a))`~
-    |.  ^+  b
-    ?~  a   b
-    $(a r.a, b $(a l.a, b (~(put z-in b) p.n.a)))
+    |-  ^-  (z-set _?>(?=(^ a) p.n.a))
+    ?~  a  ~
+    [p.n.a $(a l.a) $(a r.a)]
   ::
   ++  val                                               ::  list of vals
     =+  b=`(list _?>(?=(^ a) q.n.a))`~

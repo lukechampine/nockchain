@@ -1,13 +1,14 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use nockapp::noun::slab::NockJammer;
 use core::iter::once;
 use either::Either;
 use flume::Receiver;
 use futures::Stream;
 use futures::{stream::iter, StreamExt};
 use nockapp::kernel::boot::{self, Cli};
-use nockapp::kernel::checkpoint::JamPaths;
 use nockapp::kernel::form::Kernel;
+use nockapp::save::{Checkpoint, SaveableCheckpoint, Saver};
 use nockapp::utils::{create_context, NOCK_STACK_SIZE, NOCK_STACK_SIZE_HUGE};
 use nockapp::wire::Wire;
 use nockapp::{noun::slab::NounSlab, Noun, NounExt};
@@ -23,7 +24,7 @@ use nockvm::serialization::{cue, jam};
 use nockvm::trace::path_to_cord;
 use nockvm::unifying_equality::unifying_equality;
 use nockvm_macros::tas;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use tempfile::tempdir;
 use tokio::fs;
@@ -176,19 +177,28 @@ impl Jettest {
         );
 
         let cold = if let Some(snapshot_dir) = snapshot_dir {
-            let jam_paths = JamPaths::new(Path::new(&snapshot_dir));
-            let checkpoint = if jam_paths.checkpoint_exists() {
-                info!("Found existing state - restoring from checkpoint");
-                jam_paths.load_checkpoint(&mut stack).ok()
-            } else {
-                info!("No existing state found");
-                None
-            };
+            let saver: Option<SaveableCheckpoint> = Saver::<NockJammer>::try_load(&PathBuf::from(&snapshot_dir), None)
+                .await
+                .inspect_err(|e| info!("No existing state found {e:?}"))
+                .ok()
+                .and_then(|v| v.1)
+                .inspect(|_| info!("Found existing state - restoring from checkpoint"));
 
-            let (cold, event_num_raw) = checkpoint.as_ref().map_or_else(
-                || (Cold::new(&mut stack), 0),
-                |snapshot| (snapshot.cold, snapshot.event_num),
-            );
+            let (cold, event_num_raw) = match saver {
+                None => (Cold::new(&mut stack), 0),
+                Some(checkpoint) => {
+                    let event_num = checkpoint.event_num();
+                    let checkpoint_noun = checkpoint.noun.copy_to_stack(&mut stack);
+                    let checkpoint_cell = checkpoint_noun
+                        .as_cell()
+                        .expect("snapshot noun should be a cell");
+                    let cold_noun = checkpoint_cell.tail();
+                    let cold_vecs = Cold::from_noun(&mut stack, &cold_noun)
+                        .expect("Could not load cold state from snapshot");
+                    let cold = Cold::from_vecs(&mut stack, cold_vecs.0, cold_vecs.1, cold_vecs.2);
+                    (cold, event_num)
+                }
+            };
 
             debug!("Cold state from event {event_num_raw}");
 
@@ -314,18 +324,11 @@ async fn run_kernel(
     pokes: impl Stream<Item = SendSlab> + Send + 'static,
     cli: Cli,
 ) -> Receiver<SendSlab> {
-    let snapshot_dir =
-        tokio::task::spawn_blocking(|| tempdir().expect("Failed to create temporary directory"))
-            .await
-            .expect("Failed to create temporary directory");
     let hot_state = zkvm_jetpack::hot::produce_prover_hot_state();
-    let snapshot_path_buf = snapshot_dir.path().to_path_buf();
-    let jam_paths = JamPaths::new(snapshot_dir.path());
 
-    let kernel = Kernel::load_with_hot_state(
-        snapshot_path_buf,
-        jam_paths,
+    let kernel = Kernel::<SaveableCheckpoint>::load_with_hot_state(
         KERNEL,
+        None,
         &hot_state,
         cli.trace_opts.into(),
     )

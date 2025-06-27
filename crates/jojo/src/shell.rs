@@ -229,7 +229,7 @@ impl Shell {
         let prt = D(out_sample.is_some() as u64);
         self.save_state = out_sample;
 
-        let mut slab = NounSlab::new();
+        let mut slab: NounSlab = NounSlab::new();
 
         let mut vases = [None, None];
 
@@ -283,7 +283,7 @@ impl Shell {
             let sam = vased_sample
                 .and_then(|v| slot(v, 3).ok())
                 .ok_or_else(|| anyhow!("Cannot jam without sample (impossible)"))?;
-            let slab = NounSlab::from(sam);
+            let slab: NounSlab = NounSlab::from(sam);
             let bytes = slab.jam();
             return Ok(Command::Jam(bytes, jam));
         } else if let Some((cue, axis)) = cue_inp {
@@ -365,7 +365,7 @@ impl Shell {
                 }
                 Command::Cue(path, axis) => {
                     if let Err(e) = async {
-                        let mut slab = NounSlab::new();
+                        let mut slab: NounSlab = NounSlab::new();
                         let bytes = tokio::fs::read(&path).await?;
                         let noun = slab.cue_into(bytes.into())?;
                         if let Ok(noun) = slot(noun, axis as u64) {

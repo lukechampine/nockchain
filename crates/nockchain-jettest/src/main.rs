@@ -1,12 +1,12 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use nockapp::save::SaveableCheckpoint;
 use core::iter::once;
 use flume::Receiver;
 use futures::Stream;
 use futures::{stream::iter, StreamExt};
 use itertools::Itertools;
 use nockapp::kernel::boot::{self, Cli};
-use nockapp::kernel::checkpoint::JamPaths;
 use nockapp::kernel::form::Kernel;
 use nockapp::utils::NOCK_STACK_1KB;
 use nockapp::wire::Wire;
@@ -170,17 +170,10 @@ async fn run_kernel(
     hot_state: Vec<HotEntry>,
     cli: Cli,
 ) -> Receiver<SendSlab> {
-    let snapshot_dir =
-        tokio::task::spawn_blocking(|| tempdir().expect("Failed to create temporary directory"))
-            .await
-            .expect("Failed to create temporary directory");
-    let snapshot_path_buf = snapshot_dir.path().to_path_buf();
-    let jam_paths = JamPaths::new(snapshot_dir.path());
 
-    let kernel = Kernel::load_with_hot_state(
-        snapshot_path_buf,
-        jam_paths,
+    let kernel = Kernel::<SaveableCheckpoint>::load_with_hot_state(
         kernels::miner::KERNEL,
+        None,
         &hot_state,
         cli.trace_opts.into(),
     )

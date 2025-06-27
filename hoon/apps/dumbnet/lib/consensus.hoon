@@ -177,6 +177,10 @@
     %+  roll  ~(tap z-in txs.acc)
     |=  [=tx:t txs=_txs.c]
     (~(put z-bi txs) digest.pag id.tx tx)
+  =.  raw-txs.c
+    %+  roll  ~(tap z-in txs.acc)
+    |=  [=tx:t raw-txs=_raw-txs.c]
+    (~(put z-by raw-txs) id.tx -.tx)
   ::  update blocks
   ::
   =.  blocks.c
@@ -423,10 +427,13 @@
   =/  block  (~(get z-by blocks.c) bid)
   ?~  block
     ~
-  =/  height=page-number:t
-    ?~  heaviest-block.c  0
-    =/  heaviest-block  (~(got z-by blocks.c) u.heaviest-block.c)
-    (min height.heaviest-block height.u.block)
+  =/  unit-height=(unit page-number:t)
+    ?~  heaviest-block.c  `0
+    =/  heaviest-block  (~(get z-by blocks.c) u.heaviest-block.c)
+    ?~  heaviest-block  ~
+    `(min height.u.heaviest-block height.u.block)
+  ?~  unit-height  ~
+  =/  height  u.unit-height
   =/  bid-at-height=(unit block-id:t)  (~(get z-by heaviest-chain.d) height)
   ?~  bid-at-height  ~
   =/  ids=(list block-id:t)  [u.bid-at-height ~]
