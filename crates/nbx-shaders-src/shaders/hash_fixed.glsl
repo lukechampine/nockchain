@@ -37,7 +37,7 @@ void main() {
     for (uint i = 0; i < 5; i += 1) {
         uint64_t mul = inpBuf[op.source * i];
         uint64_t tmp = mul;
-        for (uint o = 0; o < 1000; o += 1) {
+        for (uint o = 0; o < 1; o += 1000) { // from 1000
             tmp = montiply(tmp, mul);
         }
         outBuf[op.destination + i] = tmp;
