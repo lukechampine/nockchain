@@ -18,6 +18,9 @@ members = [
     "crates/nockvm/rust/nockvm",
     "crates/nockchain-wallet",
     "crates/zkvm-jetpack",
+    "crates/nbx-shaders",
+    "crates/nbx-shaders-src",
+    "crates/nbx-shaders-build",
 ]
 
 resolver = "2"
@@ -58,6 +61,12 @@ path = "crates/nockvm/rust/nockvm_macros"
 
 [workspace.dependencies.zkvm-jetpack]
 path = "crates/zkvm-jetpack"
+
+[workspace.dependencies.nbx-shaders]
+path = "crates/nbx-shaders"
+
+[workspace.dependencies.nbx-shaders-src]
+path = "crates/nbx-shaders-src"
 
 [workspace.dependencies]
 json = "0.12.4"
@@ -168,6 +177,11 @@ testcontainers = { git = "https://github.com/bitemyapp/testcontainers-rs.git", r
 array-concat = "0.5"
 array-util = "1"
 const_for = "0.1"
+wgpu = { version = "25", features = ["spirv", "glsl"] }
+naga = "25"
+bytemuck = "1"
+pollster = "0.4"
+shaderc = { version = "0.9", features = ["build-from-source", "prefer-static-linking"] }
 
 thiserror = "2.0.11"
 tokio = { version = "1.32", features = [

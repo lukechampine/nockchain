@@ -416,39 +416,55 @@ pub fn tog_felts(context: &mut Context, subj: Noun) -> Result {
 
 pub type NounDigest<T = Melt> = [T; 5];
 
-#[derive(Debug)]
-struct ReduceOp {
-    source: usize,
-    destination: usize,
+#[derive(bytemuck::Pod, bytemuck::Zeroable, Clone, Copy, Debug)]
+#[repr(C)]
+pub struct ReduceOp {
+    pub source: u32,
+    pub destination: u32,
 }
 
 impl ReduceOp {
-    fn reduce_variable(self, in_len: usize, input: &[Melt], out_ptr: *mut Melt, out_len: usize) {
-        let dig = hash_varlen(&input[self.source..(self.source + in_len)]);
-
-        debug_assert!(out_len >= self.destination + DIGEST_LENGTH);
-        unsafe { core::slice::from_raw_parts_mut(out_ptr.add(self.destination), DIGEST_LENGTH) }
-            .copy_from_slice(&dig);
-    }
-
-    fn reduce_fixed(self, input: &[Melt], out_ptr: *mut Melt, out_len: usize) {
+    fn reduce_fixed(self, input: &[Melt], out_ptr: *mut Melt, out_len: u32) {
         let dig = hash_10(
-            input[self.source..(self.source + DIGEST_LENGTH * 2)]
+            input[(self.source as usize)..((self.source as usize) + DIGEST_LENGTH * 2)]
                 .try_into()
                 .unwrap(),
         );
 
-        debug_assert!(out_len >= self.destination + DIGEST_LENGTH);
-        unsafe { core::slice::from_raw_parts_mut(out_ptr.add(self.destination), DIGEST_LENGTH) }
-            .copy_from_slice(&dig);
+        debug_assert!((out_len as usize) >= (self.destination as usize) + DIGEST_LENGTH);
+        unsafe {
+            core::slice::from_raw_parts_mut(out_ptr.add(self.destination as usize), DIGEST_LENGTH)
+        }
+        .copy_from_slice(&dig);
+    }
+}
+
+#[derive(bytemuck::Pod, bytemuck::Zeroable, Clone, Copy, Debug)]
+#[repr(C)]
+pub struct VariableReduceOp {
+    pub inner: ReduceOp,
+    pub len: u32,
+}
+
+impl VariableReduceOp {
+    fn reduce(self, input: &[Melt], out_ptr: *mut Melt, out_len: u32) {
+        let Self { inner, len } = self;
+
+        let dig = hash_varlen(&input[(inner.source as usize)..((inner.source + len) as usize)]);
+
+        debug_assert!((out_len as usize) >= (inner.destination as usize) + DIGEST_LENGTH);
+        unsafe {
+            core::slice::from_raw_parts_mut(out_ptr.add(inner.destination as usize), DIGEST_LENGTH)
+        }
+        .copy_from_slice(&dig);
     }
 }
 
 #[derive(Default)]
-struct ReduceStage {
-    ops_variable: Vec<(ReduceOp, usize)>,
-    ops_fixed: Vec<ReduceOp>,
-    out: Vec<Melt>,
+pub struct ReduceStage {
+    pub ops_variable: Vec<VariableReduceOp>,
+    pub ops_fixed: Vec<ReduceOp>,
+    pub out: Vec<Melt>,
 }
 
 impl ReduceStage {
@@ -460,14 +476,14 @@ impl ReduceStage {
         unsafe impl Send for MeltSlice {}
         unsafe impl Sync for MeltSlice {}
         let out_ptr = MeltSlice(self.out.as_mut_ptr());
-        let out_len = self.out.len();
+        let out_len = self.out.len() as u32;
         self.ops_fixed.into_iter().for_each(|op| {
             let out = &out_ptr;
             op.reduce_fixed(inp, out.0, out_len);
         });
-        self.ops_variable.into_iter().for_each(|(op, len)| {
+        self.ops_variable.into_iter().for_each(|op| {
             let out = &out_ptr;
-            op.reduce_variable(len, inp, out.0, out_len);
+            op.reduce(inp, out.0, out_len);
         });
         self.out
     }
@@ -475,13 +491,13 @@ impl ReduceStage {
     fn push_variable(&mut self, a: usize, len: usize) -> usize {
         let ret = self.out.len();
         self.out.resize(ret + DIGEST_LENGTH, Melt(0));
-        self.ops_variable.push((
-            ReduceOp {
-                source: a,
-                destination: ret,
+        self.ops_variable.push(VariableReduceOp {
+            inner: ReduceOp {
+                source: a as u32,
+                destination: ret as u32,
             },
-            len,
-        ));
+            len: len as u32,
+        });
         ret
     }
 
@@ -490,8 +506,8 @@ impl ReduceStage {
         let ret = self.out.len();
         self.out.resize(ret + DIGEST_LENGTH, Melt(0));
         self.ops_fixed.push(ReduceOp {
-            source: a,
-            destination: ret,
+            source: a as u32,
+            destination: ret as u32,
         });
         ret
     }
@@ -596,6 +612,10 @@ impl HashEngine {
         stage.out.extend(core::iter::repeat_n(shape, len).flatten());
 
         Ok((ret, len))
+    }
+
+    pub fn destruct(self) -> Vec<ReduceStage> {
+        self.stages
     }
 
     #[tracing::instrument(skip_all)]

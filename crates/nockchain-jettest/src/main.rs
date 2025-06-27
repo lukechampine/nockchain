@@ -57,6 +57,7 @@ unsafe impl Sync for SendSlab {}
 #[derive(Subcommand, Debug, Clone)]
 pub enum Mode {
     Test(Test),
+    GpuTest,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -238,5 +239,6 @@ async fn main() -> Result<()> {
 
     match cli.mode {
         Mode::Test(p) => p.run(cli.nockapp_cli).await,
+        Mode::GpuTest => Ok(zkvm_jetpack::jets::nbx::gpu::gpu_test().unwrap()),
     }
 }

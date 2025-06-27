@@ -1,0 +1,14 @@
+[package]
+name = "nbx-shaders"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+wgpu.workspace = true
+
+[build-dependencies]
+nbx-shaders-src = { workspace = true, optional = true }
+
+[features]
+comptime = ["nbx-shaders-src"]
+spirv_passthrough = []
