@@ -2,7 +2,7 @@ use std::iter::once;
 
 use crate::form::mary::{Mary, MarySlice};
 use crate::form::math::poly::{p_decompose, peval};
-use crate::form::{BPolySlice, Belt, Element, ElementEx, FPolySlice, Felt};
+use crate::form::{binv, BPolySlice, Belt, Element, ElementEx, FPolySlice, Felt};
 use crate::form::{BPolyVec, PolySlice};
 use crate::hand::handle::{
     finalize_mary, finalize_poly, new_handle_mut_mary, new_handle_mut_slice,
@@ -320,4 +320,8 @@ pub fn peval_impl<T: ElementEx>(stack: &mut NockStack, sam: Noun) -> Result {
 
 pub fn bpeval(stack: &mut NockStack, sam: Noun) -> Result {
     peval_impl::<Belt>(stack, sam)
+}
+
+pub fn binv_sam(stack: &mut NockStack, sam: Noun) -> Result {
+    Ok(Atom::new(stack, binv(sam.as_atom()?.as_u64()?)).as_noun())
 }

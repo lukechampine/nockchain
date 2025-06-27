@@ -1,6 +1,5 @@
 ::  /lib/zoon: vendored types from hoon.hoon
 /=  z  /common/zeke
-~%  %zoon  ..ut  ~
 |%
 ::
 +|  %map
@@ -268,7 +267,6 @@
     ?~(a 0 +((add $(a l.a) $(a r.a))))
   ::
   ++  key                                               ::  z-set of keys
-    ~/  %key
     |-  ^-  (z-set _?>(?=(^ a) p.n.a))
     ?~  a  ~
     [p.n.a $(a l.a) $(a r.a)]
