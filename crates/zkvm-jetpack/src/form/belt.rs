@@ -4,7 +4,7 @@ use nockvm::noun::Noun;
 use num_traits::Pow;
 use tracing::debug;
 
-use crate::based;
+use nbx_tip5::based;
 use crate::form::math::base::*;
 use crate::form::poly::Belt;
 

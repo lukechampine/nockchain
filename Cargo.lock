@@ -4140,7 +4140,18 @@ dependencies = [
 name = "nbx-shaders-src"
 version = "0.1.0"
 dependencies = [
+ "nbx-tip5",
  "shaderc",
+]
+
+[[package]]
+name = "nbx-tip5"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "const_for",
+ "nockvm",
+ "num-traits",
 ]
 
 [[package]]
@@ -8214,6 +8225,7 @@ dependencies = [
  "ibig",
  "naga",
  "nbx-shaders",
+ "nbx-tip5",
  "nockapp",
  "nockvm",
  "nockvm_macros",

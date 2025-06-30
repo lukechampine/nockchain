@@ -21,6 +21,7 @@ members = [
     "crates/nbx-shaders",
     "crates/nbx-shaders-src",
     "crates/nbx-shaders-build",
+    "crates/nbx-tip5",
 ]
 
 resolver = "2"
@@ -67,6 +68,9 @@ path = "crates/nbx-shaders"
 
 [workspace.dependencies.nbx-shaders-src]
 path = "crates/nbx-shaders-src"
+
+[workspace.dependencies.nbx-tip5]
+path = "crates/nbx-tip5"
 
 [workspace.dependencies]
 json = "0.12.4"
@@ -179,7 +183,7 @@ array-util = "1"
 const_for = "0.1"
 wgpu = { version = "25", features = ["spirv", "glsl"] }
 naga = "25"
-bytemuck = "1"
+bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.4"
 shaderc = { version = "0.9", features = ["build-from-source", "prefer-static-linking"] }
 

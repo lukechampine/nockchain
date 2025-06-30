@@ -4,6 +4,8 @@ use crate::jets::nbx::three::{ReduceOp, ReduceStage, VariableReduceOp};
 
 use super::three::{HashEngine, NounDigest};
 use core::num::NonZeroU64;
+use nbx_shaders::get_shader_module;
+use nbx_tip5::tip5;
 use std::sync::{mpsc, Arc, OnceLock};
 use std::time::Instant;
 use tracing::*;
@@ -12,7 +14,6 @@ use wgpu::{
     Label, PushConstantRange, ShaderModuleDescriptor, ShaderModuleDescriptorPassthrough,
     ShaderModuleDescriptorSpirV, ShaderSource, ShaderStages,
 };
-use nbx_shaders::get_shader_module;
 
 struct Pipeline {
     pipeline: wgpu::ComputePipeline,
@@ -24,11 +25,12 @@ struct Gpu {
     queue: wgpu::Queue,
     hash_fixed: Pipeline,
     hash_variable: Pipeline,
+    debug_capture: bool,
 }
 
 impl Gpu {
     fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::from_env_or_default());
 
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
@@ -49,11 +51,13 @@ impl Gpu {
         // 1GB
         required_limits.max_buffer_size = 0x40000000;
         required_limits.max_storage_buffer_binding_size = 0x40000000;
+        //required_limits.max_storage_buffer_binding_size = 0x8000000;// 0x40000000;
 
         let (device, queue) =
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                 label: None,
-                required_features: wgpu::Features::SHADER_INT64 | wgpu::Features::SPIRV_SHADER_PASSTHROUGH,
+                required_features: wgpu::Features::SHADER_INT64
+                    | wgpu::Features::SPIRV_SHADER_PASSTHROUGH,
                 required_limits,
                 memory_hints: wgpu::MemoryHints::MemoryUsage,
                 trace: wgpu::Trace::Off,
@@ -64,10 +68,7 @@ impl Gpu {
         // Shader related
 
         let [hash_fixed, hash_variable] = [
-            (
-                core::mem::size_of::<ReduceOp>(),
-                "hash_fixed",
-            ),
+            (core::mem::size_of::<ReduceOp>(), "hash_fixed"),
             (
                 core::mem::size_of::<VariableReduceOp>(),
                 // TODO: hash_variable
@@ -165,6 +166,7 @@ impl Gpu {
             queue,
             hash_fixed,
             hash_variable,
+            debug_capture: std::env::var("GPU_DEBUGGER").as_deref().unwrap_or("0") != "0",
         })
     }
 }
@@ -288,6 +290,10 @@ pub fn reduce(engine: HashEngine) -> Vec<NounDigest> {
 
     debug!("All buffers");
 
+    if gpu.debug_capture {
+        unsafe { gpu.device.start_graphics_debugger_capture() };
+    }
+
     let mut encoder = gpu
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
@@ -379,6 +385,10 @@ pub fn reduce(engine: HashEngine) -> Vec<NounDigest> {
 
     let _ = rx.recv().unwrap();
 
+    if gpu.debug_capture {
+        unsafe { gpu.device.stop_graphics_debugger_capture() };
+    }
+
     let data = buffer_slice.get_mapped_range();
     let result: &[NounDigest] = bytemuck::cast_slice(&data);
 
@@ -416,7 +426,7 @@ fn get_engine() -> HashEngine {
 }
 
 fn cpu_reduce(engine: HashEngine) -> Vec<NounDigest> {
-    let mut cur: Vec<Melt> = vec![];
+    /*let mut cur: Vec<Melt> = vec![];
     let mut stages = engine.destruct();
 
     while let Some(ReduceStage {
@@ -425,20 +435,23 @@ fn cpu_reduce(engine: HashEngine) -> Vec<NounDigest> {
         mut out,
     }) = stages.pop()
     {
-        for ReduceOp {
-            source,
-            destination,
-        } in ops_fixed
-        {
-            for off in 0..5 {
+        use rayon::prelude::*;
+        struct MeltSlice(*mut Melt);
+        unsafe impl Send for MeltSlice {}
+        unsafe impl Sync for MeltSlice {}
+        let out_ptr = MeltSlice(out.as_mut_ptr());
+        ops_fixed.into_par_iter().for_each(|ReduceOp { source, destination }| {
+            let out = &out_ptr;
+            (0..5).into_iter().for_each(|off| {
                 let val = cur[(source + off) as usize].0;
-                let mut tmp = val;
-                for i in 0..1000 {
-                    tmp = montiply(tmp, val);
+                let mut tmp = [Melt(0); tip5::STATE_SIZE];
+                tmp[0] = Melt(val);
+                for i in 0..1 {
+                    tip5::permute(&mut tmp);
                 }
-                out[(destination + off) as usize] = Melt(tmp);
-            }
-        }
+                unsafe { *out.0.add((destination + off) as usize) = tmp[0] };
+            });
+        });
         cur = out;
     }
 
@@ -447,7 +460,8 @@ fn cpu_reduce(engine: HashEngine) -> Vec<NounDigest> {
     let l = cur.len() / DIGEST_LENGTH;
     let c = cur.capacity() / DIGEST_LENGTH;
     core::mem::forget(cur);
-    unsafe { Vec::from_raw_parts(p as *mut NounDigest, l, c) }
+    unsafe { Vec::from_raw_parts(p as *mut NounDigest, l, c) }*/
+    engine.reduce()
 }
 
 pub fn gpu_test() -> Result<(), Box<dyn std::error::Error>> {

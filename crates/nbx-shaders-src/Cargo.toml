@@ -5,3 +5,4 @@ edition.workspace = true
 
 [dependencies]
 shaderc.workspace = true
+nbx-tip5.workspace = true

@@ -1,0 +1,10 @@
+[package]
+name = "nbx-tip5"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+const_for.workspace = true
+num-traits.workspace = true
+nockvm.workspace = true
+bytemuck.workspace = true

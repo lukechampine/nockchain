@@ -28,9 +28,10 @@ naga.workspace = true
 tokio.workspace = true
 bytemuck.workspace = true
 pollster.workspace = true
+nbx-tip5.workspace = true
 nbx-shaders = { workspace = true, features = [
     # "comptime"
-    # "spirv_passthrough"
+    "spirv_passthrough"
 ] }
 
 [dev-dependencies]

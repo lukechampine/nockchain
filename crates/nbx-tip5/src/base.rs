@@ -1,11 +1,8 @@
-// Base field arithmetic functions.
-
-pub use nbx_tip5::base::*;
-
-#[derive(Debug)]
-pub enum FieldError {
-    OrderedRootError,
-}
+pub const PRIME: u64 = 18446744069414584321;
+pub const PRIME_PRIME: u64 = PRIME - 2;
+pub const PRIME_128: u128 = 18446744069414584321;
+pub const H: u64 = 20033703337;
+pub const ORDER: u64 = 2_u64.pow(32);
 
 pub const fn based_check(a: u64) -> bool {
     a < PRIME
@@ -16,7 +13,7 @@ macro_rules! based {
     ( $( $x:expr ),* ) => {
       {
           $(
-              debug_assert!($crate::form::math::base::based_check($x), "element must be inside the field\r");
+              debug_assert!($crate::base::based_check($x), "element must be inside the field\r");
           )*
       }
     };
@@ -110,32 +107,29 @@ pub const fn montify(x: u64) -> u64 {
 
 /// Reduce a 128 bit number
 #[inline(always)]
-pub fn reduce(n: u128) -> u64 {
-    reduce_159(n as u64, (n >> 64) as u32, (n >> 96) as u64)
-}
+pub fn reduce(prod: u128) -> u64 {
+    // NOTE: see https://docs.rs/risc0-core/1.2.6/src/risc0_core/field/goldilocks.rs.html#299
+    let ret: u64 = prod as u64;
+    // Get two high words
+    let med: u32 = (prod >> 64) as u32;
+    let high: u32 = (prod >> 96) as u32;
+    // Subtract out high bits, add in P if underflow
+    let ret = if ret >= (high as u64) {
+        ret.wrapping_sub(high as u64)
+    } else {
+        ret.wrapping_sub(high as u64).wrapping_add(PRIME)
+    };
 
-/// Reduce a 159 bit number
-/// See <https://cp4space.hatsya.com/2021/09/01/an-efficient-prime-for-number-theoretic-transforms/>
-/// See <https://github.com/mir-protocol/plonky2/blob/3a6d693f3ffe5aa1636e0066a4ea4885a10b5cdf/field/src/goldilocks_field.rs#L340-L356>
-#[inline(always)]
-pub fn reduce_159(low: u64, mid: u32, high: u64) -> u64 {
-    let (mut low2, carry) = low.overflowing_sub(high);
-    if carry {
-        low2 = low2.wrapping_add(PRIME);
+    // Compute shifted effect of medium
+    let med_shift = ((med as u64) << 32).wrapping_sub(med as u64);
+
+    // Add in, if overflow, subtract a P
+    let ret = ret.wrapping_add(med_shift);
+    if ret < med_shift || ret >= PRIME {
+        ret.wrapping_sub(PRIME)
+    } else {
+        ret
     }
-
-    let mut product = (mid as u64) << 32;
-    product -= product >> 32;
-
-    let (mut result, carry) = product.overflowing_add(low2);
-    if carry {
-        result = result.wrapping_sub(PRIME);
-    }
-
-    if result >= PRIME {
-        result -= PRIME;
-    }
-    result
 }
 
 #[inline(always)]

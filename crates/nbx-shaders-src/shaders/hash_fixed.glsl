@@ -34,12 +34,15 @@ void main() {
     // Do the multiply by two and write to the output.
     ReduceOp op = ops[idx];
 
+    Sponge tmp = fixedSponge;
+
+    for (uint i = 0; i < tip5Rate; i += 1) {
+        tmp.s[i] = inpBuf[op.source + i];
+    }
+
+    tip5Permute(tmp);
+
     for (uint i = 0; i < 5; i += 1) {
-        uint64_t mul = inpBuf[op.source * i];
-        uint64_t tmp = mul;
-        for (uint o = 0; o < 1; o += 1000) { // from 1000
-            tmp = montiply(tmp, mul);
-        }
-        outBuf[op.destination + i] = tmp;
+        outBuf[op.destination + i] = tmp.s[i];
     }
 }

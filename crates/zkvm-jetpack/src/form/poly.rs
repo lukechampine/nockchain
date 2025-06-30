@@ -5,7 +5,7 @@ use nockvm::mem::NockStack;
 use nockvm::noun::{Atom, Noun};
 use std::fmt::Debug;
 use std::slice::Iter;
-use num_traits::Pow;
+pub use nbx_tip5::melt::Melt;
 
 use crate::hand::handle::new_handle_mut_felt;
 
@@ -15,10 +15,6 @@ use super::{binv, bpow, FieldError};
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Default, bytemuck::Zeroable, bytemuck::Pod)]
 #[repr(transparent)]
 pub struct Belt(pub u64);
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Default, bytemuck::Zeroable, bytemuck::Pod)]
-#[repr(transparent)]
-pub struct Melt(pub u64);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Default, bytemuck::Zeroable, bytemuck::Pod)]
 #[repr(transparent)]

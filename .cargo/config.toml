@@ -1,4 +1,7 @@
 
+[profile.release.package."wgpu-hal"]
+debug-assertions = true
+
 [profile.release-v4]
 inherits = "release"
 rustflags = ["-C", "target-cpu=x86-64-v4", "-C", "force-frame-pointers=yes"]
