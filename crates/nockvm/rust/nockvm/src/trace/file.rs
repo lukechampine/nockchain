@@ -176,6 +176,5 @@ pub fn create_trace_file(pier_path: PathBuf) -> Result<TraceInfo, Error> {
     Ok(TraceInfo {
         backend,
         filter: None,
-        trace_jets: false,
     })
 }

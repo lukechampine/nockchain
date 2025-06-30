@@ -75,7 +75,6 @@ impl<T> core::ops::DerefMut for TraceStack<T> {
 pub struct TraceInfo {
     pub backend: Box<dyn TraceBackend>,
     pub filter: Option<Box<dyn TraceFilter>>,
-    pub trace_jets: bool,
 }
 
 impl TraceInfo {

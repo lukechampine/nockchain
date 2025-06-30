@@ -344,11 +344,14 @@ struct Miner {
 impl Miner {
     pub async fn new(trc: TraceOpts, pin_thread: Option<usize>) -> Self {
         let hot_state = zkvm_jetpack::hot::produce_prover_hot_state();
+        let test_jets_str = std::env::var("NOCK_TEST_JETS").unwrap_or_default();
+        let test_jets = nockapp::kernel::boot::parse_test_jets(test_jets_str.as_str());
         // Spawns a new std::thread for this mining attempt
         let kernel = Kernel::<SaveableCheckpoint>::load_with_hot_state(
             KERNEL,
             None,
             &hot_state,
+            test_jets,
             trc.into(),
         )
         .await

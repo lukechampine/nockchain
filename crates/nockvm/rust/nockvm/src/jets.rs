@@ -343,6 +343,7 @@ pub mod util {
             let cache = Hamt::<Noun>::new(&mut stack);
             let slogger = std::boxed::Box::pin(TestSlogger {});
             let cancel = Arc::new(AtomicIsize::new(NockCancelToken::RUNNING_IDLE));
+            let test_jets = Hamt::<()>::new(&mut stack);
 
             Context {
                 stack,
@@ -354,6 +355,7 @@ pub mod util {
                 scry_stack: D(0),
                 trace_info: None,
                 running_status: cancel,
+                test_jets,
             }
         }
 

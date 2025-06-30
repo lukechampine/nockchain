@@ -7588,6 +7588,7 @@ dependencies = [
  "array-concat",
  "array-util",
  "arrayref",
+ "bitvec",
  "bytes",
  "const_for",
  "either",

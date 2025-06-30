@@ -297,6 +297,7 @@ pub struct Context {
     pub scry_stack: Noun,
     pub trace_info: Option<TraceInfo>,
     pub running_status: Arc<AtomicIsize>,
+    pub test_jets: Hamt<()>,
 }
 
 #[derive(Debug, Clone)]
@@ -382,6 +383,7 @@ pub enum Mote {
     Fail = tas!(b"fail") as isize,
     Intr = tas!(b"intr") as isize,
     Meme = tas!(b"meme") as isize,
+    Jest = tas!(b"jest") as isize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -429,6 +431,7 @@ pub type Result = result::Result<Noun, Error>;
 const BAIL_EXIT: Result = Err(Error::Deterministic(Mote::Exit, D(0)));
 const BAIL_FAIL: Result = Err(Error::NonDeterministic(Mote::Fail, D(0)));
 const BAIL_INTR: Result = Err(Error::NonDeterministic(Mote::Intr, D(0)));
+pub(crate) const BAIL_JEST: Result = Err(Error::NonDeterministic(Mote::Jest, D(0)));
 
 #[allow(unused_variables)]
 #[inline(always)]
@@ -740,42 +743,27 @@ pub fn interpret(context: &mut Context, mut subject: Noun, formula: Noun) -> Res
                             push_formula(&mut context.stack, kale.core, false)?;
                         }
                         Todo9::ComputeResult => {
-                            let mut tracepoint = None;
-
                             if let Ok(mut formula) = res.slot_atom(kale.axis) {
                                 if !cfg!(feature = "sham_hints") {
-                                    if let Some((jet, path)) = context.warm.find_jet(
-                                        &mut context.stack, &mut res, &mut formula,
-                                    ) {
-                                        if let Some(trace_info) = context
-                                            .trace_info
-                                            .as_mut()
-                                            .filter(|v| v.trace_jets)
-                                        {
-                                            tracepoint = trace_info.append_trace(
-                                                &mut context.stack, path, !kale.tail,
-                                            );
-                                        }
-
+                                    if let Some((jet, path, test)) = context
+                                        .warm
+                                        .find_jet(&mut context.stack, &mut res, &mut formula)
+                                        .next()
+                                    {
                                         match jet(context, res) {
-                                            Ok(jet_res) => {
-                                                res = jet_res;
-                                                context.stack.pop::<NockWork>();
-
-                                                // Write this trace, because it's unlinked
-                                                // from the frame, and it will otherwise be
-                                                // lost.
-                                                if !kale.tail {
-                                                    if let Some(tracepoint) =
-                                                        tracepoint.take()
-                                                    {
-                                                        write_trace2(
-                                                            context,
-                                                            tracepoint.as_ptr(),
-                                                        );
+                                            Ok(mut jet_res) => {
+                                                if test {
+                                                    let mut test_res =
+                                                        interpret(context, res, formula)?;
+                                                    if !unifying_equality(
+                                                        &mut context.stack, &mut test_res,
+                                                        &mut jet_res,
+                                                    ) {
+                                                        break BAIL_JEST;
                                                     }
                                                 }
-
+                                                res = jet_res;
+                                                context.stack.pop::<NockWork>();
                                                 continue;
                                             }
                                             Err(JetErr::Punt) => {}
@@ -803,21 +791,19 @@ pub fn interpret(context: &mut Context, mut subject: Noun, formula: Noun) -> Res
                                 if kale.tail {
                                     stack.pop::<NockWork>();
 
-                                    if tracepoint.is_none() {
-                                        // We could trace on 2 as well, but 2 only comes from Hoon via
-                                        // '.*', so we can assume it's never directly used to invoke
-                                        // jetted code.
-                                        if let Some((path, trace_info)) =
-                                            context.trace_info.as_mut().and_then(|v| {
-                                                context
-                                                    .cold
-                                                    .matches(stack, &mut res)
-                                                    .zip(Some(v))
-                                            })
-                                        {
-                                            trace_info.append_trace(stack, path, false);
-                                        };
-                                    }
+                                    // We could trace on 2 as well, but 2 only comes from Hoon via
+                                    // '.*', so we can assume it's never directly used to invoke
+                                    // jetted code.
+                                    if let Some((path, trace_info)) =
+                                        context.trace_info.as_mut().and_then(|v| {
+                                            context
+                                                .cold
+                                                .matches(stack, &mut res)
+                                                .zip(Some(v))
+                                        })
+                                    {
+                                        trace_info.append_trace(stack, path, false);
+                                    };
 
                                     subject = res;
                                     push_formula(stack, formula, true)?;
@@ -835,27 +821,19 @@ pub fn interpret(context: &mut Context, mut subject: Noun, formula: Noun) -> Res
                                     *stack.push() = NockWork::Ret;
                                     push_formula(stack, formula, true)?;
 
-                                    if let Some(tracepoint) = tracepoint.take() {
-                                        // Link the existing jetted frame onto this new
-                                        // frame.
-                                        *(stack.local_noun_pointer(1)
-                                            as *mut *const TraceStack) =
-                                            tracepoint.as_ptr();
-                                    } else {
-                                        // We could trace on 2 as well, but 2 only comes from Hoon via
-                                        // '.*', so we can assume it's never directly used to invoke
-                                        // jetted code.
-                                        if let Some((path, trace_info)) =
-                                            context.trace_info.as_mut().and_then(|v| {
-                                                context
-                                                    .cold
-                                                    .matches(stack, &mut res)
-                                                    .zip(Some(v))
-                                            })
-                                        {
-                                            trace_info.append_trace(stack, path, false);
-                                        };
-                                    }
+                                    // We could trace on 2 as well, but 2 only comes from Hoon via
+                                    // '.*', so we can assume it's never directly used to invoke
+                                    // jetted code.
+                                    if let Some((path, trace_info)) =
+                                        context.trace_info.as_mut().and_then(|v| {
+                                            context
+                                                .cold
+                                                .matches(stack, &mut res)
+                                                .zip(Some(v))
+                                        })
+                                    {
+                                        trace_info.append_trace(stack, path, false);
+                                    };
                                 }
                             } else {
                                 // Axis into core must be atom
@@ -1751,7 +1729,9 @@ mod hint {
                         };
 
                         match cold_res {
-                            Ok(true) => context.warm = Warm::init(stack, cold, hot),
+                            Ok(true) => {
+                                context.warm = Warm::init(stack, cold, hot, &context.test_jets)
+                            }
                             Err(cold::Error::NoParent) => {
                                 flog!(context, "serf: cold: register: could not match parent battery at given axis: {:?} {:?}", chum, parent_formula_ax);
                             }

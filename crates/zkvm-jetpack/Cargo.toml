@@ -18,6 +18,7 @@ strum.workspace = true
 nockvm.workspace = true
 nockvm_macros.workspace = true
 tracing.workspace = true
+bitvec.workspace = true
 array-concat.workspace = true
 array-util.workspace = true
 const_for.workspace = true

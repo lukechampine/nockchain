@@ -18,8 +18,7 @@ use crate::hand::handle::{finalize_mary, new_handle_mut_mary};
 use crate::jets::table_utils::*;
 use crate::jets::utils::jet_err;
 
-pub fn memory_extend_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
-
+pub fn memory_v0_v1_extend_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let sam = slot(subject, 6)?;
     let table_mary = slot(sam, 2)?;
     let chals_rd1 = slot(sam, 6)?;
@@ -279,7 +278,7 @@ fn ion_bunt() -> Ion {
     }
 }
 
-pub fn memory_mega_extend_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+pub fn memory_v0_v1_mega_extend_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let sam = slot(subject, 6)?;
     let table_mary = slot(sam, 2)?;
     let all_chals = slot(sam, 6)?;

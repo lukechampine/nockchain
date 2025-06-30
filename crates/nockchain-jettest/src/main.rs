@@ -17,7 +17,6 @@ use nockvm::mem::NockStack;
 use nockvm::mug::mug;
 use std::path::Path;
 use std::time::Instant;
-use tempfile::tempdir;
 use zkvm_jetpack::hot::produce_prover_hot_state;
 use zkvm_jetpack::jets::nbx::nbx_jets;
 
@@ -175,6 +174,7 @@ async fn run_kernel(
         kernels::miner::KERNEL,
         None,
         &hot_state,
+        vec![],
         cli.trace_opts.into(),
     )
     .await

@@ -211,7 +211,7 @@ impl Jettest {
             Cold::new(&mut stack)
         };
 
-        let mut context = create_context(stack, &hot_state, cold, cli.trace_opts.clone().into());
+        let mut context = create_context(stack, &hot_state, cold, cli.trace_opts.clone().into(), vec![]);
 
         let mut jet_res = None;
         if jet_run {
@@ -330,6 +330,7 @@ async fn run_kernel(
         KERNEL,
         None,
         &hot_state,
+        vec![],
         cli.trace_opts.into(),
     )
     .await

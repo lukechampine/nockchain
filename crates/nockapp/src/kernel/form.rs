@@ -114,6 +114,7 @@ impl<C: SerfCheckpoint + Send + 'static> SerfThread<C> {
         checkpoint: Option<C>,
         constant_hot_state: Vec<HotEntry>,
         nock_stack_size: usize,
+        test_jets: Vec<NounSlab>,
         trace_info: Option<TraceInfo>,
     ) -> Result<Self> {
         let (action_sender, action_receiver) = mpsc::channel(1);
@@ -126,7 +127,9 @@ impl<C: SerfCheckpoint + Send + 'static> SerfThread<C> {
             .stack_size(SERF_THREAD_STACK_SIZE)
             .spawn(move || {
                 let stack = NockStack::new(nock_stack_size, 0);
-                let serf = Serf::new(stack, checkpoint, &kernel_bytes, &constant_hot_state, trace_info);
+                let serf = Serf::new(
+                    stack, checkpoint, &kernel_bytes, &constant_hot_state, test_jets, trace_info,
+                );
                 event_number_sender
                     .send(serf.event_num.clone())
                     .expect("Could not send event number out of serf thread");
@@ -553,34 +556,13 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         kernel: &[u8],
         checkpoint: Option<C>,
         hot_state: &[HotEntry],
+        test_jets: Vec<NounSlab>,
         trace_opts: TraceOpts,
-    ) -> Result<Self> {
-        Self::load_with_hot_state_trace_info(kernel, checkpoint, hot_state, trace_opts.into())
-        .await
-    }
-
-    /// Loads a kernel with a custom hot state.
-    ///
-    /// # Arguments
-    ///
-    /// * `snap_dir` - Directory for storing snapshots.
-    /// * `kernel` - Byte slice containing the kernel as a jammed noun.
-    /// * `hot_state` - Custom hot state entries.
-    /// * `trace_info` - Optional tracing implementation.
-    ///
-    /// # Returns
-    ///
-    /// A new `Kernel` instance.
-    pub async fn load_with_hot_state_trace_info(
-        kernel: &[u8],
-        checkpoint: Option<C>,
-        hot_state: &[HotEntry],
-        trace_info: Option<TraceInfo>,
     ) -> Result<Self> {
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
         let serf = SerfThread::new(
-            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE, trace_info,
+            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE, test_jets, trace_opts.into(),
         )
         .await?;
         Ok(Self { serf })
@@ -590,12 +572,13 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         kernel: &[u8],
         checkpoint: Option<C>,
         hot_state: &[HotEntry],
+        test_jets: Vec<NounSlab>,
         trace_info: Option<TraceInfo>,
     ) -> Result<Self> {
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
         let serf = SerfThread::new(
-            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_BIG, trace_info,
+            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_BIG, test_jets, trace_info,
         )
         .await?;
         Ok(Self { serf })
@@ -605,12 +588,13 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         kernel: &[u8],
         checkpoint: Option<C>,
         hot_state: &[HotEntry],
-        trace: Option<TraceInfo>,
+        test_jets: Vec<NounSlab>,
+        trace_info: Option<TraceInfo>,
     ) -> Result<Self> {
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
         let serf = SerfThread::new(
-            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_HUGE, trace,
+            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_HUGE, test_jets, trace_info,
         )
         .await?;
         Ok(Self { serf })
@@ -627,8 +611,13 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
     /// # Returns
     ///
     /// A new `Kernel` instance.
-    pub async fn load(kernel: &[u8], checkpoint: Option<C>, trace_opts: TraceOpts) -> Result<Self> {
-        Self::load_with_hot_state(kernel, checkpoint, &Vec::new(), trace_opts).await
+    pub async fn load(
+        kernel: &[u8],
+        checkpoint: Option<C>,
+        test_jets: Vec<NounSlab>,
+        trace_opts: TraceOpts,
+    ) -> Result<Self> {
+        Self::load_with_hot_state(kernel, checkpoint, &Vec::new(), test_jets, trace_opts.into()).await
     }
 
     /// Produces a checkpoint of the kernel state.
@@ -718,6 +707,7 @@ impl Serf {
         checkpoint: Option<C>,
         kernel_bytes: &[u8],
         constant_hot_state: &[HotEntry],
+        test_jets: Vec<NounSlab>,
         trace_info: Option<TraceInfo>,
     ) -> Self {
         let hot_state = [URBIT_HOT_STATE, constant_hot_state].concat();
@@ -751,7 +741,7 @@ impl Serf {
 
         let event_num = Arc::new(AtomicU64::new(event_num_raw));
 
-        let mut context = create_context(stack, &hot_state, cold, trace_info);
+        let mut context = create_context(stack, &hot_state, cold, trace_info, test_jets);
         let cancel_token = context.cancel_token();
 
         let mut arvo = {
@@ -1166,6 +1156,7 @@ impl Serf {
     pub unsafe fn preserve_event_update_leftovers(&mut self) {
         let stack = &mut self.context.stack;
         stack.preserve(&mut self.context.warm);
+        stack.preserve(&mut self.context.test_jets);
         stack.preserve(&mut self.context.hot);
         stack.preserve(&mut self.context.cache);
         stack.preserve(&mut self.context.cold);
@@ -1232,7 +1223,7 @@ mod tests {
             .join(jam);
         let jam_bytes =
             fs::read(jam_path).unwrap_or_else(|_| panic!("Failed to read {} file", jam));
-        Kernel::load(&jam_bytes, None, false)
+        Kernel::load(&jam_bytes, None, vec![], false)
             .await
             .expect("Could not load kernel")
     }
