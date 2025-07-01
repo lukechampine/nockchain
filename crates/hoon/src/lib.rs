@@ -29,18 +29,7 @@ pub struct HoonCli {
 }
 
 pub async fn run(cli: HoonCli, hot_state: &[HotEntry]) -> Result<(), Box<dyn std::error::Error>> {
-    let trace_info = if cli.boot.trace {
-        let file = File::create("trace.json").expect("Cannot create trace file trace.json");
-        let pid = std::process::id();
-        let process_start = std::time::Instant::now();
-        Some(TraceInfo {
-            file,
-            pid,
-            process_start,
-        })
-    } else {
-        None
-    };
+    let trace_info = cli.boot.trace_opts.into();
     let mut context: Context = init_context(Some(hot_state), trace_info);
 
     save_generator(&mut context, &cli.nock_script, cli.dep_dir, cli.out_dir).await
