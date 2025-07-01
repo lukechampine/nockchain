@@ -45,7 +45,6 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing-test = { workspace = true }
 yaque = { workspace = true }
-affinity = { workspace = true }
 
 # Let's Encrypt and HTTPS support
 axum-server = { workspace = true }
@@ -70,3 +69,6 @@ tracing-tracy.workspace = true
 [lib]
 name = "nockapp"
 path = "src/lib.rs"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+affinity = { workspace = true }
