@@ -1,3 +1,11 @@
+use std::io::Error;
+use std::path::PathBuf;
+use std::result::Result;
+use std::time::Instant;
+
+use either::Either::*;
+use nockvm_macros::tas;
+
 use crate::flog;
 use crate::interpreter::Context;
 use crate::jets::bits::util::rap;
@@ -6,12 +14,6 @@ use crate::mem::NockStack;
 use crate::mug::met3_usize;
 use crate::noun::{Atom, DirectAtom, IndirectAtom, Noun};
 use core::ptr::NonNull;
-use either::Either::*;
-use std::io::Error;
-use nockvm_macros::tas;
-use std::path::PathBuf;
-use std::result::Result;
-use std::time::Instant;
 
 mod file;
 pub use file::*;

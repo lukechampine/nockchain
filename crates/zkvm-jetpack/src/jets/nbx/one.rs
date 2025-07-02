@@ -118,9 +118,12 @@ fn lift_elt(stack: &mut NockStack, step: usize, a: Noun) -> Result {
     if step == 1 {
         Ok(a)
     } else {
-        let reaped = reap(stack, step - 1, D(0))?;
-        let poly = T(stack, &[a, reaped]);
-        let bp = init_bpoly(stack, poly)?;
+        let (res, res_poly): (IndirectAtom, &mut [Belt]) =
+            new_handle_mut_slice(stack, Some(step as usize));
+        res_poly[0] = Belt(a.as_atom()?.as_u64()?);
+        res_poly[1..].iter_mut().for_each(|v| *v = Belt(0));
+
+        let bp = finalize_poly(stack, Some(res_poly.len()), res);
         Ok(bp.as_cell()?.tail())
     }
 }
