@@ -232,13 +232,21 @@ pub fn bp_coseword_jet(context: &mut Context, subject: Noun) -> Result {
 pub fn init_bpoly_jet(context: &mut Context, subject: Noun) -> Result {
     let poly = slot(subject, 6)?;
 
-    let list_belt = HoonList::try_from(poly)?.into_iter();
-    let count = list_belt.count();
-    let (res, res_poly): (IndirectAtom, &mut [Belt]) =
-        new_handle_mut_slice(&mut context.stack, Some(count as usize));
-    init_bpoly(list_belt, res_poly)?;
+    let (res, res_poly) = if let Ok(list_belt) = HoonList::try_from(poly) {
+        let count = list_belt.count();
+        let (res, res_poly): (IndirectAtom, &mut [Belt]) =
+                              new_handle_mut_slice(&mut context.stack, Some(count as usize));
+        init_bpoly(list_belt, res_poly)?;
+
+        (res, res_poly)
+    } else {
+        let (res, res_poly): (IndirectAtom, &mut [Belt]) = new_handle_mut_slice(&mut context.stack, Some(1));
+        res_poly[0] = Belt(0);
+        (res, res_poly)
+    };
 
     let res_cell = finalize_poly(&mut context.stack, Some(res_poly.len()), res);
+
     Ok(res_cell)
 }
 
