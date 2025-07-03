@@ -976,14 +976,14 @@
     =/  check-timelock  =(timelock-range.raw (roll-timelocks:inputs inputs.raw))
     =/  check-field  (based:hash id.raw)
     =/  check-id  =(id.raw (compute-id raw))
-    :: %-  %-  slog
-    ::     :~  leaf+"validate-raw-tx"
-    ::         leaf+"inputs: {<check-inputs>}"
-    ::         leaf+"fees: {<check-fees>}"
-    ::         leaf+"timelock: {<check-timelock>}"
-    ::         leaf+"field: {<check-field>}"
-    ::         leaf+"id: {<check-id>}"
-    ::     ==
+    %-  %-  slog
+        :~  leaf+"validate-raw-tx"
+            leaf+"inputs: {<check-inputs>}"
+            leaf+"fees: {<check-fees>}"
+            leaf+"timelock: {<check-timelock>}"
+            leaf+"field: {<check-field>}"
+            leaf+"id: {<check-id>}"
+        ==
     ?&  check-inputs
         check-fees
         check-timelock
@@ -1936,17 +1936,17 @@
       %.n
     ::  check that the keys in .signature are a subset of the keys in the lock
     ?.  =((~(int z-in pubkeys.lock.parent-note) have-pks) have-pks)
-    ::   =/  base58-have-pks=(list @t)
-    ::     %+  turn  ~(tap z-by have-pks)
-    ::     to-b58:schnorr-pubkey
-    ::   =/  base58-pubkeys=(list @t)
-    ::     %+  turn  ~(tap z-by pubkeys.lock.parent-note)
-    ::     to-b58:schnorr-pubkey
+      =/  base58-have-pks=(list @t)
+        %+  turn  ~(tap z-by have-pks)
+        to-b58:schnorr-pubkey
+      =/  base58-pubkeys=(list @t)
+        %+  turn  ~(tap z-by pubkeys.lock.parent-note)
+        to-b58:schnorr-pubkey
       ::  intersection of pubkeys in .lock and pubkeys in .signature does not equal
       ::  the pubkeys in .signature
-      :: ~&  >>  "invalid signatures"
-      :: ~&  >>  "have-pks: {<base58-have-pks>}"
-      :: ~&  >>  "pubkeys.lock.parent-note: {<base58-pubkeys>}"
+      ~&  >>  "invalid signatures"
+      ~&  >>  "have-pks: {<base58-have-pks>}"
+      ~&  >>  "pubkeys.lock.parent-note: {<base58-pubkeys>}"
       %.n
     ::  we have enough signatures, they're all from the set of pubkeys required
     ::  by the lock, so now we can actually verify them.
