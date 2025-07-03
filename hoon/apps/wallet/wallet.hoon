@@ -1233,11 +1233,7 @@
       (~(del z-by:zo pending-commands.state) pid)
     ::
     =^  cmd-effs  state
-      =+  try-poke=(mule |.((poke ov)))
-      ?-  -.try-poke
-        %|  ~>  %slog.[%0 leaf+"poke failed, continuing to execute pending commands"]  [[%exit 0]~ state]
-        %&  p.try-poke
-      ==
+      (poke ov)
     $(cmds t.cmds, effs (weld effs cmd-effs))
   ::
   ++  do-sync-run

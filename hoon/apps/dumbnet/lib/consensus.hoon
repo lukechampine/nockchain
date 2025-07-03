@@ -6,23 +6,9 @@
 ::
 ::  this library is where _every_ update to the consensus state
 ::  occurs, no matter how minor.
-|_  [c=consensus-state:dk p=pending-state:dk =blockchain-constants:dumb-transact]
+|_  [c=consensus-state:dk =blockchain-constants:dumb-transact]
 +*  t  ~(. dumb-transact blockchain-constants)
 ::
-:: We have to duplicate this here to avoid cyclic dependencies with pending.hoon
-++  get-raw-tx
-  |=  tid=tx-id:t
-  ^-  (unit raw-tx:t)
-  =/  p-rawtx  (~(get by raw-txs.p) tid)
-  ?~  p-rawtx
-    (~(get by raw-txs.c) tid)
-  p-rawtx
-::
-::
-++  got-raw-tx
-  |=  tid=tx-id:t
-  ^-  raw-tx:t
-  (need (get-raw-tx tid))
 ::
 ::  checkpointed digests for chain stability
 ++  checkpointed-digests
@@ -170,7 +156,7 @@
 ++  check-size
   |=  [p=pending-state:dk pag=page:t]
   ^-  ?
-  (lte (compute-size:page:t pag got-raw-tx) max-block-size:t)
+  (lte (compute-size:page:t pag raw-txs.p) max-block-size:t)
 ::
 ++  add-page
   |=  [pag=page:t acc=tx-acc:t now=@da]
@@ -352,7 +338,7 @@
     ::~&  >>>  "block {digest-b58} is too large"
     [%.n %block-too-large]
   =/  raw-tx-set=(set (unit raw-tx:t))
-    (~(run z-in tx-ids.pag) |=(=tx-id:t (get-raw-tx tx-id)))
+    (~(run z-in tx-ids.pag) |=(=tx-id:t (~(get z-by raw-txs.p) tx-id)))
   =/  raw-tx-list=(list (unit raw-tx:t))  ~(tap z-in raw-tx-set)
   =|  tx-list=(list tx:t)
   =.  tx-list

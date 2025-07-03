@@ -3,25 +3,10 @@
 /=  dumb-transact  /common/tx-engine
 /=  *  /common/zoon
 ::
-|_  [p=pending-state:dk c=consensus-state:dk bc=blockchain-constants:dumb-transact]
+|_  [p=pending-state:dk bc=blockchain-constants:dumb-transact]
 +*  t  ~(. dumb-transact bc)
 +|  %logic
 ::  +find-ready-blocks: blocks for which .id was the last missing tx
-++  has-raw-tx
-  |=  tid=tx-id:t
-  ^-  ?
-  |((~(has z-by raw-txs.p) tid) (~(has z-by raw-txs.c) tid))
-++  get-raw-tx
-  |=  tid=tx-id:t
-  ^-  (unit raw-tx:t)
-  =/  p-raw-tx  (~(get z-by raw-txs.p) tid)
-  ?~  p-raw-tx
-    (~(get z-by raw-txs.c) tid)
-  p-raw-tx
-++  got-raw-tx
-  |=  tid=tx-id:t
-  ^-  raw-tx:t
-  (need (get-raw-tx tid))
 ++  find-ready-blocks
   ^-  (z-set block-id:t)
   ::  set of all pending blocks
@@ -41,7 +26,7 @@
   !=(*(z-set nname:t) common-names)
 ::
 ++  refresh-after-new-block
-  |=  retain=(unit @)
+  |=  [c=consensus-state:dk retain=(unit @)]
   ^-  pending-state:dk
   ?~  retain
     ::  never drop transactions
@@ -56,7 +41,7 @@
   ::
   ::  enumerate last N block heights inclusive of current block height
   =/  cur-height=page-number:t
-    ~(get-cur-height dcon c p bc)
+    ~(get-cur-height dcon c bc)
   =/  min-height=page-number:t
     ?:  (lth cur-height u.retain)  0
     ::  add 1 b/c range is inclusive of cur-height
@@ -70,11 +55,11 @@
     |=  $:  [tid=tx-id:t num=page-number:t]
             [keep=(list [tx-id:t page-number:t]) drop=(list raw-tx:t)]
         ==
-    =/  raw=raw-tx:t  (got-raw-tx tid)
+    =/  raw=raw-tx:t  (~(got z-by raw-txs.p) tid)
     ?:  (lth num min-height)
       ::  tx is old, drop it
       [keep [raw drop]]
-    ?.  (~(inputs-in-heaviest-balance dcon c p bc) raw)
+    ?.  (~(inputs-in-heaviest-balance dcon c bc) raw)
       ::  input(s) in tx not in balance, discard
       [keep [raw drop]]
     ::  tx should stay in heard-at
@@ -191,13 +176,7 @@
   ^-  [(list tx-id:t) pending-state:dk]
   ::  find missing txs
   =/  missing-txs=(list tx-id:t)
-    :: linear in the number of transactions in a block which is much smaller than
-    :: the number of transactions in the state, which key:z-by must traverse
-    %-  ~(rep z-in tx-ids.pag)
-    |=  [tid=tx-id:t missing=(list tx-id:t)]
-    ?.  (has-raw-tx tid)
-      [tid missing]
-    missing
+    ~(tap z-in (~(dif z-in tx-ids.pag) ~(key z-by raw-txs.p)))
   ::  return missing txs and new pending state
   :-  missing-txs
   =;  pen=pending-state:dk

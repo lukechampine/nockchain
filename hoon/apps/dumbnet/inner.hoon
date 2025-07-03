@@ -20,9 +20,9 @@
 ++  inner
   |_  k=kernel-state:dk
   +*  min      ~(. dumb-miner m.k constants.k)
-      pen      ~(. dumb-pending p.k c.k constants.k)
+      pen      ~(. dumb-pending p.k constants.k)
       der      ~(. dumb-derived d.k constants.k)
-      con      ~(. dumb-consensus c.k p.k constants.k)
+      con      ~(. dumb-consensus c.k constants.k)
       t        ~(. c-transact constants.k)
   ::
   ::  We should be calling the inner kernel load in case of update
@@ -199,7 +199,12 @@
       ::  scry for a raw-tx
       ^-  (unit (unit raw-tx:t))
       :-  ~
-      (get-raw-tx:pen (from-b58:hash:t tid.pole))
+      =/  hash  (from-b58:hash:t tid.pole)
+      =/  raw-from-pending
+        (~(get z-by raw-txs.p.k) hash)
+      ?~  raw-from-pending
+        (~(get z-by raw-txs.c.k) hash)
+      raw-from-pending
     ::
         [%heavy ~]
       ^-  (unit (unit (unit block-id:t)))
@@ -274,7 +279,7 @@
       ?+    wir  ~|("unsupported wire: {<wir>}" !!)
           [%poke src=?(%nc %timer %sys %miner %npc) ver=@ *]
         ?-  -.cause
-          %command  (handle-command now eny p.cause)
+          %command  (handle-command now p.cause)
           %fact     (handle-fact wir eny our now p.cause)
         ==
       ::
@@ -601,7 +606,7 @@
         [(liar-effect wir %tx-id-invalid)]~
       ::
       ::  do we already have raw-tx?
-      ?:  (has-raw-tx:pen id.raw)
+      ?:  (~(has z-by raw-txs.p.k) id.raw)
         :: do almost nothing (idempotency), we already have it
         :: but do tell the runtime we've already seen it
         ~>  %slog.[3 leaf+"tx-id-already-seen"]
@@ -809,7 +814,7 @@
         [orphaned-block-span reorg-span effs]
       ::
       ::  refresh pending state
-      =.  p.k  (refresh-after-new-block:pen retain.a.k)
+      =.  p.k  (refresh-after-new-block:pen c.k retain.a.k)
       ::
       ::  tell the miner about the new block
       =.  m.k  (heard-new-block:min c.k p.k now)
@@ -817,7 +822,7 @@
       ::  update derived state
       =.  d.k  (update:der c.k pag)
       ?.  =(old-heavy heaviest-block.c.k)
-        =^  mining-effs  k  (do-mine (hash-noun-varlen:tip5:zeke [%nonce (mod eny p.zeke)]))
+        =^  mining-effs  k  (do-mine (hash-noun-varlen:tip5:zeke [%nonce eny]))
         =.  effs  (weld mining-effs effs)
         effs^k
       ::
@@ -858,7 +863,7 @@
       (some id.pole)
     ::
     ++  handle-command
-      |=  [now=@da eny=@ =command:dk]
+      |=  [now=@da =command:dk]
       ^-  [(list effect:dk) kernel-state:dk]
       ~>  %slog.[3 (cat 3 'command: ' -.command)]
       ::  ~&  "handling command: {<-.command>}"
@@ -873,7 +878,7 @@
       |^
       ?-  -.command
           %born
-        (do-born eny)
+        do-born
       ::
           %pow
         do-pow
@@ -908,7 +913,6 @@
       ==
       ::
       ++  do-born
-        |=  eny=@
         ^-  [(list effect:dk) kernel-state:dk]
         ?>  ?=([%born *] command)
         ::  once born command is registered, the init phase is over
@@ -933,17 +937,11 @@
         :: Also emit %seen for the heaviest block so our cache can start to update
         =/  height=page-number:t
           +(height:(~(got z-by blocks.c.k) u.heaviest-block.c.k))
-        =/  born-effects=(list effect:dk)
-          :~  [%request %block %by-height height]
-              [%seen %block u.heaviest-block.c.k `height]
-          ==
-        =/  nonce=noun-digest:tip5:zeke  (hash-noun-varlen:tip5:zeke [%nonce (mod eny p:zeke)])
-        =/  k=kernel-state:dk  k
-        =^  mine-effects=(list effect:dk)  k
-          (do-mine nonce)
         ~>  %slog.[0 leaf+"dumbnet born"]
         :_  k
-        (weld mine-effects born-effects)
+        :~  [%request %block %by-height height]
+            [%seen %block u.heaviest-block.c.k `height]
+        ==
       ::
       ++  do-pow
         ^-  [(list effect:dk) kernel-state:dk]
