@@ -30,6 +30,20 @@ bool notEqual(uint a, uint b) {
 #define BOOL bool
 #include <gbase>
 
+#define U64 u64vec2
+#define U32 uvec2
+#define I32 ivec2
+#define U128 u128vec2
+#define BOOL bvec2
+#include <gbase>
+
+#define U64 u64vec3
+#define U32 uvec3
+#define I32 ivec3
+#define U128 u128vec3
+#define BOOL bvec3
+#include <gbase>
+
 #define U64 u64vec4
 #define U32 uvec4
 #define I32 ivec4

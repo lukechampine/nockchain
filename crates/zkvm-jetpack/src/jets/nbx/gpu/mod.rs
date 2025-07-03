@@ -187,7 +187,7 @@ pub fn reduce(engine: HashEngine) -> Vec<NounDigest> {
     let mut stages = engine.destruct();
     let mut i = 0;
 
-    let workgroup_size = 128;
+    let workgroup_size = 256;
     let max_workgroup_insts = 65535;
     let chunk_size = max_workgroup_insts * workgroup_size;
     //let op_size = ops.size() as usize / ops_len;

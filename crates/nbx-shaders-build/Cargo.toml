@@ -9,6 +9,6 @@ nbx-shaders-src = { workspace = true }
 [features]
 default = [
   # Comment this out to enable more optimal math
-  "emulate_extended_maths"
+  # "emulate_extended_maths"
 ]
 emulate_extended_maths = []

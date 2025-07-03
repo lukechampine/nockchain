@@ -1,15 +1,17 @@
+#include <math_emu>
+
 struct U128 {
     U64 lo;
     U64 hi;
 };
 
 void umul32(U32 a, U32 b, out U32 chi, out U32 clo) {
-    umulExtended(a, b, chi, clo);//clo = a * b;
+    umulEx(a, b, chi, clo);//clo = a * b;
 }
 
 U64 mul32(U32 a, U32 b) {
   U32 lo, hi;
-  umulExtended(a, b, hi, lo);
+  umulEx(a, b, hi, lo);
   return U64(hi) << 32 | U64(lo);
 }
 
@@ -73,7 +75,7 @@ U64 badd(U64 a, U64 b) {
     return x1 + (PRIME * U64(lessThan(a, c)));
 }
 
-I32 findMSB64(U64 x) {
+/*I32 findMSB64(U64 x) {
     U32 lo = U32(x);
     U32 hi = U32(x >> 32);
     I32 msbLo = findMSB(lo);
@@ -88,11 +90,10 @@ U32 leadingZeros64(U64 x) {
     I32 msb = findMSB64(x);
     // else count how many bits above the MSB are zero
     return U32(I32(63) - msb);
-}
+}*/
 
-U64 mpow(U64 v, uint e) {
+U64 mpow(U64 v, uint e, uint bitLength) {
     U64 acc = U64(oneMelt);
-    uint bitLength = 64 - leadingZeros64(e);
     for (uint i = 0; i < bitLength; i += 1) {
         acc = montiply(acc, acc);
         bool bitSet = (e & (1 << (bitLength - 1 - i))) != 0;
@@ -100,6 +101,12 @@ U64 mpow(U64 v, uint e) {
         acc = montiply(acc, U64(1 - bv) + U64(bv) * v);
     }
     return acc;
+}
+
+U64 mpow(U64 v, uint e) {
+    // 64 - leadingZeros64(e);
+    uint bitLength = 1 + findMSB(e);
+    return mpow(v, e, bitLength);
 }
 
 #undef U64

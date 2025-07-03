@@ -1,7 +1,8 @@
+use std::path::Path;
+
 use shaderc::{
     CompileOptions, Compiler, IncludeCallbackResult, IncludeType, ResolvedInclude, ShaderKind,
 };
-use std::path::Path;
 
 pub struct BuildOptions<T> {
     out_dir: T,
@@ -78,6 +79,9 @@ const uint128_t tip5R = uint128_t(0, 1);
 const uint tip5LookupTable[256] = uint[256]({lookup_table});
 const uint64_t tip5RoundConstants[{rc_size}] = uint64_t[{rc_size}]({round_constants});
 const uint64_t tip5MdsMatrix[{STATE_SIZE}][{STATE_SIZE}] = uint64_t[{STATE_SIZE}][{STATE_SIZE}]({mds_matrix});
+
+const u64vec4 tip5RoundConstantsVec[{rc_size} / 4] = u64vec4[{rc_size} / 4]({round_constants_vec});
+const u64vec4 tip5MdsMatrixVec[{STATE_SIZE}][{STATE_SIZE} / 4] = u64vec4[{STATE_SIZE}][{STATE_SIZE} / 4]({mds_matrix_vec});
 ",
         lookup_table = LOOKUP_TABLE
             .into_iter()
@@ -88,6 +92,17 @@ const uint64_t tip5MdsMatrix[{STATE_SIZE}][{STATE_SIZE}] = uint64_t[{STATE_SIZE}
         round_constants = ROUND_CONSTANTS2
             .into_iter()
             .map(|v| u64_to_glsl(v.0))
+            .collect::<Vec<_>>()
+            .join(", "),
+        round_constants_vec = ROUND_CONSTANTS2
+            .chunks(4)
+            .map(|v| {
+                let v = v.iter()
+                    .map(|v| u64_to_glsl(v.0))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("u64vec4({v})")
+            })
             .collect::<Vec<_>>()
             .join(", "),
         mds_matrix = MDS_MATRIX_MONT
@@ -101,6 +116,27 @@ const uint64_t tip5MdsMatrix[{STATE_SIZE}][{STATE_SIZE}] = uint64_t[{STATE_SIZE}
             ))
             .collect::<Vec<_>>()
             .join(", "),
+        mds_matrix_vec = MDS_MATRIX_MONT
+            .into_iter()
+            .map(|m| format!(
+                "u64vec4[{STATE_SIZE} / 4]({})",
+                m.chunks(4)
+                    .map(|c| {
+                        let c = c
+                            .iter()
+                            .map(|v| u64_to_glsl(v.0))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        format!("u64vec4({c})")
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ") /*m.into_iter()
+                                .map(|v| u64_to_glsl(v.0))
+                                .collect::<Vec<_>>()
+                                .join(", ")*/
+            ))
+            .collect::<Vec<_>>()
+            .join(", "),
     )
 }
 
@@ -108,18 +144,30 @@ fn generate_sponge() -> String {
     use nbx_tip5::tip5::*;
     format!(
         r"
-const Sponge fixedSponge = Sponge(uint64_t[16]({fixed_sponge}));
-const Sponge variableSponge = Sponge(uint64_t[16]({variable_sponge}));
+const Sponge fixedSponge = Sponge(u64vec4[4]({fixed_sponge}));
+const Sponge variableSponge = Sponge(u64vec4[4]({variable_sponge}));
 ",
         fixed_sponge = [0; RATE]
             .into_iter()
             .map(|v| v.to_string())
             .chain(["oneMelt"; CAPACITY].map(str::to_string))
             .collect::<Vec<_>>()
+            .chunks(4)
+            .map(|c| {
+                let v = c.to_vec().join(", ");
+                format!("u64vec4({v})")
+            })
+            .collect::<Vec<_>>()
             .join(", "),
         variable_sponge = [0; STATE_SIZE]
             .into_iter()
             .map(|v| v.to_string())
+            .collect::<Vec<_>>()
+            .chunks(4)
+            .map(|c| {
+                let v = c.to_vec().join(", ");
+                format!("u64vec4({v})")
+            })
             .collect::<Vec<_>>()
             .join(", "),
     )
@@ -214,6 +262,7 @@ pub fn build_shaders(options: BuildOptions<impl AsRef<Path>>) {
                 &format!(
                     r"#version 460
 #extension GL_ARB_gpu_shader_int64 : require
+#extension GL_ARB_gpu_shader_fp64 : require
 {printf_ext}
 #define EMULATE_EXTENDED_MATH {math_emu}
 #include <lib>

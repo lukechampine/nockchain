@@ -1,4 +1,4 @@
-layout(local_size_x = 128) in;
+layout(local_size_x = 256) in;
 // Input to the shader. The length of the array is determined by what buffer is bound.
 //
 // Out of bounds accesses
@@ -37,12 +37,12 @@ void main() {
     Sponge tmp = fixedSponge;
 
     for (uint i = 0; i < tip5Rate; i += 1) {
-        tmp.s[i] = inpBuf[op.source + i];
+        tmp.s[i / 4][i % 4] = inpBuf[op.source + i];
     }
 
     tip5Permute(tmp);
 
     for (uint i = 0; i < 5; i += 1) {
-        outBuf[op.destination + i] = tmp.s[i];
+        outBuf[op.destination + i] = tmp.s[i / 4][i % 4];
     }
 }
