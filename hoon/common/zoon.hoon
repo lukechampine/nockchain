@@ -9,7 +9,6 @@
   |=(a=(tree (pair)) ?:(=(~ a) & ~(apt z-by a)))
 ::
 ++  z-by                                                  ::  z-map engine
-  ~/  %z-by
   =|  a=(tree (pair))  ::  (z-map)
   |@
   ++  all                                               ::  logical AND
