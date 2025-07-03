@@ -64,6 +64,8 @@ pub struct Test {
     src_event: String,
     #[arg(short, long, help = "effect to compare jetted results against")]
     effect: Option<String>,
+    #[arg(long, help = "where to write effect if it mismatches")]
+    error_out: Option<String>,
     #[arg(short, long, help = "permute through jet combinations")]
     permute: bool,
     #[arg(
@@ -88,6 +90,7 @@ impl Test {
         let Self {
             src_event,
             effect,
+            error_out,
             permute,
             max_disable,
         } = self;
@@ -139,6 +142,12 @@ impl Test {
                     },
                     time.elapsed().as_secs_f64()
                 );
+
+                if res_hash != src_effect_hash && error_out.is_some() {
+                    let loc = error_out.as_ref().unwrap();
+                    tokio::fs::write(loc, res.jam()).await?;
+                    println!("Wrote got effect to {loc}");
+                }
             }
         }
 

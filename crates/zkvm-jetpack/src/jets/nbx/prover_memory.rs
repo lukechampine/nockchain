@@ -48,7 +48,7 @@ fn bioz(b: u64) -> u64 {
 // ++  num-randomizers  1
 const NUM_RANDOMIZERS: u64 = 1;
 
-fn header(stack: &mut NockStack) -> Noun {
+fn header<const NUM_EXT_COLUMN_NAMES: u64>(stack: &mut NockStack) -> Noun {
     // ^-  header:table  ^~
     // TODO: Pull these automatically
     let r = [
@@ -59,11 +59,11 @@ fn header(stack: &mut NockStack) -> Noun {
         //     (lent basic-column-names:static:common)
         D(14),
         //     (lent ext-column-names:static:common)
-        D(11 * 3),
+        D(NUM_EXT_COLUMN_NAMES * 3),
         //     (lent mega-ext-column-names:static:common)
         D(8 * 3),
         //     (lent column-names:static:common)
-        D(14 + 11 * 3 + 8 * 3),
+        D(14 + NUM_EXT_COLUMN_NAMES * 3 + 8 * 3),
         //     num-randomizers
         D(NUM_RANDOMIZERS),
         // ==
@@ -72,7 +72,15 @@ fn header(stack: &mut NockStack) -> Noun {
     T(stack, &r)
 }
 
-pub fn build(stack: &mut NockStack, ret: Noun) -> Result {
+pub fn build_v0_v1(stack: &mut NockStack, ret: Noun) -> Result {
+    build_impl::<11>(stack, ret)
+}
+
+pub fn build_v2(stack: &mut NockStack, ret: Noun) -> Result {
+    build_impl::<10>(stack, ret)
+}
+
+fn build_impl<const NUM_EXT_COLUMN_NAMES: u64>(stack: &mut NockStack, ret: Noun) -> Result {
     // ~/  %build
     // |=  return=fock-return
     let [_, zeroes, decodes, sf] = ret.uncell()?;
@@ -184,7 +192,7 @@ pub fn build(stack: &mut NockStack, ret: Noun) -> Result {
             (ct - 1, mtx)
         });
 
-    let header = header(stack);
+    let header = header::<NUM_EXT_COLUMN_NAMES>(stack);
 
     let mlen = mtx.len();
     let (ret_ma, h_ma) = new_handle_mut_mary(stack, 14, mlen);

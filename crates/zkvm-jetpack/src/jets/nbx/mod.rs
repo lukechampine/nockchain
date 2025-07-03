@@ -23,7 +23,7 @@ use eight::*;
 use five::*;
 use four::*;
 use one::*;
-use prover_memory::{*, build as memory_build};
+use prover_memory::{*, build_v0_v1 as memory_build_v0_v1, build_v2 as memory_build_v2};
 use prover_compute::{*, build as compute_build};
 use six::*;
 use three::*;
@@ -184,7 +184,8 @@ sam_jet! {
     fstack_push_jet => fstack_push 'raw,
     pstack_push_jet => pstack_push 'raw,
     rna_bfta_jet => rna_bfta_sam,
-    memory_build_jet => memory_build,
+    memory_build_v0_v1_jet => memory_build_v0_v1,
+    memory_build_v2_jet => memory_build_v2,
     compute_build_jet => compute_build,
     precompute_ntts_jet => precompute_ntts,
     turn_coseword_jet => turn_coseword,
@@ -768,7 +769,7 @@ pub const NBX_EIGHT_JETS: &[HotEntry] = &[
     ),
 ];
 
-pub const NBX_MEMORY_JETS: &[HotEntry] = &[
+pub const NBX_MEMORY_V0_V1_JETS: &[HotEntry] = &[
     (
         &[
             K_138,
@@ -796,7 +797,7 @@ pub const NBX_MEMORY_JETS: &[HotEntry] = &[
             Left(b"build"),
         ],
         1,
-        memory_build_jet,
+        memory_build_v0_v1_jet,
     ),
     (
         &[
@@ -815,7 +816,54 @@ pub const NBX_MEMORY_JETS: &[HotEntry] = &[
     ),
 ];
 
-pub const NBX_COMPUTE_JETS: &[HotEntry] = &[
+pub const NBX_MEMORY_V2_JETS: &[HotEntry] = &[
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"memory-table-v2"),
+            Left(b"rna-bfta"),
+        ],
+        1,
+        rna_bfta_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"memory-table-v2"),
+            Left(b"funcs"),
+            Left(b"build"),
+        ],
+        1,
+        memory_build_v2_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"memory-table-v2"),
+            Left(b"funcs"),
+            Left(b"pad"),
+        ],
+        1,
+        pad_jet,
+    ),
+];
+
+pub const NBX_COMPUTE_V0_V1_JETS: &[HotEntry] = &[
     (
         &[
             K_138,
@@ -825,6 +873,24 @@ pub const NBX_COMPUTE_JETS: &[HotEntry] = &[
             Left(b"qua"),
             Left(b"pen"),
             Left(b"compute-table-v0-v1"),
+            Left(b"funcs"),
+            Left(b"build"),
+        ],
+        1,
+        compute_build_jet,
+    ),
+];
+
+pub const NBX_COMPUTE_V2_JETS: &[HotEntry] = &[
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"compute-table-v2"),
             Left(b"funcs"),
             Left(b"build"),
         ],
@@ -858,8 +924,10 @@ pub fn nbx_jets() -> impl Iterator<Item = HotEntry> {
         NBX_FIVE_JETS,
         NBX_SIX_JETS,
         NBX_EIGHT_JETS,
-        NBX_MEMORY_JETS,
-        NBX_COMPUTE_JETS,
+        NBX_MEMORY_V0_V1_JETS,
+        NBX_COMPUTE_V0_V1_JETS,
+        NBX_MEMORY_V2_JETS,
+        NBX_COMPUTE_V2_JETS,
         //NBX_ZOON_JETS,
     ]
     .map(|v| v.iter().copied())
