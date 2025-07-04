@@ -9,7 +9,10 @@ layout(std430, binding = 1) readonly buffer OpsBuf {
     ReduceOp ops[];
 };
 layout(std140, binding = 2) uniform Globals {
-    uint globalOffset;
+    uint opsOffset;
+    uint numOps;
+    uint inpOffset;
+    uint outOffset;
 };
 // Output of the shader.
 layout(std430, binding = 3) buffer OutputBuf {
@@ -20,14 +23,12 @@ layout(std430, binding = 3) buffer OutputBuf {
 // _generally_ be a multiple of 64. Common sizes are 64x1x1, 256x1x1; or 8x8x1, 16x16x1 for 2D workloads.
 void main() {
     // While compute invocations are 3d, we're only using one dimension.
-    uint idx = gl_GlobalInvocationID.x + globalOffset;
+    uint idx = gl_GlobalInvocationID.x + opsOffset;
 
     // Because we're using a workgroup size of 64, if the input size isn't a multiple of 64,
     // we will have some "extra" invocations. This is fine, but we should tell them to stop
     // to avoid out-of-bounds accesses.
-    uint array_length = ops.length();
-
-    if (idx >= array_length) {
+    if (idx >= opsOffset + numOps) {
         return;
     }
 
@@ -37,12 +38,14 @@ void main() {
     Sponge tmp = fixedSponge;
 
     for (uint i = 0; i < tip5Rate; i += 1) {
-        tmp.s[i / 4][i % 4] = inpBuf[op.source + i];
+        tmp.s[i / 4][i % 4] = inpBuf[op.source + i - inpOffset];
     }
 
+    tip5SpongePrint(tmp);
     tip5Permute(tmp);
+    tip5SpongePrint(tmp);
 
     for (uint i = 0; i < 5; i += 1) {
-        outBuf[op.destination + i] = tmp.s[i / 4][i % 4];
+        outBuf[op.destination + i - outOffset] = tmp.s[i / 4][i % 4];
     }
 }

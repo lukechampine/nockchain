@@ -36,6 +36,9 @@ void tip5SpongePrint(Sponge sp) {
         uint(sp.s[3][3] >> 32), uint(sp.s[3][3])
     );
 }
+#else
+void tip5SpongePrint(Sponge sp) {
+}
 #endif
 
 u64vec4 tip5SboxOne(u64vec4 v) {
