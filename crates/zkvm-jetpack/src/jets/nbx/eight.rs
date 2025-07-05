@@ -6,6 +6,7 @@ use nockvm::noun::{IndirectAtom, Noun, D};
 use tracing::log::*;
 
 use super::one::*;
+use super::substitute::SubstituteEngine;
 use super::two::*;
 use super::utils::*;
 use crate::form::fext::{fmul_, fpow_};
@@ -356,9 +357,9 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
     // however, for some reason LTO-d x86_64-v4 binary is faster with `Belt`. So here, we switch
     // against them.
 
-    #[cfg(target_feature = "avx2")]
-    type Elem = Belt;
-    #[cfg(not(target_feature = "avx2"))]
+    //#[cfg(target_feature = "avx2")]
+    //type Elem = Belt;
+    //#[cfg(not(target_feature = "avx2"))]
     type Elem = Melt;
 
     // ~/  %compute-composition-poly
@@ -456,9 +457,9 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
         let chals2 = BPolySlice::try_from(chals)?;
         // =/  trace  (snag i tworow-trace-polys)
         let trace = tworow_trace_polys[i];
-        #[cfg(not(target_feature = "avx2"))]
+        //#[cfg(not(target_feature = "avx2"))]
         let trace: PolyVec<Elem> = PolyVec(trace.0.to_vec()).into();
-        #[cfg(not(target_feature = "avx2"))]
+        //#[cfg(not(target_feature = "avx2"))]
         let trace: PolySlice<Elem> = (&trace).into();
         // =/  constraints  (~(got by constraint-w-deg-map.dp) i)
         let constraints2 = constraint_w_deg_map.get(&(i as u64)).unwrap();
@@ -520,7 +521,7 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
             )?;
             // %-  bpdiv
             // :_  boundary-zerofier
-            #[cfg(not(target_feature = "avx2"))]
+            //#[cfg(not(target_feature = "avx2"))]
             let dividend: PolyVec<Elem> = PolyVec(dividend.0.to_vec()).into();
             let res = pdiv(&processed_constraints.0, &dividend.0);
             // ;:  bpadd
@@ -569,36 +570,29 @@ where
     let mut acc = PolyVec(vec![E::zero()]);
     let mut idx = 0;
 
-    let mut engine = SubstituteEngine::default();
+    let mut engine = SubstituteEngine::new(max_height);
     let mut comp_cnts = vec![];
 
     for (_, mp) in constraints.iter() {
         // =/  comps=(list bpoly)
         //   (mp-substitute-ultra mp trace max-height chal-map dyns)
         comp_cnts.push(mp_substitute_ultra_impl(
-            stack,
-            &mut engine,
-            0,
-            *mp,
-            trace,
-            max_height,
-            chal_map,
-            dyns,
+            stack, &mut engine, 0, *mp, trace, chal_map, dyns,
         )?);
     }
 
-    let mut all_comps = engine.reduce();
+    let (all_comps, poly_len) = engine.reduce();
+    let mut all_comps = all_comps.as_slice();
 
     for ((degs, _), comps) in constraints.iter().zip(comp_cnts) {
-        let rest = all_comps.split_off(comps);
-        let comps = all_comps;
+        let (comps, rest) = all_comps.split_at(comps * poly_len);
         all_comps = rest;
 
         // NOTE: zip-up expects equal lengths
         // %+  roll
         //   (zip-up degs comps)
         // |=  [[deg=@ comp=bpoly] [idx=_idx acc=_acc]]
-        for (deg, comp) in degs.iter().zip(comps) {
+        for (deg, comp) in degs.iter().zip(comps.chunks(poly_len)) {
             // :-  +(idx)
             // ::
             // ::  Each constraint corresponds to two weights: alpha and beta. The verifier
@@ -616,7 +610,7 @@ where
             // ::  p(x)*(α*X^{D-1-D_j} + β)
             // ::  which will make the polynomial exactly degree D-1 which is what we want.
             // =/  comp-coeff  (bp-ifft comp)
-            let comp_coeff = p_ifft(comp.0)?;
+            let comp_coeff = p_ifft(comp.to_vec())?;
             // %+  bpadd  acc
             // %+  bpadd
             //   (bpscal beta comp-coeff)

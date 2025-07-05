@@ -5,10 +5,10 @@ use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::noun::*;
 use nockvm_macros::tas;
-use rayon::prelude::*;
 use tracing::log::*;
 
 use super::one::{p_decompose_impl, peval_impl};
+use super::substitute::{SubstituteEngine, SubstituteMulStage};
 use super::utils::*;
 use crate::form::bpoly::{bp_coseword, bpscal_inplace};
 use crate::form::fext::{fadd_, fdiv_, finv_, fmul_, fneg_};
@@ -378,19 +378,17 @@ pub fn mp_substitute_ultra(stack: &mut NockStack, inp: Noun) -> Result {
         return jet_err();
     };
 
-    let mut engine = SubstituteEngine::default();
-    mp_substitute_ultra_impl::<Belt>(
-        stack, &mut engine, 0, p, trace_evals, height, &chal_map, dyns,
-    )?;
-    let ret = engine.reduce();
+    let mut engine = SubstituteEngine::new(height);
+    mp_substitute_ultra_impl::<Belt>(stack, &mut engine, 0, p, trace_evals, &chal_map, dyns)?;
+    let (ret, poly_size) = engine.reduce();
 
     let mut ret = ret
-        .into_iter()
+        .chunks(poly_size)
         .map(|v| {
             let (res, res_poly): (IndirectAtom, &mut [Belt]) =
-                new_handle_mut_slice(stack, Some(v.0.len()));
-            res_poly.copy_from_slice(&v.0);
-            let res_cell = finalize_poly(stack, Some(v.0.len()), res);
+                new_handle_mut_slice(stack, Some(v.len()));
+            res_poly.copy_from_slice(v);
+            let res_cell = finalize_poly(stack, Some(v.len()), res);
             res_cell
         })
         .collect::<Vec<_>>();
@@ -446,7 +444,6 @@ pub fn mp_substitute_ultra_impl<'a, E: ElementEx>(
     stage: usize,
     p: Noun,
     trace_evals: PolySlice<'a, E>,
-    height: u64,
     chal_map: &impl Map<u64, Belt>,
     dyns: BPolySlice,
 ) -> core::result::Result<usize, JetErr> {
@@ -465,7 +462,6 @@ pub fn mp_substitute_ultra_impl<'a, E: ElementEx>(
                 stage,
                 p_tail,
                 trace_evals,
-                height,
                 chal_map,
                 dyns,
                 &Default::default(),
@@ -499,7 +495,6 @@ pub fn mp_substitute_ultra_impl<'a, E: ElementEx>(
                         stage + 1,
                         mp,
                         trace_evals,
-                        height,
                         chal_map,
                         dyns,
                         &Default::default(),
@@ -515,7 +510,7 @@ pub fn mp_substitute_ultra_impl<'a, E: ElementEx>(
                 // |=  mp=mp-mega
                 // (mp-substitute-mega mp trace-evals height chal-map dyns com-map)
                 mp_substitute_mega_impl::<E, E>(
-                    stack, engine, stage, mp, trace_evals, height, chal_map, dyns, &com_map,
+                    stack, engine, stage, mp, trace_evals, chal_map, dyns, &com_map,
                 )?;
                 ret += 1;
             }
@@ -693,7 +688,8 @@ pub fn mp_substitute_mega(stack: &mut NockStack, inp: Noun) -> Result {
         return jet_err();
     };
 
-    let mut engine = SubstituteEngine::default();
+    let height = height.as_atom()?.as_u64()?;
+    let mut engine = SubstituteEngine::new(height);
     engine.ensure_stages(1);
     let com_map = HoonMapIter::try_from(com_map)
         .ok()
@@ -704,7 +700,7 @@ pub fn mp_substitute_mega(stack: &mut NockStack, inp: Noun) -> Result {
                 let v = PolyVec(v.0.to_vec());
                 (
                     k.as_atom().unwrap().as_u64().unwrap(),
-                    engine.push_iter(1, v, PolySlice(&[])),
+                    engine.push_iter(1, Some((&v).into()), PolySlice(&[])),
                 )
             })
             .collect()
@@ -717,170 +713,18 @@ pub fn mp_substitute_mega(stack: &mut NockStack, inp: Noun) -> Result {
     // println!("dyns={:?}", mug(stack, dyns).data());
     // println!("com_map={:?}", mug(stack, com_map).data());
     mp_substitute_mega_impl::<Belt, Belt>(
-        stack,
-        &mut engine,
-        0,
-        p,
-        trace_evals,
-        height.as_atom()?.as_u64()?,
-        &chal_map,
-        dyns,
-        &com_map,
+        stack, &mut engine, 0, p, trace_evals, &chal_map, dyns, &com_map,
     )?;
 
-    let acc = engine.reduce();
-    assert_eq!(acc.len(), 1);
-    let acc = acc.into_iter().next().unwrap();
+    let (acc, poly_len) = engine.reduce();
+    assert_eq!(acc.len(), poly_len);
+    let acc = PolyVec(acc);
 
     let (ret, handle) = new_handle_mut_slice(stack, Some(acc.len()));
     handle.copy_from_slice(&acc.0);
     let ret = finalize_poly(stack, Some(acc.len()), ret);
 
     Ok(ret)
-}
-
-pub struct SubstituteMulStage<E: ElementEx> {
-    vars: Vec<(usize, u64)>,
-    coms: Vec<(usize, u64)>,
-    scal: E,
-}
-
-impl<E: ElementEx> SubstituteMulStage<E> {
-    pub fn new(scal: E) -> Self {
-        Self {
-            vars: vec![],
-            coms: vec![],
-            scal,
-        }
-    }
-}
-
-struct SubstituteIter<'a, E: ElementEx> {
-    muls: Vec<SubstituteMulStage<E>>,
-    traces: PolySlice<'a, E>,
-}
-
-impl<'a, E: ElementEx> SubstituteIter<'a, E> {
-    fn new(traces: PolySlice<'a, E>) -> Self {
-        Self {
-            muls: vec![],
-            traces,
-        }
-    }
-}
-
-impl<E: ElementEx> SubstituteIter<'_, E> {
-    fn reduce(self, inp: &[PolyVec<E>], out: PolyVec<E>) -> PolyVec<E> {
-        let out_len = out.len();
-        core::iter::once(out)
-            .chain(self.muls.into_iter().map(|m| {
-                let acc = PolyVec(vec![m.scal; out_len]);
-
-                // NOTE: never parallel iter here, because it is slow
-                m.coms
-                    .into_iter()
-                    .map(|(i, exp)| (&inp[i].0[..], exp))
-                    .chain(m.vars.into_iter().map(|(i, exp)| {
-                        let var = self.traces.0.split_at(out_len * i).1;
-                        let var = &var[..out_len];
-                        (var, exp)
-                    }))
-                    .fold(acc, |mut acc, (o, exp)| {
-                        debug_assert_eq!(o.len(), acc.0.len());
-                        debug_assert!(o.len() % 16 == 0);
-                        debug_assert!(acc.0.len() % 16 == 0);
-                        let acc_len = acc.0.len() & !0xf;
-                        let a = acc.0.split_at_mut(acc_len).0;
-                        let b = o.split_at(acc_len).0;
-                        for _ in 0..exp {
-                            p_hadamard_inplace(a, b);
-                        }
-                        acc
-                    })
-            }))
-            .reduce(
-                /*|| PolyVec(vec![E::zero(); out_len]),*/
-                |mut acc, o| {
-                    padd_in_place(&mut acc.0, &o.0);
-                    acc
-                },
-            )
-            .unwrap()
-    }
-}
-
-struct SubstituteStage<'a, E: ElementEx> {
-    iters: Vec<SubstituteIter<'a, E>>,
-    out: Vec<PolyVec<E>>,
-}
-
-impl<E: ElementEx> Default for SubstituteStage<'_, E> {
-    fn default() -> Self {
-        Self {
-            iters: vec![],
-            out: vec![],
-        }
-    }
-}
-
-impl<E: ElementEx> SubstituteStage<'_, E> {
-    #[tracing::instrument(skip_all)]
-    fn reduce(self, inp: &[PolyVec<E>]) -> Vec<PolyVec<E>> {
-        self.iters
-            .into_iter()
-            .zip(self.out)
-            .map(|(i, o)| i.reduce(inp, o))
-            .collect()
-    }
-}
-
-pub struct SubstituteEngine<'a, E: ElementEx> {
-    stages: Vec<SubstituteStage<'a, E>>,
-}
-
-impl<E: ElementEx> Default for SubstituteEngine<'_, E> {
-    fn default() -> Self {
-        Self { stages: vec![] }
-    }
-}
-
-impl<'a, E: ElementEx> SubstituteEngine<'a, E> {
-    #[tracing::instrument(skip_all)]
-    pub fn reduce(mut self) -> Vec<PolyVec<E>> {
-        let mut cur = vec![];
-        while let Some(stage) = self.stages.pop() {
-            cur = stage.reduce(&cur);
-        }
-        cur
-    }
-
-    pub fn ensure_stages(&mut self, stages: usize) {
-        while self.stages.len() <= stages {
-            self.stages.push(Default::default());
-        }
-    }
-
-    pub fn push_iter(&mut self, stage: usize, out: PolyVec<E>, traces: PolySlice<'a, E>) -> usize {
-        if self.stages.len() <= stage {
-            assert_eq!(self.stages.len(), stage);
-            self.stages.push(Default::default());
-        }
-        let stage = &mut self.stages[stage];
-        let ret = stage.iters.len();
-        stage.iters.push(SubstituteIter::new(traces));
-        stage.out.push(out);
-        ret
-    }
-
-    pub fn push_mul(&mut self, stage: usize, iter: usize, mul: SubstituteMulStage<E>) {
-        if self.stages.len() <= stage {
-            assert_eq!(self.stages.len(), stage);
-            self.stages.push(Default::default());
-        }
-        let stage = &mut self.stages[stage];
-        let iter = &mut stage.iters[iter];
-        iter.muls.push(mul);
-    }
 }
 
 #[inline(never)]
@@ -891,7 +735,6 @@ pub fn mp_substitute_mega_impl<'a, E: ElementEx, P: Into<E> + Copy>(
     stage: usize,
     p: Noun,
     trace_evals: PolySlice<'a, E>,
-    height: u64,
     chal_map: &impl Map<u64, Belt>,
     dyns: BPolySlice,
     com_map: &BTreeMap<u64, usize>,
@@ -902,8 +745,8 @@ where
 {
     // ^-  bpoly
 
-    let len = (height * 4) as usize;
-    let iter = engine.push_iter(stage, PolyVec(vec![E::zero(); len]), trace_evals);
+    let len = engine.poly_len();
+    let iter = engine.push_iter(stage, None, trace_evals);
 
     // %+  roll  ~(tap by p)
     // |=  [[k=bpoly v=belt] acc=_zero-bpoly]

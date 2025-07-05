@@ -30,7 +30,7 @@ bytemuck.workspace = true
 pollster.workspace = true
 nbx-tip5.workspace = true
 nbx-shaders = { workspace = true, features = [
-    # "comptime"
+    # "comptime",
     "spirv_passthrough"
 ] }
 
