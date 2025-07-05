@@ -162,30 +162,18 @@ fn generate_sponge() -> String {
     use nbx_tip5::tip5::*;
     format!(
         r"
-const Sponge fixedSponge = Sponge(u64vec4[4]({fixed_sponge}));
-const Sponge variableSponge = Sponge(u64vec4[4]({variable_sponge}));
+const Sponge fixedSponge = SPONGE({fixed_sponge});
+const Sponge variableSponge = SPONGE({variable_sponge});
 ",
         fixed_sponge = [0; RATE]
             .into_iter()
             .map(|v| v.to_string())
             .chain(["oneMelt"; CAPACITY].map(str::to_string))
             .collect::<Vec<_>>()
-            .chunks(4)
-            .map(|c| {
-                let v = c.to_vec().join(", ");
-                format!("u64vec4({v})")
-            })
-            .collect::<Vec<_>>()
             .join(", "),
         variable_sponge = [0; STATE_SIZE]
             .into_iter()
             .map(|v| v.to_string())
-            .collect::<Vec<_>>()
-            .chunks(4)
-            .map(|c| {
-                let v = c.to_vec().join(", ");
-                format!("u64vec4({v})")
-            })
             .collect::<Vec<_>>()
             .join(", "),
     )
@@ -253,7 +241,7 @@ pub fn build_shaders(options: BuildOptions<impl AsRef<Path>>) {
     }
 
     if optimize {
-        options.set_optimization_level(shaderc::OptimizationLevel::Performance);
+        options.set_optimization_level(shaderc::OptimizationLevel::Size);
     }
 
     let printf_ext = if printf_ext {

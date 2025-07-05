@@ -38,7 +38,7 @@ void main() {
     Sponge tmp = fixedSponge;
 
     for (uint i = 0; i < tip5Rate; i += 1) {
-        tmp.s[i / 4][i % 4] = inpBuf[op.source + i - inpOffset];
+        spongeSet(tmp, i, inpBuf[op.source + i - inpOffset]);
     }
 
     tip5SpongePrint(tmp);
@@ -46,6 +46,6 @@ void main() {
     tip5SpongePrint(tmp);
 
     for (uint i = 0; i < 5; i += 1) {
-        outBuf[op.destination + i - outOffset] = tmp.s[i / 4][i % 4];
+        outBuf[op.destination + i - outOffset] = spongeGet(tmp, i);
     }
 }

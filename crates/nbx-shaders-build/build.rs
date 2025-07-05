@@ -13,7 +13,7 @@ fn main() {
     nbx_shaders_src::build_shaders(
         BuildOptions::new(out_dir)
             .emit_cargo_rerun(true)
-            .debug_info(false)
+            .debug_info(true)
             .optimize(true)
             .emulate_extended_math(emumath)
             .spirv_version(if spirv_1_3 { Some(13) } else { None })
