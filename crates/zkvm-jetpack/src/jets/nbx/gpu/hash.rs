@@ -1,14 +1,15 @@
-use std::sync::mpsc;
+use std::sync::mpsc::{self, Receiver};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use tracing::*;
 use wgpu::util::DeviceExt;
-use wgpu::Buffer;
+use wgpu::{Buffer, Device, SubmissionIndex};
 
 use super::{get_gpu, WgOffsets};
 use crate::jets::nbx::hash::{HashEngine, NounDigest, ReduceChunk};
 
-pub fn reduce(engine: HashEngine) -> Vec<NounDigest> {
+pub fn reduce(engine: HashEngine) -> HashSubmission {
     let t = Instant::now();
 
     let gpu = get_gpu();
@@ -73,6 +74,9 @@ pub fn reduce(engine: HashEngine) -> Vec<NounDigest> {
         }
         stage_buffers.push(out_bufs);
     }
+
+    debug!("stage buffers: {:.02}", t.elapsed().as_secs_f64());
+    let t2 = Instant::now();
 
     let mut prev_sb: Option<Vec<(Buffer, Buffer, Buffer)>> = None;
     let mut cur_inputs = vec![];
@@ -148,7 +152,12 @@ pub fn reduce(engine: HashEngine) -> Vec<NounDigest> {
         cur_inputs = stage.chunks.into_iter().map(|v| v.out).collect::<Vec<_>>();
     }
 
-    debug!("Inputs");
+    debug!(
+        "runs: {:.02}, {:.02}",
+        t.elapsed().as_secs_f64(),
+        t2.elapsed().as_secs_f64()
+    );
+    let t2 = Instant::now();
 
     let download = gpu.device.create_buffer(&wgpu::BufferDescriptor {
         label: None,
@@ -157,17 +166,30 @@ pub fn reduce(engine: HashEngine) -> Vec<NounDigest> {
         mapped_at_creation: false,
     });
 
-    debug!("All buffers");
+    debug!(
+        "download: {:.02}, {:.02}",
+        t.elapsed().as_secs_f64(),
+        t2.elapsed().as_secs_f64()
+    );
+    let t2 = Instant::now();
 
-    if gpu.debug_capture {
+    let debug_capture_guard = gpu.debug_capture.try_lock();
+    let debug_capture = *debug_capture_guard.as_deref().unwrap_or(&None);
+
+    let debug = if debug_capture == Some(true) {
         unsafe { gpu.device.start_graphics_debugger_capture() };
-    }
+        debug_capture_guard.unwrap().take();
+        Some(gpu.debug_capture.clone())
+    } else {
+        core::mem::drop(debug_capture_guard);
+        None
+    };
 
     let mut encoder = gpu
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-    for fixed_runs in processed_stages {
+    {
         let pipeline = &gpu.hash_fixed;
 
         // Single compute pass
@@ -178,40 +200,46 @@ pub fn reduce(engine: HashEngine) -> Vec<NounDigest> {
 
         // Set the pipeline that we want to use
         compute_pass.set_pipeline(&pipeline.pipeline);
+        for fixed_runs in processed_stages {
+            for (input, output, fixed, ops_len, uniform) in fixed_runs {
+                let bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: None,
+                    layout: &pipeline.bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: input.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: fixed.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: uniform.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: output.as_entire_binding(),
+                        },
+                    ],
+                });
 
-        for (input, output, fixed, ops_len, uniform) in fixed_runs {
-            let bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
-                layout: &pipeline.bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: input.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: fixed.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: uniform.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: output.as_entire_binding(),
-                    },
-                ],
-            });
+                // Set the bind group that we want to use
+                compute_pass.set_bind_group(0, &bind_group, &[]);
 
-            // Set the bind group that we want to use
-            compute_pass.set_bind_group(0, &bind_group, &[]);
-
-            let workgroup_count = ops_len.div_ceil(workgroup_size as _);
-            compute_pass.dispatch_workgroups(workgroup_count as u32, 1, 1);
+                let workgroup_count = ops_len.div_ceil(workgroup_size as _);
+                compute_pass.dispatch_workgroups(workgroup_count as u32, 1, 1);
+            }
         }
     }
 
-    debug!("Compute passes");
+    debug!(
+        "compute pass: {:.02}, {:.02}",
+        t.elapsed().as_secs_f64(),
+        t2.elapsed().as_secs_f64()
+    );
+    let t2 = Instant::now();
 
     let output = prev_sb.unwrap()[0].0.clone();
 
@@ -219,36 +247,78 @@ pub fn reduce(engine: HashEngine) -> Vec<NounDigest> {
 
     let command_buffer = encoder.finish();
 
-    debug!("Command buffer");
+    debug!(
+        "command buffer: {:.02}, {:.02}",
+        t.elapsed().as_secs_f64(),
+        t2.elapsed().as_secs_f64()
+    );
+    let t2 = Instant::now();
 
     let si = gpu.queue.submit([command_buffer]);
 
-    debug!("Submitted (in {:.02}s)", t.elapsed().as_secs_f64());
+    debug!(
+        "submitted: {:.02}, {:.02}",
+        t.elapsed().as_secs_f64(),
+        t2.elapsed().as_secs_f64()
+    );
 
-    let buffer_slice = download.slice(..);
-    let (tx, rx) = mpsc::channel();
-    buffer_slice.map_async(wgpu::MapMode::Read, move |_| {
-        debug!("Mapped");
-        let _ = tx.send(());
-    });
-
-    debug!("Map request");
-
-    gpu.device
-        .poll(wgpu::PollType::WaitForSubmissionIndex(si))
-        .unwrap();
-    debug!("Polled");
-
-    let _ = rx.recv().unwrap();
-
-    if gpu.debug_capture {
-        unsafe { gpu.device.stop_graphics_debugger_capture() };
+    HashSubmission {
+        device: gpu.device.clone(),
+        si,
+        download,
+        debug,
     }
+}
 
-    let data = buffer_slice.get_mapped_range();
-    let result: &[NounDigest] = bytemuck::cast_slice(&data);
+pub struct HashSubmission {
+    device: Device,
+    si: SubmissionIndex,
+    download: Buffer,
+    debug: Option<Arc<Mutex<Option<bool>>>>,
+}
 
-    println!("Result: {result:?}");
+impl Drop for HashSubmission {
+    fn drop(&mut self) {
+        if let Some(debug) = self.debug.take() {
+            *debug.lock().unwrap() = Some(true);
+        }
+    }
+}
 
-    result.to_vec()
+impl HashSubmission {
+    pub fn finish(self) -> Vec<NounDigest> {
+        let Self {
+            device,
+            si,
+            download,
+            debug,
+        } = &self;
+
+        let buffer_slice = download.slice(..);
+        let (tx, rx) = mpsc::channel();
+        buffer_slice.map_async(wgpu::MapMode::Read, move |_| {
+            debug!("Mapped");
+            let _ = tx.send(());
+        });
+
+        debug!("Map request");
+
+        device
+            .poll(wgpu::PollType::WaitForSubmissionIndex(si.clone()))
+            .unwrap();
+        debug!("Polled");
+
+        let _ = rx.recv().unwrap();
+
+        if debug.is_some() {
+            unsafe { device.stop_graphics_debugger_capture() };
+        }
+
+        let data = buffer_slice.get_mapped_range();
+        let result: &[NounDigest] = bytemuck::cast_slice(&data);
+
+        println!("Result: {result:?}");
+
+        result.to_vec()
+    }
 }

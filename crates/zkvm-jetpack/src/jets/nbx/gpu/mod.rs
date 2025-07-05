@@ -1,10 +1,11 @@
 use core::num::NonZeroU64;
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
 use nbx_shaders::get_shader_module;
 use tracing::*;
 
+use self::hash::HashSubmission;
 use crate::form::Melt;
 use crate::jets::nbx::hash::{HashEngine, NounDigest, ReduceOp, VariableReduceOp};
 
@@ -20,7 +21,7 @@ struct Gpu {
     queue: wgpu::Queue,
     hash_fixed: Pipeline,
     hash_variable: Pipeline,
-    debug_capture: bool,
+    debug_capture: Arc<Mutex<Option<bool>>>,
 }
 
 impl Gpu {
@@ -160,7 +161,10 @@ impl Gpu {
             queue,
             hash_fixed,
             hash_variable,
-            debug_capture: std::env::var("GPU_DEBUGGER").as_deref().unwrap_or("0") != "0",
+            debug_capture: Mutex::new(Some(
+                std::env::var("GPU_DEBUGGER").as_deref().unwrap_or("0") != "0",
+            ))
+            .into(),
         })
     }
 }
@@ -257,14 +261,30 @@ fn cpu_reduce(engine: HashEngine) -> Vec<NounDigest> {
 }
 
 pub fn gpu_test() -> Result<(), Box<dyn std::error::Error>> {
+    use rayon::prelude::*;
+
     let _ = get_gpu();
 
     println!("Reducing");
 
     let t = Instant::now();
-    let gpu_buffer = hash::reduce(get_engine());
+    let gpu_submissions = (0..std::env::var("GPU_SUBMISSIONS")
+        .as_deref()
+        .unwrap_or("1")
+        .parse::<usize>()
+        .unwrap())
+        .into_par_iter()
+        .map(|_| hash::reduce(get_engine()))
+        .collect::<Vec<_>>();
+    println!("Submitted all: {:.02}", t.elapsed().as_secs_f64());
+    let t2 = Instant::now();
+    let gpu_buffers = gpu_submissions
+        .into_iter()
+        .map(HashSubmission::finish)
+        .collect::<Vec<_>>();
+    let gpu_buffer = &gpu_buffers[0];
     println!("{:?}", gpu_buffer);
-    println!("GPU Time: {:.02}", t.elapsed().as_secs_f64());
+    println!("GPU Time: {:.02}, {:.02}", t.elapsed().as_secs_f64(), t2.elapsed().as_secs_f64());
 
     let t = Instant::now();
     let cpu_buffer = cpu_reduce(get_engine());
