@@ -18,6 +18,7 @@ mod three;
 mod two;
 mod utils;
 mod zoon;
+mod hash;
 pub mod gpu;
 
 use eight::*;

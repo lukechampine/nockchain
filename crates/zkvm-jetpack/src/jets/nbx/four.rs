@@ -12,7 +12,8 @@ use crate::jets::nbx::three::{absorb_sponge, new_sponge};
 use crate::jets::utils::jet_err;
 use crate::noun::noun_ext::NounExt;
 
-use super::three::{HashEngine, NounDigest, Tip5Tog};
+use super::three::Tip5Tog;
+use super::hash::{HashEngine, NounDigest};
 
 fn poly_noun<T: Element + Copy>(stack: &mut NockStack, p: PolyVec<T>) -> Noun {
     let (ret, slc) = new_handle_mut_slice(stack, Some(p.0.len()));
