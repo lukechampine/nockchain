@@ -1,4 +1,4 @@
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 

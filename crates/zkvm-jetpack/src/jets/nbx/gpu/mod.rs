@@ -268,15 +268,21 @@ pub fn gpu_test() -> Result<(), Box<dyn std::error::Error>> {
     println!("Reducing");
 
     let t = Instant::now();
-    let gpu_submissions = (0..std::env::var("GPU_SUBMISSIONS")
+    let hash_engines = (0..std::env::var("GPU_SUBMISSIONS")
         .as_deref()
         .unwrap_or("1")
         .parse::<usize>()
         .unwrap())
         .into_par_iter()
-        .map(|_| hash::reduce(get_engine()))
+        .map(|_| get_engine())
         .collect::<Vec<_>>();
-    println!("Submitted all: {:.02}", t.elapsed().as_secs_f64());
+    println!("Hash engines: {:.02}", t.elapsed().as_secs_f64());
+    let t2 = Instant::now();
+    let gpu_submissions = hash_engines
+        .into_par_iter()
+        .map(hash::reduce)
+        .collect::<Vec<_>>();
+    println!("Submitted all: {:.02}, {:.02}", t.elapsed().as_secs_f64(), t2.elapsed().as_secs_f64());
     let t2 = Instant::now();
     let gpu_buffers = gpu_submissions
         .into_iter()

@@ -41,26 +41,19 @@ void tip5SpongePrint(Sponge sp) {
 }
 #endif
 
-u64vec4 tip5SboxOne(u64vec4 v) {
-    u64vec4 ret = u64vec4(0);
-    for (uint i = 0; i < 8; i += 1) {
-        uint v1 = tip5LookupTable[uint(v.x & 0xff)];
-        uint v2 = tip5LookupTable[uint(v.y & 0xff)];
-        uint v3 = tip5LookupTable[uint(v.z & 0xff)];
-        uint v4 = tip5LookupTable[uint(v.w & 0xff)];
-        u64vec4 tmp = u64vec4(v1, v2, v3, v4);
-        v = v >> 8;
-        ret |= tmp << (i * 8);
-    }
-    return ret;
-}
 
-uint64_t tip5SboxOne(uint64_t v) {
-    uint64_t ret = 0;
-    for (uint i = 0; i < 8; i += 1) {
-        uint64_t tmp = uint64_t(tip5LookupTable[uint(v & 0xff)]);
-        v = v >> 8;
-        ret |= tmp << (i * 8);
+u64vec4 tip5SboxOne(u64vec4 vIn) {
+    u64vec4 ret = u64vec4(0);
+    for (uint o = 0; o < 4; o += 1) {
+        uint64_t v = vIn[o];
+        uint64_t r = 0;
+        for (uint i = 0; i < 8; i += 1) {
+            uint i1 = uint(v & 0xff);
+            uint64_t tmp = tip5LookupTable[uint(i1)];
+            v >>= 8;
+            r |= tmp << (i * 8);
+        }
+        ret[o] = r;
     }
     return ret;
 }

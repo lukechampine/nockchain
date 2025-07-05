@@ -9,6 +9,9 @@ nbx-shaders-src = { workspace = true }
 [features]
 default = [
   # Comment this out to enable more optimal math
-  # "emulate_extended_maths"
+  # "emulate_extended_maths",
+  # Comment this out to enable newer version of spirv (unsupported by wgpu)
+  "spirv_1_3"
 ]
 emulate_extended_maths = []
+spirv_1_3 = []

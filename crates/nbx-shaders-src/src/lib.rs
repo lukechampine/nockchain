@@ -11,6 +11,8 @@ pub struct BuildOptions<T> {
     debug_info: bool,
     optimize: bool,
     printf_ext: bool,
+    spirv_version: Option<usize>,
+    has_int8: bool,
 }
 
 impl<T: AsRef<Path>> BuildOptions<T> {
@@ -22,6 +24,8 @@ impl<T: AsRef<Path>> BuildOptions<T> {
             debug_info: false,
             optimize: true,
             printf_ext: false,
+            spirv_version: None,
+            has_int8: false,
         }
     }
 
@@ -50,6 +54,17 @@ impl<T: AsRef<Path>> BuildOptions<T> {
     pub fn printf_ext(self, printf_ext: bool) -> Self {
         Self { printf_ext, ..self }
     }
+
+    pub fn spirv_version(self, spirv_version: Option<usize>) -> Self {
+        Self {
+            spirv_version,
+            ..self
+        }
+    }
+
+    pub fn has_int8(self, has_int8: bool) -> Self {
+        Self { has_int8, ..self }
+    }
 }
 
 fn u64_to_glsl(v: u64) -> String {
@@ -60,8 +75,10 @@ fn u64_to_glsl(v: u64) -> String {
     )
 }
 
-fn generate_tip5() -> String {
+fn generate_tip5(has_uint8: bool) -> String {
     use nbx_tip5::tip5::*;
+
+    let tb_ty = if has_uint8 { "uint8_t" } else { "uint" };
 
     format!(
         r"
@@ -84,8 +101,8 @@ const u64vec4 tip5RoundConstantsVec[{rc_size} / 4] = u64vec4[{rc_size} / 4]({rou
 const u64vec4 tip5MdsMatrixVec[{STATE_SIZE}][{STATE_SIZE} / 4] = u64vec4[{STATE_SIZE}][{STATE_SIZE} / 4]({mds_matrix_vec});
 ",
         lookup_table = LOOKUP_TABLE
-            .into_iter()
-            .map(|v| v.to_string())
+            .iter()
+            .map(|v| format!("{tb_ty}({v})"))
             .collect::<Vec<_>>()
             .join(", "),
         rc_size = NUM_ROUNDS * STATE_SIZE,
@@ -97,7 +114,8 @@ const u64vec4 tip5MdsMatrixVec[{STATE_SIZE}][{STATE_SIZE} / 4] = u64vec4[{STATE_
         round_constants_vec = ROUND_CONSTANTS2
             .chunks(4)
             .map(|v| {
-                let v = v.iter()
+                let v = v
+                    .iter()
                     .map(|v| u64_to_glsl(v.0))
                     .collect::<Vec<_>>()
                     .join(", ");
@@ -194,13 +212,15 @@ pub fn build_shaders(options: BuildOptions<impl AsRef<Path>>) {
         debug_info,
         printf_ext,
         optimize,
+        spirv_version,
+        has_int8,
     } = options;
 
     let shader_root = concat!(env!("CARGO_MANIFEST_DIR"), "/shaders");
     let shader_ext = "glsl";
 
     let generate_map = [
-        ("tip5", generate_tip5()),
+        ("tip5", generate_tip5(has_int8)),
         ("base", generate_base()),
         ("sponge", generate_sponge()),
     ]
@@ -254,6 +274,23 @@ pub fn build_shaders(options: BuildOptions<impl AsRef<Path>>) {
         })
     });
 
+    //options.set_target_env(shaderc::TargetEnv::Vulkan, shaderc::EnvVersion::WebGPU as _);
+    options.set_target_env(
+        shaderc::TargetEnv::Vulkan,
+        shaderc::EnvVersion::Vulkan1_1 as _,
+    );
+    match spirv_version {
+        Some(10) => options.set_target_spirv(shaderc::SpirvVersion::V1_0),
+        Some(11) => options.set_target_spirv(shaderc::SpirvVersion::V1_1),
+        Some(12) => options.set_target_spirv(shaderc::SpirvVersion::V1_2),
+        Some(13) => options.set_target_spirv(shaderc::SpirvVersion::V1_3),
+        Some(14) => options.set_target_spirv(shaderc::SpirvVersion::V1_4),
+        Some(15) => options.set_target_spirv(shaderc::SpirvVersion::V1_5),
+        Some(16) => options.set_target_spirv(shaderc::SpirvVersion::V1_6),
+        None => (),
+        _ => panic!("Unrecognized spirv version"),
+    }
+
     let math_emu = emulate_extended_math as usize;
 
     for shader in ["hash_fixed"] {
@@ -261,8 +298,7 @@ pub fn build_shaders(options: BuildOptions<impl AsRef<Path>>) {
             .compile_into_spirv(
                 &format!(
                     r"#version 460
-#extension GL_ARB_gpu_shader_int64 : require
-#extension GL_ARB_gpu_shader_fp64 : require
+#extension GL_EXT_shader_explicit_arithmetic_types : require
 {printf_ext}
 #define EMULATE_EXTENDED_MATH {math_emu}
 #include <lib>
