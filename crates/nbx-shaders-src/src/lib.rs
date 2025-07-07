@@ -281,7 +281,7 @@ pub fn build_shaders(options: BuildOptions<impl AsRef<Path>>) {
 
     let math_emu = emulate_extended_math as usize;
 
-    for shader in ["hash_fixed"] {
+    for shader in ["hash_fixed", "hash_variable"] {
         let artifact = compiler
             .compile_into_spirv(
                 &format!(

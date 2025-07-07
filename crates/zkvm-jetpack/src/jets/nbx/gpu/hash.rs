@@ -16,6 +16,21 @@ impl FromBuffer for Vec<NounDigest> {
     }
 }
 
+enum RunArgs {
+    Fixed(FixedRunArgs),
+    Variable(VariableRunArgs),
+}
+
+struct FixedRunArgs {
+    input: Buffer,
+    output: Buffer,
+    fixed: Buffer,
+    ops_len: usize,
+    uniform: Buffer,
+}
+
+struct VariableRunArgs {}
+
 impl Submittable for HashEngine {
     type Output = Vec<NounDigest>;
 
@@ -145,13 +160,13 @@ impl Submittable for HashEngine {
                                     usage: wgpu::BufferUsages::UNIFORM,
                                 });
 
-                        fixed_runs.push((
-                            psb[inp_idx].0.clone(),
-                            output.clone(),
-                            fixed.clone(),
-                            c.len(),
+                        fixed_runs.push(RunArgs::Fixed(FixedRunArgs {
+                            input: psb[inp_idx].0.clone(),
+                            output: output.clone(),
+                            fixed: fixed.clone(),
+                            ops_len: c.len(),
                             uniform,
-                        ));
+                        }));
                     }
                 } else {
                     unreachable!();
@@ -170,9 +185,10 @@ impl Submittable for HashEngine {
         );
         let t2 = Instant::now();
 
+        let download_size = prev_sb.as_ref().unwrap()[0].0.size();
         let download = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
-            size: core::mem::size_of::<NounDigest>() as _,
+            size: download_size, // core::mem::size_of::<NounDigest>() as _,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
@@ -201,46 +217,54 @@ impl Submittable for HashEngine {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
         {
-            let pipeline = &gpu.hash_fixed;
-
             // Single compute pass
             let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: None,
                 timestamp_writes: None,
             });
 
-            // Set the pipeline that we want to use
-            compute_pass.set_pipeline(&pipeline.pipeline);
-            for fixed_runs in processed_stages {
-                for (input, output, fixed, ops_len, uniform) in fixed_runs {
-                    let bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: None,
-                        layout: &pipeline.bind_group_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: fixed.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: uniform.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: output.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 3,
-                                resource: input.as_entire_binding(),
-                            },
-                        ],
-                    });
+            for stage in processed_stages {
+                for run in stage {
+                    match run {
+                        RunArgs::Fixed(runargs) => {
+                            compute_pass.set_pipeline(&gpu.hash_fixed.pipeline);
 
-                    // Set the bind group that we want to use
-                    compute_pass.set_bind_group(0, &bind_group, &[]);
+                            let bind_group =
+                                gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                    label: None,
+                                    layout: &gpu.hash_fixed.bind_group_layout,
+                                    entries: &[
+                                        wgpu::BindGroupEntry {
+                                            binding: 0,
+                                            resource: runargs.fixed.as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 1,
+                                            resource: runargs.uniform.as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 2,
+                                            resource: runargs.output.as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 3,
+                                            resource: runargs.input.as_entire_binding(),
+                                        },
+                                    ],
+                                });
 
-                    let workgroup_count = ops_len.div_ceil(workgroup_size as _);
-                    compute_pass.dispatch_workgroups(workgroup_count as u32, 1, 1);
+                            // Set the bind group that we want to use
+                            compute_pass.set_bind_group(0, &bind_group, &[]);
+
+                            let workgroup_count = runargs.ops_len.div_ceil(workgroup_size as _);
+                            compute_pass.dispatch_workgroups(workgroup_count as u32, 1, 1);
+                        }
+                        RunArgs::Variable(runargs) => {
+                            compute_pass.set_pipeline(&gpu.hash_variable.pipeline);
+
+                            todo!("hash_variable not implemented yet!");
+                        }
+                    }
                 }
             }
         }

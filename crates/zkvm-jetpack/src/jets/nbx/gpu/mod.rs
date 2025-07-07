@@ -4,11 +4,13 @@ use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::time::Instant;
 
 use nbx_shaders::get_shader_module;
+use nockapp::Noun;
 use tracing::*;
 use wgpu::{Buffer, Device, SubmissionIndex};
 
 use super::substitute::SubstituteEngine;
 use crate::form::Melt;
+use crate::hand::structs::HoonList;
 use crate::jets::nbx::hash::{HashEngine, NounDigest, ReduceOp, VariableReduceOp};
 
 mod hash;
@@ -63,12 +65,7 @@ impl Gpu {
 
         let [hash_fixed, hash_variable] = [
             (core::mem::size_of::<ReduceOp>(), "hash_fixed", 1),
-            (
-                core::mem::size_of::<VariableReduceOp>(),
-                // TODO: hash_variable
-                "hash_fixed",
-                1,
-            ),
+            (core::mem::size_of::<VariableReduceOp>(), "hash_variable", 1),
         ]
         .map(|(sz, source_label, num_inputs)| {
             debug!("Shader module");
@@ -227,6 +224,10 @@ fn get_engine() -> HashEngine {
         }
     }
 
+    // add some test data to trigger variable hashing
+    let list: NounDigest = [Melt(1), Melt(2), Melt(3), Melt(4), Melt(5)];
+    engine.push_list(0, [list; 1].into_iter());
+
     engine
 }
 
@@ -276,43 +277,47 @@ pub fn gpu_test() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Reducing");
 
-    let t = Instant::now();
-    let hash_engines = (0..std::env::var("GPU_SUBMISSIONS")
-        .as_deref()
-        .unwrap_or("1")
-        .parse::<usize>()
-        .unwrap())
-        .into_par_iter()
-        .map(|_| get_engine())
-        .collect::<Vec<_>>();
-    println!("Hash engines: {:.02}", t.elapsed().as_secs_f64());
-    let t2 = Instant::now();
-    let gpu_submissions = hash_engines
-        .into_par_iter()
-        .map(Submittable::submit)
-        .collect::<Vec<_>>();
-    println!(
-        "Submitted all: {:.02}, {:.02}",
-        t.elapsed().as_secs_f64(),
-        t2.elapsed().as_secs_f64()
-    );
-    let t2 = Instant::now();
-    let gpu_buffers = gpu_submissions
-        .into_iter()
-        .map(Submission::finish)
-        .collect::<Vec<_>>();
-    let gpu_buffer = &gpu_buffers[0];
-    println!("{:?}", gpu_buffer);
-    println!(
-        "GPU Time: {:.02}, {:.02}",
-        t.elapsed().as_secs_f64(),
-        t2.elapsed().as_secs_f64()
-    );
+    if true {
+        let t = Instant::now();
+        let hash_engines = (0..std::env::var("GPU_SUBMISSIONS")
+            .as_deref()
+            .unwrap_or("1")
+            .parse::<usize>()
+            .unwrap())
+            .into_par_iter()
+            .map(|_| get_engine())
+            .collect::<Vec<_>>();
+        println!("Hash engines: {:.02}", t.elapsed().as_secs_f64());
+        let t2 = Instant::now();
+        let gpu_submissions = hash_engines
+            .into_par_iter()
+            .map(Submittable::submit)
+            .collect::<Vec<_>>();
+        println!(
+            "Submitted all: {:.02}, {:.02}",
+            t.elapsed().as_secs_f64(),
+            t2.elapsed().as_secs_f64()
+        );
+        let t2 = Instant::now();
+        let gpu_buffers = gpu_submissions
+            .into_iter()
+            .map(Submission::finish)
+            .collect::<Vec<_>>();
+        let gpu_buffer = &gpu_buffers[0];
+        println!("{:?}", gpu_buffer);
+        println!(
+            "GPU Time: {:.02}, {:.02}",
+            t.elapsed().as_secs_f64(),
+            t2.elapsed().as_secs_f64()
+        );
+    }
 
-    let t = Instant::now();
-    let cpu_buffer = cpu_reduce(get_engine());
-    println!("{:?}", cpu_buffer);
-    println!("CPU Time: {:.02}", t.elapsed().as_secs_f64());
+    if true {
+        let t = Instant::now();
+        let cpu_buffer = cpu_reduce(get_engine());
+        println!("{:?}", cpu_buffer);
+        println!("CPU Time: {:.02}", t.elapsed().as_secs_f64());
+    }
 
     Ok(())
 }
