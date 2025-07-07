@@ -1,15 +1,15 @@
 use core::num::NonZeroU64;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::marker::PhantomData;
+use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::time::Instant;
 
 use nbx_shaders::get_shader_module;
 use tracing::*;
-
-use self::hash::HashSubmission;
-use crate::form::Melt;
-use crate::jets::nbx::hash::{HashEngine, NounDigest, ReduceOp, VariableReduceOp};
+use wgpu::{Buffer, Device, SubmissionIndex};
 
 use super::substitute::SubstituteEngine;
+use crate::form::Melt;
+use crate::jets::nbx::hash::{HashEngine, NounDigest, ReduceOp, VariableReduceOp};
 
 mod hash;
 
@@ -95,8 +95,7 @@ impl Gpu {
                         ty: wgpu::BufferBindingType::Uniform,
                         // This is the size of a single element in the buffer.
                         min_binding_size: Some(
-                            NonZeroU64::new(core::mem::size_of::<WgOffsets>() as _)
-                                .unwrap(),
+                            NonZeroU64::new(core::mem::size_of::<WgOffsets>() as _).unwrap(),
                         ),
                         has_dynamic_offset: false,
                     },
@@ -290,17 +289,25 @@ pub fn gpu_test() -> Result<(), Box<dyn std::error::Error>> {
     let t2 = Instant::now();
     let gpu_submissions = hash_engines
         .into_par_iter()
-        .map(hash::reduce)
+        .map(Submittable::submit)
         .collect::<Vec<_>>();
-    println!("Submitted all: {:.02}, {:.02}", t.elapsed().as_secs_f64(), t2.elapsed().as_secs_f64());
+    println!(
+        "Submitted all: {:.02}, {:.02}",
+        t.elapsed().as_secs_f64(),
+        t2.elapsed().as_secs_f64()
+    );
     let t2 = Instant::now();
     let gpu_buffers = gpu_submissions
         .into_iter()
-        .map(HashSubmission::finish)
+        .map(Submission::finish)
         .collect::<Vec<_>>();
     let gpu_buffer = &gpu_buffers[0];
     println!("{:?}", gpu_buffer);
-    println!("GPU Time: {:.02}, {:.02}", t.elapsed().as_secs_f64(), t2.elapsed().as_secs_f64());
+    println!(
+        "GPU Time: {:.02}, {:.02}",
+        t.elapsed().as_secs_f64(),
+        t2.elapsed().as_secs_f64()
+    );
 
     let t = Instant::now();
     let cpu_buffer = cpu_reduce(get_engine());
@@ -311,7 +318,6 @@ pub fn gpu_test() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 pub fn gpu_sub_test(engine: SubstituteEngine<Melt>) -> Result<(), Box<dyn std::error::Error>> {
-
     let _ = get_gpu();
 
     println!("Substituting on poly size {}", engine.poly_len());
@@ -347,4 +353,65 @@ pub fn gpu_sub_test(engine: SubstituteEngine<Melt>) -> Result<(), Box<dyn std::e
     println!("CPU Time: {:.02}", t.elapsed().as_secs_f64());
 
     Ok(())
+}
+
+pub struct Submission<T> {
+    device: Device,
+    si: SubmissionIndex,
+    download: Buffer,
+    debug: Option<Arc<Mutex<Option<bool>>>>,
+    _download_convert: PhantomData<T>,
+}
+
+impl<T> Drop for Submission<T> {
+    fn drop(&mut self) {
+        if let Some(debug) = self.debug.take() {
+            *debug.lock().unwrap() = Some(true);
+        }
+    }
+}
+
+impl<T: FromBuffer> Submission<T> {
+    pub fn finish(self) -> T {
+        let Self {
+            device,
+            si,
+            download,
+            debug,
+            _download_convert: _,
+        } = &self;
+
+        let buffer_slice = download.slice(..);
+        let (tx, rx) = mpsc::channel();
+        buffer_slice.map_async(wgpu::MapMode::Read, move |_| {
+            debug!("Mapped");
+            let _ = tx.send(());
+        });
+
+        debug!("Map request");
+
+        device
+            .poll(wgpu::PollType::WaitForSubmissionIndex(si.clone()))
+            .unwrap();
+        debug!("Polled");
+
+        let _ = rx.recv().unwrap();
+
+        if debug.is_some() {
+            unsafe { device.stop_graphics_debugger_capture() };
+        }
+
+        let data = buffer_slice.get_mapped_range();
+        T::from_buffer(&data)
+    }
+}
+
+pub trait FromBuffer {
+    fn from_buffer(b: &[u8]) -> Self;
+}
+
+pub trait Submittable: Sized {
+    type Output: FromBuffer;
+
+    fn submit(self) -> Submission<Self::Output>;
 }
