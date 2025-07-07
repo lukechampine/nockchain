@@ -34,6 +34,8 @@ use three::*;
 use two::*;
 use zoon::*;
 
+pub use two::mp_substitute_ultra_impl;
+
 use super::utils::jet_err;
 
 macro_rules! jam_err {

@@ -1,8 +1,13 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
 use nockapp::save::SaveableCheckpoint;
-use nockvm::noun::FullDebugCellDepth;
+use nockvm::jets::util::slot;
+use zkvm_jetpack::form::{BPolySlice, BPolyVec, Belt, MPolyVec, Melt, PolyVec};
+use zkvm_jetpack::hand::structs::HoonMapIter;
+use zkvm_jetpack::jets::nbx::{substitute::SubstituteEngine, mp_substitute_ultra_impl};
+use zkvm_jetpack::noun::noun_ext::NounExt as ZNounExt;
 use core::iter::once;
+use std::collections::BTreeMap;
 use flume::Receiver;
 use futures::Stream;
 use futures::{stream::iter, StreamExt};
@@ -57,7 +62,62 @@ unsafe impl Sync for SendSlab {}
 #[derive(Subcommand, Debug, Clone)]
 pub enum Mode {
     Test(Test),
-    GpuTest,
+    #[command(subcommand)]
+    GpuTest(GpuTest),
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum GpuTest {
+    Hash,
+    Sub {
+        #[arg(help = "path to mp_substitute_ultra subject.jam")]
+        mpsub_sam: String,
+    },
+}
+
+impl GpuTest {
+    async fn run(self, _: Cli) -> Result<()> {
+        match self {
+            Self::Hash => Ok(zkvm_jetpack::jets::nbx::gpu::gpu_test().unwrap()),
+            Self::Sub { mpsub_sam } => {
+                let subject = load_jam(mpsub_sam)?;
+                let subject = *unsafe { subject.root() };
+
+                let inp = slot(subject, 6).unwrap();
+
+                let [p, trace_evals, height, chal_map, dyns] = inp.uncell()?;
+
+                let Ok(trace_evals) = BPolySlice::try_from(trace_evals) else {
+                    return Err(anyhow!("Can't parse trace_evals"));
+                };
+                let trace_evals: BPolyVec = PolyVec(trace_evals.0.into());
+                let trace_evals: MPolyVec = trace_evals.into();
+
+                let height = height.as_atom()?.as_u64()?;
+                let chal_map = HoonMapIter::try_from(chal_map).ok().into_iter().flatten().map(|v| {
+                    let [k, v] = v.uncell().unwrap().map(|v| v.as_atom().unwrap().as_u64().unwrap());
+                    (k, Belt(v))
+                }).collect::<BTreeMap<_, _>>();
+
+                let Ok(dyns) = BPolySlice::try_from(dyns) else {
+                    return Err(anyhow!("Can't parse dyns"));
+                };
+
+                let mut engine = SubstituteEngine::new(height);
+                mp_substitute_ultra_impl::<Melt>(
+                    &mut engine,
+                    0,
+                    p,
+                    (&trace_evals).into(),
+                    &chal_map,
+                    dyns,
+                ).unwrap();
+                zkvm_jetpack::jets::nbx::gpu::gpu_sub_test(engine).unwrap();
+
+                Ok(())
+            }
+        }
+    }
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -239,6 +299,6 @@ async fn main() -> Result<()> {
 
     match cli.mode {
         Mode::Test(p) => p.run(cli.nockapp_cli).await,
-        Mode::GpuTest => Ok(zkvm_jetpack::jets::nbx::gpu::gpu_test().unwrap()),
+        Mode::GpuTest(p) => p.run(cli.nockapp_cli).await,
     }
 }

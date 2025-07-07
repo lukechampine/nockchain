@@ -8,7 +8,7 @@ use nockvm_macros::tas;
 use tracing::log::*;
 
 use super::one::{p_decompose_impl, peval_impl};
-use super::substitute::{SubstituteEngine, SubstituteMulStage};
+use super::substitute::{SubstituteEngine, SubstituteMulStage, SubstituteOp};
 use super::utils::*;
 use crate::form::bpoly::{bp_coseword, bpscal_inplace};
 use crate::form::fext::{fadd_, fdiv_, finv_, fmul_, fneg_};
@@ -23,7 +23,7 @@ use crate::form::{
 use crate::hand::handle::{
     finalize_mary, finalize_poly, new_handle_mut_felt, new_handle_mut_mary, new_handle_mut_slice,
 };
-use crate::hand::structs::{HoonList, HoonMap, HoonMapIter};
+use crate::hand::structs::{HoonList, HoonMapIter};
 use crate::jets::utils::jet_err;
 use crate::noun::noun_ext::NounExt;
 
@@ -372,18 +372,30 @@ pub fn mp_substitute_ultra(stack: &mut NockStack, inp: Noun) -> Result {
     };
 
     let height = height.as_atom()?.as_u64()?;
-    let chal_map = HoonMap::try_from(chal_map).ok();
+    let chal_map = HoonMapIter::try_from(chal_map)
+        .ok()
+        .into_iter()
+        .flatten()
+        .map(|v| {
+            let [k, v] = v
+                .uncell()
+                .unwrap()
+                .map(|v| v.as_atom().unwrap().as_u64().unwrap());
+            (k, Belt(v))
+        })
+        .collect::<BTreeMap<_, _>>();
 
     let Ok(dyns) = BPolySlice::try_from(dyns) else {
         return jet_err();
     };
 
     let mut engine = SubstituteEngine::new(height);
-    mp_substitute_ultra_impl::<Belt>(stack, &mut engine, 0, p, trace_evals, &chal_map, dyns)?;
+    mp_substitute_ultra_impl::<Belt>(&mut engine, 0, p, trace_evals, &chal_map, dyns)?;
     let (ret, poly_size) = engine.reduce();
 
     let mut ret = ret
-        .chunks(poly_size)
+        .iter()
+        .flat_map(|v| v.chunks(poly_size))
         .map(|v| {
             let (res, res_poly): (IndirectAtom, &mut [Belt]) =
                 new_handle_mut_slice(stack, Some(v.len()));
@@ -397,54 +409,13 @@ pub fn mp_substitute_ultra(stack: &mut NockStack, inp: Noun) -> Result {
     Ok(T(stack, &ret))
 }
 
-pub trait Map<K, V> {
-    fn get(&self, stack: &mut NockStack, k: K) -> Option<V>;
-}
-
-trait MapKey {
-    fn as_noun(&self, stack: &mut NockStack) -> Noun;
-}
-
-impl<T: ElementEx> MapKey for T {
-    fn as_noun(&self, stack: &mut NockStack) -> Noun {
-        ElementEx::as_noun(*self, stack)
-    }
-}
-
-impl MapKey for u64 {
-    fn as_noun(&self, stack: &mut NockStack) -> Noun {
-        Atom::new(stack, *self).as_noun()
-    }
-}
-
-impl<K: MapKey, V: TryFrom<Noun>> Map<K, V> for HoonMap {
-    fn get(&self, stack: &mut NockStack, k: K) -> Option<V> {
-        let k = k.as_noun(stack);
-        let v = self.get(stack, k)?;
-        V::try_from(v).ok()
-    }
-}
-
-impl<K: MapKey, V: TryFrom<Noun>> Map<K, V> for Option<HoonMap> {
-    fn get(&self, stack: &mut NockStack, k: K) -> Option<V> {
-        self.and_then(|v| Map::get(&v, stack, k))
-    }
-}
-
-impl<K: Ord, V: Copy> Map<K, V> for BTreeMap<K, V> {
-    fn get(&self, _: &mut NockStack, k: K) -> Option<V> {
-        BTreeMap::get(self, &k).copied()
-    }
-}
-
 #[tracing::instrument(skip_all)]
 pub fn mp_substitute_ultra_impl<'a, E: ElementEx>(
-    stack: &mut NockStack,
     engine: &mut SubstituteEngine<'a, E>,
     stage: usize,
     p: Noun,
     trace_evals: PolySlice<'a, E>,
-    chal_map: &impl Map<u64, Belt>,
+    chal_map: &BTreeMap<u64, Belt>,
     dyns: BPolySlice,
 ) -> core::result::Result<usize, JetErr> {
     // ^-  (list bpoly)
@@ -457,7 +428,6 @@ pub fn mp_substitute_ultra_impl<'a, E: ElementEx>(
             // :~  (mp-substitute-mega +.p trace-evals height chal-map dyns ~)
             // ==
             mp_substitute_mega_impl::<E, E>(
-                stack,
                 engine,
                 stage,
                 p_tail,
@@ -490,7 +460,6 @@ pub fn mp_substitute_ultra_impl<'a, E: ElementEx>(
                 com_map.insert(
                     i as u64,
                     mp_substitute_mega_impl::<E, E>(
-                        stack,
                         engine,
                         stage + 1,
                         mp,
@@ -510,7 +479,7 @@ pub fn mp_substitute_ultra_impl<'a, E: ElementEx>(
                 // |=  mp=mp-mega
                 // (mp-substitute-mega mp trace-evals height chal-map dyns com-map)
                 mp_substitute_mega_impl::<E, E>(
-                    stack, engine, stage, mp, trace_evals, chal_map, dyns, &com_map,
+                    engine, stage, mp, trace_evals, chal_map, dyns, &com_map,
                 )?;
                 ret += 1;
             }
@@ -683,7 +652,18 @@ pub fn mp_substitute_mega(stack: &mut NockStack, inp: Noun) -> Result {
     let Ok(trace_evals) = BPolySlice::try_from(trace_evals) else {
         return jet_err();
     };
-    let chal_map = HoonMap::try_from(chal_map).ok();
+    let chal_map = HoonMapIter::try_from(chal_map)
+        .ok()
+        .into_iter()
+        .flatten()
+        .map(|v| {
+            let [k, v] = v
+                .uncell()
+                .unwrap()
+                .map(|v| v.as_atom().unwrap().as_u64().unwrap());
+            (k, Belt(v))
+        })
+        .collect::<BTreeMap<_, _>>();
     let Ok(dyns) = BPolySlice::try_from(dyns) else {
         return jet_err();
     };
@@ -713,12 +693,13 @@ pub fn mp_substitute_mega(stack: &mut NockStack, inp: Noun) -> Result {
     // println!("dyns={:?}", mug(stack, dyns).data());
     // println!("com_map={:?}", mug(stack, com_map).data());
     mp_substitute_mega_impl::<Belt, Belt>(
-        stack, &mut engine, 0, p, trace_evals, &chal_map, dyns, &com_map,
+        &mut engine, 0, p, trace_evals, &chal_map, dyns, &com_map,
     )?;
 
-    let (acc, poly_len) = engine.reduce();
-    assert_eq!(acc.len(), poly_len);
-    let acc = PolyVec(acc);
+    let (mut acc, poly_len) = engine.reduce();
+    assert_eq!(acc.len(), 1);
+    assert_eq!(acc[0].len(), poly_len);
+    let acc = PolyVec(acc.pop().unwrap());
 
     let (ret, handle) = new_handle_mut_slice(stack, Some(acc.len()));
     handle.copy_from_slice(&acc.0);
@@ -730,12 +711,11 @@ pub fn mp_substitute_mega(stack: &mut NockStack, inp: Noun) -> Result {
 #[inline(never)]
 #[tracing::instrument(skip_all)]
 pub fn mp_substitute_mega_impl<'a, E: ElementEx, P: Into<E> + Copy>(
-    stack: &mut NockStack,
     engine: &mut SubstituteEngine<'a, E>,
     stage: usize,
     p: Noun,
     trace_evals: PolySlice<'a, E>,
-    chal_map: &impl Map<u64, Belt>,
+    chal_map: &BTreeMap<u64, Belt>,
     dyns: BPolySlice,
     com_map: &BTreeMap<u64, usize>,
     //com_map: &BTreeMap<u64, PolyVec<P>>,
@@ -788,12 +768,15 @@ where
                     // %+  roll  (range exp)
                     // |=  [i=@ power=_acc]
                     // (bp-hadamard power var)
-                    muls.vars.push((idx, exp));
+                    muls.vars.push(SubstituteOp {
+                        chunk: idx as _,
+                        exp: exp as _,
+                    });
                 }
                 // %rnd
                 MegaTyp::Rnd => {
                     // =/  rnd  (~(got by chal-map) idx)
-                    let rnd = chal_map.get(stack, idx as u64).unwrap();
+                    let rnd = chal_map.get(&(idx as u64)).unwrap();
                     // (bpscal (bpow rnd exp) acc)
                     let powed = bpow(rnd.0, exp);
                     muls.scal = muls.scal * E::from_u64(powed);
@@ -817,7 +800,10 @@ where
                     // %+  roll  (range exp)
                     // |=  [i=@ power=_acc]
                     // (bp-hadamard power com)
-                    muls.coms.push((com, exp));
+                    muls.coms.push(SubstituteOp {
+                        chunk: com as _,
+                        exp: exp as _,
+                    });
                 }
             }
         }

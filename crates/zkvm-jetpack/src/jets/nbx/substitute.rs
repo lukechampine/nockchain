@@ -2,9 +2,20 @@ use crate::form::math::poly::*;
 use crate::form::poly::Poly;
 use crate::form::{ElementEx, PolySlice, PolyVec};
 
+// 64MB in melts/belts
+const MAX_CHUNK_SIZE: usize = 0x4000000 / core::mem::size_of::<u64>();
+
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+#[repr(C)]
+pub struct SubstituteOp {
+    pub chunk: u32,
+    pub exp: u32,
+}
+
+#[derive(Clone)]
 pub struct SubstituteMulStage<E: ElementEx> {
-    pub vars: Vec<(usize, u64)>,
-    pub coms: Vec<(usize, u64)>,
+    pub vars: Vec<SubstituteOp>,
+    pub coms: Vec<SubstituteOp>,
     pub scal: E,
 }
 
@@ -18,6 +29,7 @@ impl<E: ElementEx> SubstituteMulStage<E> {
     }
 }
 
+#[derive(Clone)]
 struct SubstituteIter<'a, E: ElementEx> {
     pub muls: Vec<SubstituteMulStage<E>>,
     pub traces: PolySlice<'a, E>,
@@ -33,8 +45,9 @@ impl<'a, E: ElementEx> SubstituteIter<'a, E> {
 }
 
 impl<E: ElementEx> SubstituteIter<'_, E> {
-    fn reduce(self, inp: &[E], out: &mut [E]) {
+    fn reduce(self, inp: &[impl AsRef<[E]>], out: &mut [E]) {
         let out_len = out.len();
+        let inp_chunks = MAX_CHUNK_SIZE / out_len;
         self.muls
             .into_iter()
             .map(|m| {
@@ -43,11 +56,19 @@ impl<E: ElementEx> SubstituteIter<'_, E> {
                 // NOTE: never parallel iter here, because it is slow
                 m.coms
                     .into_iter()
-                    .map(|(i, exp)| (&inp.split_at(out_len * i).1[..out_len], exp))
-                    .chain(m.vars.into_iter().map(|(i, exp)| {
-                        let var = self.traces.0.split_at(out_len * i).1;
+                    .map(|SubstituteOp { chunk, exp }| {
+                        (
+                            &inp[(chunk as usize) / inp_chunks]
+                                .as_ref()
+                                .split_at(out_len * ((chunk as usize) % inp_chunks))
+                                .1[..out_len],
+                            exp as u64,
+                        )
+                    })
+                    .chain(m.vars.into_iter().map(|SubstituteOp { chunk, exp }| {
+                        let var = self.traces.0.split_at(out_len * (chunk as usize)).1;
                         let var = &var[..out_len];
-                        (var, exp)
+                        (var, exp as u64)
                     }))
                     .fold(acc, |mut acc, (o, exp)| {
                         debug_assert_eq!(o.len(), acc.0.len());
@@ -73,9 +94,10 @@ impl<E: ElementEx> SubstituteIter<'_, E> {
     }
 }
 
+#[derive(Clone)]
 struct SubstituteStage<'a, E: ElementEx> {
     pub iters: Vec<SubstituteIter<'a, E>>,
-    pub out: Vec<E>,
+    pub out: Vec<Vec<E>>,
 }
 
 impl<E: ElementEx> Default for SubstituteStage<'_, E> {
@@ -89,15 +111,16 @@ impl<E: ElementEx> Default for SubstituteStage<'_, E> {
 
 impl<E: ElementEx> SubstituteStage<'_, E> {
     #[tracing::instrument(skip_all)]
-    fn reduce(mut self, poly_len: usize, inp: &[E]) -> Vec<E> {
+    fn reduce(mut self, poly_len: usize, inp: &[impl AsRef<[E]>]) -> Vec<Vec<E>> {
         self.iters
             .into_iter()
-            .zip(self.out.chunks_mut(poly_len))
+            .zip(self.out.iter_mut().flat_map(|m| m.chunks_mut(poly_len)))
             .for_each(|(i, o)| i.reduce(inp, o));
         self.out
     }
 }
 
+#[derive(Clone)]
 pub struct SubstituteEngine<'a, E: ElementEx> {
     stages: Vec<SubstituteStage<'a, E>>,
     poly_len: usize,
@@ -105,14 +128,19 @@ pub struct SubstituteEngine<'a, E: ElementEx> {
 
 impl<'a, E: ElementEx> SubstituteEngine<'a, E> {
     pub fn new(height: u64) -> Self {
+        let poly_len = (height as usize) * 4;
+        assert!(
+            poly_len <= MAX_CHUNK_SIZE,
+            "{poly_len:x} is larger than {MAX_CHUNK_SIZE:x}"
+        );
         Self {
             stages: vec![],
-            poly_len: (height as usize) * 4,
+            poly_len,
         }
     }
 
     #[tracing::instrument(skip_all)]
-    pub fn reduce(mut self) -> (Vec<E>, usize) {
+    pub fn reduce(mut self) -> (Vec<Vec<E>>, usize) {
         let mut cur = vec![];
         while let Some(stage) = self.stages.pop() {
             cur = stage.reduce(self.poly_len, &cur);
@@ -130,7 +158,12 @@ impl<'a, E: ElementEx> SubstituteEngine<'a, E> {
         }
     }
 
-    pub fn push_iter(&mut self, stage: usize, out: Option<PolySlice<E>>, traces: PolySlice<'a, E>) -> usize {
+    pub fn push_iter(
+        &mut self,
+        stage: usize,
+        out: Option<PolySlice<E>>,
+        traces: PolySlice<'a, E>,
+    ) -> usize {
         if self.stages.len() <= stage {
             assert_eq!(self.stages.len(), stage);
             self.stages.push(Default::default());
@@ -138,11 +171,22 @@ impl<'a, E: ElementEx> SubstituteEngine<'a, E> {
         let stage = &mut self.stages[stage];
         let ret = stage.iters.len();
         stage.iters.push(SubstituteIter::new(traces));
+
+        let fits_in_last = stage
+            .out
+            .last()
+            .map(|v| v.len() + self.poly_len <= MAX_CHUNK_SIZE)
+            .unwrap_or(false);
+        if !fits_in_last {
+            stage.out.push(vec![]);
+        }
+        let lout = stage.out.last_mut().unwrap();
+
         if let Some(out) = out {
             assert_eq!(out.len(), self.poly_len);
-            stage.out.extend_from_slice(out.0);
+            lout.extend_from_slice(out.0);
         } else {
-            stage.out.resize(stage.out.len() + self.poly_len, E::zero());
+            lout.resize(lout.len() + self.poly_len, E::zero());
         }
         ret
     }

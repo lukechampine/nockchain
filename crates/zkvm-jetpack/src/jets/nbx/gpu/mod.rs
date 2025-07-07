@@ -9,6 +9,8 @@ use self::hash::HashSubmission;
 use crate::form::Melt;
 use crate::jets::nbx::hash::{HashEngine, NounDigest, ReduceOp, VariableReduceOp};
 
+use super::substitute::SubstituteEngine;
+
 mod hash;
 
 struct Pipeline {
@@ -295,6 +297,45 @@ pub fn gpu_test() -> Result<(), Box<dyn std::error::Error>> {
     let t = Instant::now();
     let cpu_buffer = cpu_reduce(get_engine());
     println!("{:?}", cpu_buffer);
+    println!("CPU Time: {:.02}", t.elapsed().as_secs_f64());
+
+    Ok(())
+}
+
+pub fn gpu_sub_test(engine: SubstituteEngine<Melt>) -> Result<(), Box<dyn std::error::Error>> {
+
+    let _ = get_gpu();
+
+    println!("Substituting on poly size {}", engine.poly_len());
+
+    /*let t = Instant::now();
+    let hash_engines = (0..std::env::var("GPU_SUBMISSIONS")
+        .as_deref()
+        .unwrap_or("1")
+        .parse::<usize>()
+        .unwrap())
+        .into_par_iter()
+        .map(|_| get_engine())
+        .collect::<Vec<_>>();
+    println!("Hash engines: {:.02}", t.elapsed().as_secs_f64());
+    let t2 = Instant::now();
+    let gpu_submissions = hash_engines
+        .into_par_iter()
+        .map(hash::reduce)
+        .collect::<Vec<_>>();
+    println!("Submitted all: {:.02}, {:.02}", t.elapsed().as_secs_f64(), t2.elapsed().as_secs_f64());
+    let t2 = Instant::now();
+    let gpu_buffers = gpu_submissions
+        .into_iter()
+        .map(HashSubmission::finish)
+        .collect::<Vec<_>>();
+    let gpu_buffer = &gpu_buffers[0];
+    println!("{:?}", gpu_buffer);
+    println!("GPU Time: {:.02}, {:.02}", t.elapsed().as_secs_f64(), t2.elapsed().as_secs_f64());*/
+
+    let t = Instant::now();
+    let (cpu_buffer, _) = engine.clone().reduce();
+    println!("{:?}", &cpu_buffer[0][..10]);
     println!("CPU Time: {:.02}", t.elapsed().as_secs_f64());
 
     Ok(())

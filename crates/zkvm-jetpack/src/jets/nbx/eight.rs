@@ -577,22 +577,26 @@ where
         // =/  comps=(list bpoly)
         //   (mp-substitute-ultra mp trace max-height chal-map dyns)
         comp_cnts.push(mp_substitute_ultra_impl(
-            stack, &mut engine, 0, *mp, trace, chal_map, dyns,
+            &mut engine,
+            0,
+            *mp,
+            trace,
+            chal_map,
+            dyns,
         )?);
     }
 
     let (all_comps, poly_len) = engine.reduce();
-    let mut all_comps = all_comps.as_slice();
+    let mut all_comps = all_comps.iter().flat_map(|m| m.chunks(poly_len));
 
     for ((degs, _), comps) in constraints.iter().zip(comp_cnts) {
-        let (comps, rest) = all_comps.split_at(comps * poly_len);
-        all_comps = rest;
+        let comps = (&mut all_comps).take(comps);
 
         // NOTE: zip-up expects equal lengths
         // %+  roll
         //   (zip-up degs comps)
         // |=  [[deg=@ comp=bpoly] [idx=_idx acc=_acc]]
-        for (deg, comp) in degs.iter().zip(comps.chunks(poly_len)) {
+        for (deg, comp) in degs.iter().zip(comps) {
             // :-  +(idx)
             // ::
             // ::  Each constraint corresponds to two weights: alpha and beta. The verifier
