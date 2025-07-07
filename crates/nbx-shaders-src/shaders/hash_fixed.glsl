@@ -1,22 +1,22 @@
 layout(local_size_x = 256) in;
-// Input to the shader. The length of the array is determined by what buffer is bound.
-//
-// Out of bounds accesses
-layout(std430, binding = 0) readonly buffer InputBuf {
-    uint64_t inpBuf[];
-};
-layout(std430, binding = 1) readonly buffer OpsBuf {
+layout(std430, binding = 0) readonly buffer OpsBuf {
     ReduceOp ops[];
 };
-layout(std140, binding = 2) uniform Globals {
+layout(std140, binding = 1) uniform Globals {
     uint opsOffset;
     uint numOps;
     uint inpOffset;
     uint outOffset;
 };
 // Output of the shader.
-layout(std430, binding = 3) buffer OutputBuf {
+layout(std430, binding = 2) buffer OutputBuf {
     uint64_t outBuf[];
+};
+// Input to the shader. The length of the array is determined by what buffer is bound.
+//
+// Out of bounds accesses
+layout(std430, binding = 3) readonly buffer InputBuf {
+    uint64_t inpBuf[];
 };
 
 // Ideal workgroup size depends on the hardware, the workload, and other factors. However, it should

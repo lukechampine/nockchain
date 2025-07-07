@@ -62,73 +62,81 @@ impl Gpu {
         // Shader related
 
         let [hash_fixed, hash_variable] = [
-            (core::mem::size_of::<ReduceOp>(), "hash_fixed"),
+            (core::mem::size_of::<ReduceOp>(), "hash_fixed", 1),
             (
                 core::mem::size_of::<VariableReduceOp>(),
                 // TODO: hash_variable
                 "hash_fixed",
+                1,
             ),
         ]
-        .map(|(sz, source_label)| {
+        .map(|(sz, source_label, num_inputs)| {
             debug!("Shader module");
             let module = get_shader_module(&device, source_label);
+
+            let mut entries = vec![
+                // Ops buffer
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        // This is the size of a single element in the buffer.
+                        min_binding_size: Some(NonZeroU64::new(sz as _).unwrap()),
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                // Offsets
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        // This is the size of a single element in the buffer.
+                        min_binding_size: Some(
+                            NonZeroU64::new(core::mem::size_of::<WgOffsets>() as _)
+                                .unwrap(),
+                        ),
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+                // Output buffer
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        // This is the size of a single element in the buffer.
+                        min_binding_size: Some(NonZeroU64::new(8).unwrap()),
+                        has_dynamic_offset: false,
+                    },
+                    count: None,
+                },
+            ];
+
+            for i in 0..num_inputs {
+                entries.push(
+                    // Input buffer
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3 + i,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            // This is the size of a single element in the buffer.
+                            min_binding_size: Some(NonZeroU64::new(8).unwrap()),
+                            has_dynamic_offset: false,
+                        },
+                        count: None,
+                    },
+                )
+            }
 
             let bind_group_layout =
                 device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                     label: None,
-                    entries: &[
-                        // Input buffer
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                // This is the size of a single element in the buffer.
-                                min_binding_size: Some(NonZeroU64::new(8).unwrap()),
-                                has_dynamic_offset: false,
-                            },
-                            count: None,
-                        },
-                        // Ops buffer
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                // This is the size of a single element in the buffer.
-                                min_binding_size: Some(NonZeroU64::new(sz as _).unwrap()),
-                                has_dynamic_offset: false,
-                            },
-                            count: None,
-                        },
-                        // Offsets
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 2,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                // This is the size of a single element in the buffer.
-                                min_binding_size: Some(
-                                    NonZeroU64::new(core::mem::size_of::<WgOffsets>() as _)
-                                        .unwrap(),
-                                ),
-                                has_dynamic_offset: false,
-                            },
-                            count: None,
-                        },
-                        // Output buffer
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 3,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                                // This is the size of a single element in the buffer.
-                                min_binding_size: Some(NonZeroU64::new(8).unwrap()),
-                                has_dynamic_offset: false,
-                            },
-                            count: None,
-                        },
-                    ],
+                    entries: &entries,
                 });
 
             let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {

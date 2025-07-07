@@ -208,19 +208,19 @@ pub fn reduce(engine: HashEngine) -> HashSubmission {
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
-                            resource: input.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
                             resource: fixed.as_entire_binding(),
                         },
                         wgpu::BindGroupEntry {
-                            binding: 2,
+                            binding: 1,
                             resource: uniform.as_entire_binding(),
                         },
                         wgpu::BindGroupEntry {
-                            binding: 3,
+                            binding: 2,
                             resource: output.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: input.as_entire_binding(),
                         },
                     ],
                 });
