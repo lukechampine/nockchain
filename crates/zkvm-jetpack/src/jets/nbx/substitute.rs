@@ -1,11 +1,17 @@
+use std::sync::OnceLock;
+
+use nbx_tip5::melt::Melt;
+
 use crate::form::math::poly::*;
 use crate::form::poly::Poly;
 use crate::form::{ElementEx, PolySlice, PolyVec};
 
-// 64MB in melts/belts
-const MAX_CHUNK_SIZE: usize = 0x4000000 / core::mem::size_of::<u64>();
+use super::gpu;
 
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+// 64MB in melts/belts
+pub const MAX_CHUNK_SIZE: usize = 0x4000000 / core::mem::size_of::<u64>();
+
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable, Debug)]
 #[repr(C)]
 pub struct SubstituteOp {
     pub chunk: u32,
@@ -30,7 +36,7 @@ impl<E: ElementEx> SubstituteMulStage<E> {
 }
 
 #[derive(Clone)]
-struct SubstituteIter<'a, E: ElementEx> {
+pub struct SubstituteIter<'a, E: ElementEx> {
     pub muls: Vec<SubstituteMulStage<E>>,
     pub traces: PolySlice<'a, E>,
 }
@@ -95,7 +101,7 @@ impl<E: ElementEx> SubstituteIter<'_, E> {
 }
 
 #[derive(Clone)]
-struct SubstituteStage<'a, E: ElementEx> {
+pub struct SubstituteStage<'a, E: ElementEx> {
     pub iters: Vec<SubstituteIter<'a, E>>,
     pub out: Vec<Vec<E>>,
 }
@@ -126,6 +132,23 @@ pub struct SubstituteEngine<'a, E: ElementEx> {
     poly_len: usize,
 }
 
+impl SubstituteEngine<'_, Melt> {
+    #[tracing::instrument(skip_all)]
+    pub fn reduce_gpu(self) -> (Vec<Vec<Melt>>, usize) {
+        use super::gpu::Submittable;
+        let poly_len = self.poly_len;
+        (Submittable::gpu_process(self), poly_len)
+    }
+
+    pub fn reduce(self) -> (Vec<Vec<Melt>>, usize) {
+        if gpu::should_use_gpu() {
+            self.reduce_gpu()
+        } else {
+            self.reduce_cpu()
+        }
+    }
+}
+
 impl<'a, E: ElementEx> SubstituteEngine<'a, E> {
     pub fn new(height: u64) -> Self {
         let poly_len = (height as usize) * 4;
@@ -139,8 +162,12 @@ impl<'a, E: ElementEx> SubstituteEngine<'a, E> {
         }
     }
 
+    pub fn destruct(self) -> (Vec<SubstituteStage<'a, E>>, usize) {
+        (self.stages, self.poly_len)
+    }
+
     #[tracing::instrument(skip_all)]
-    pub fn reduce(mut self) -> (Vec<Vec<E>>, usize) {
+    pub fn reduce_cpu(mut self) -> (Vec<Vec<E>>, usize) {
         let mut cur = vec![];
         while let Some(stage) = self.stages.pop() {
             cur = stage.reduce(self.poly_len, &cur);

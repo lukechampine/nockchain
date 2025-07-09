@@ -40,8 +40,16 @@ macro_rules! include_shader {
     }};
 }
 
-static SHADERS: [(&str, LazyLock<Cow<'static, [u32]>>); 2] =
-    [include_shader!("hash_fixed"), include_shader!("hash_variable")];
+static SHADERS: [(&str, LazyLock<Cow<'static, [u32]>>); 4] = [
+    include_shader!("hash_fixed"),
+    include_shader!("hash_variable"),
+    include_shader!("substitute_mul"),
+    include_shader!("substitute_accum"),
+];
+
+pub fn all_shader_names() -> impl Iterator<Item = &'static str> {
+    SHADERS.iter().map(|(v, _)| *v)
+}
 
 pub fn get_shader_module(device: &Device, shader: &str) -> ShaderModule {
     let source = &**SHADERS.iter().find(|(s, _)| *s == shader).unwrap().1;

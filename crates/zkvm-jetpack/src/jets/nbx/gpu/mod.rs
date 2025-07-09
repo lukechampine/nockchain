@@ -8,12 +8,14 @@ use nockapp::Noun;
 use tracing::*;
 use wgpu::{Buffer, Device, SubmissionIndex};
 
+use self::substitute::{AccumUniform, MulUniform, SubstituteIterOps};
 use super::substitute::SubstituteEngine;
 use crate::form::Melt;
 use crate::hand::structs::HoonList;
 use crate::jets::nbx::hash::{HashEngine, NounDigest, ReduceOp, VariableReduceOp};
 
 mod hash;
+mod substitute;
 
 struct Pipeline {
     pipeline: wgpu::ComputePipeline,
@@ -25,6 +27,8 @@ struct Gpu {
     queue: wgpu::Queue,
     hash_fixed: Pipeline,
     hash_variable: Pipeline,
+    substitute_mul: Pipeline,
+    substitute_accum: Pipeline,
     debug_capture: Arc<Mutex<Option<bool>>>,
 }
 
@@ -63,44 +67,71 @@ impl Gpu {
 
         // Shader related
 
-        let [hash_fixed, hash_variable] = [
-            (core::mem::size_of::<ReduceOp>(), "hash_fixed", 1),
-            (core::mem::size_of::<VariableReduceOp>(), "hash_variable", 1),
+        let [hash_fixed, hash_variable, substitute_mul, substitute_accum] = [
+            (
+                Some(size_of::<ReduceOp>()),
+                "hash_fixed",
+                1,
+                Some(size_of::<WgOffsets>()),
+            ),
+            (
+                Some(size_of::<VariableReduceOp>()),
+                "hash_variable",
+                1,
+                Some(size_of::<WgOffsets>()),
+            ),
+            (
+                Some(size_of::<SubstituteIterOps>()),
+                "substitute_mul",
+                2,
+                Some(size_of::<MulUniform>()),
+            ),
+            (None, "substitute_accum", 1, Some(size_of::<AccumUniform>())),
         ]
-        .map(|(sz, source_label, num_inputs)| {
+        .map(|(ops_sz, source_label, num_inputs, uniform_sz)| {
             debug!("Shader module");
             let module = get_shader_module(&device, source_label);
 
-            let mut entries = vec![
-                // Ops buffer
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        // This is the size of a single element in the buffer.
-                        min_binding_size: Some(NonZeroU64::new(sz as _).unwrap()),
-                        has_dynamic_offset: false,
+            let mut entries = vec![];
+
+            if let Some(sz) = ops_sz {
+                entries.push(
+                    // Ops buffer
+                    wgpu::BindGroupLayoutEntry {
+                        binding: entries.len() as _,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            // This is the size of a single element in the buffer.
+                            min_binding_size: Some(NonZeroU64::new(sz as _).unwrap()),
+                            has_dynamic_offset: false,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                // Offsets
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        // This is the size of a single element in the buffer.
-                        min_binding_size: Some(
-                            NonZeroU64::new(core::mem::size_of::<WgOffsets>() as _).unwrap(),
-                        ),
-                        has_dynamic_offset: false,
+                );
+            }
+
+            if let Some(sz) = uniform_sz {
+                entries.push(
+                    // Offsets
+                    wgpu::BindGroupLayoutEntry {
+                        binding: entries.len() as _,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            // This is the size of a single element in the buffer.
+                            min_binding_size: Some(NonZeroU64::new(sz as _).unwrap()),
+                            has_dynamic_offset: false,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
+                );
+            }
+
+            entries.push(
                 // Output buffer
                 wgpu::BindGroupLayoutEntry {
-                    binding: 2,
+                    binding: entries.len() as _,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: false },
@@ -110,16 +141,16 @@ impl Gpu {
                     },
                     count: None,
                 },
-            ];
+            );
 
-            for i in 0..num_inputs {
+            for _ in 0..num_inputs {
                 entries.push(
                     // Input buffer
                     wgpu::BindGroupLayoutEntry {
-                        binding: 3 + i,
+                        binding: entries.len() as _,
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
                             // This is the size of a single element in the buffer.
                             min_binding_size: Some(NonZeroU64::new(8).unwrap()),
                             has_dynamic_offset: false,
@@ -167,6 +198,8 @@ impl Gpu {
             queue,
             hash_fixed,
             hash_variable,
+            substitute_mul,
+            substitute_accum,
             debug_capture: Mutex::new(Some(
                 std::env::var("GPU_DEBUGGER").as_deref().unwrap_or("0") != "0",
             ))
@@ -323,47 +356,69 @@ pub fn gpu_test() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 pub fn gpu_sub_test(engine: SubstituteEngine<Melt>) -> Result<(), Box<dyn std::error::Error>> {
+    use rayon::prelude::*;
+
     let _ = get_gpu();
 
     println!("Substituting on poly size {}", engine.poly_len());
 
-    /*let t = Instant::now();
-    let hash_engines = (0..std::env::var("GPU_SUBMISSIONS")
+    let t = Instant::now();
+    let engines = (0..std::env::var("GPU_SUBMISSIONS")
         .as_deref()
         .unwrap_or("1")
         .parse::<usize>()
         .unwrap())
         .into_par_iter()
-        .map(|_| get_engine())
+        .map(|_| engine.clone())
         .collect::<Vec<_>>();
-    println!("Hash engines: {:.02}", t.elapsed().as_secs_f64());
+    println!("Substitution engines: {:.02}", t.elapsed().as_secs_f64());
     let t2 = Instant::now();
-    let gpu_submissions = hash_engines
+    let gpu_submissions = engines
         .into_par_iter()
-        .map(hash::reduce)
+        .map(Submittable::submit)
         .collect::<Vec<_>>();
-    println!("Submitted all: {:.02}, {:.02}", t.elapsed().as_secs_f64(), t2.elapsed().as_secs_f64());
+    println!(
+        "Submitted all: {:.02}, {:.02}",
+        t.elapsed().as_secs_f64(),
+        t2.elapsed().as_secs_f64()
+    );
     let t2 = Instant::now();
     let gpu_buffers = gpu_submissions
         .into_iter()
-        .map(HashSubmission::finish)
+        .map(Submission::finish)
         .collect::<Vec<_>>();
     let gpu_buffer = &gpu_buffers[0];
-    println!("{:?}", gpu_buffer);
-    println!("GPU Time: {:.02}, {:.02}", t.elapsed().as_secs_f64(), t2.elapsed().as_secs_f64());*/
+    println!("{:?}", &gpu_buffer[0][..10]);
+    println!(
+        "GPU Time: {:.02}, {:.02}",
+        t.elapsed().as_secs_f64(),
+        t2.elapsed().as_secs_f64()
+    );
 
     let t = Instant::now();
-    let (cpu_buffer, _) = engine.clone().reduce();
+    let (cpu_buffer, _) = engine.clone().reduce_cpu();
     println!("{:?}", &cpu_buffer[0][..10]);
     println!("CPU Time: {:.02}", t.elapsed().as_secs_f64());
 
+    println!("Match? {:?}", gpu_buffer == &cpu_buffer);
+
     Ok(())
+}
+
+pub fn cache_gpu() {
+    get_gpu();
+}
+
+pub fn should_use_gpu() -> bool {
+    // TODO: move this into proper configuration
+    static USE_GPU: OnceLock<bool> = OnceLock::new();
+    *USE_GPU.get_or_init(|| std::env::var("NBX_USE_GPU").as_deref().unwrap_or("false") == "true")
 }
 
 pub struct Submission<T> {
     device: Device,
     si: SubmissionIndex,
-    download: Buffer,
+    downloads: Vec<Buffer>,
     debug: Option<Arc<Mutex<Option<bool>>>>,
     _download_convert: PhantomData<T>,
 }
@@ -377,21 +432,28 @@ impl<T> Drop for Submission<T> {
 }
 
 impl<T: FromBuffer> Submission<T> {
+    #[tracing::instrument(skip_all)]
     pub fn finish(self) -> T {
         let Self {
             device,
             si,
-            download,
+            downloads,
             debug,
             _download_convert: _,
         } = &self;
 
-        let buffer_slice = download.slice(..);
-        let (tx, rx) = mpsc::channel();
-        buffer_slice.map_async(wgpu::MapMode::Read, move |_| {
-            debug!("Mapped");
-            let _ = tx.send(());
-        });
+        let buffer_slices = downloads
+            .iter()
+            .map(|download| {
+                let buffer_slice = download.slice(..);
+                let (tx, rx) = mpsc::channel();
+                buffer_slice.map_async(wgpu::MapMode::Read, move |_| {
+                    debug!("Mapped");
+                    let _ = tx.send(());
+                });
+                (buffer_slice, rx)
+            })
+            .collect::<Vec<_>>();
 
         debug!("Map request");
 
@@ -400,23 +462,32 @@ impl<T: FromBuffer> Submission<T> {
             .unwrap();
         debug!("Polled");
 
-        let _ = rx.recv().unwrap();
+        let buffer_slices = buffer_slices
+            .into_iter()
+            .map(|(b, r)| {
+                let _ = r.recv();
+                b.get_mapped_range()
+            })
+            .collect::<Vec<_>>();
 
         if debug.is_some() {
             unsafe { device.stop_graphics_debugger_capture() };
         }
 
-        let data = buffer_slice.get_mapped_range();
-        T::from_buffer(&data)
+        T::from_buffers(&buffer_slices[..])
     }
 }
 
 pub trait FromBuffer {
-    fn from_buffer(b: &[u8]) -> Self;
+    fn from_buffers<T: AsRef<[u8]>>(b: &[T]) -> Self;
 }
 
 pub trait Submittable: Sized {
     type Output: FromBuffer;
 
     fn submit(self) -> Submission<Self::Output>;
+
+    fn gpu_process(self) -> Self::Output {
+        self.submit().finish()
+    }
 }

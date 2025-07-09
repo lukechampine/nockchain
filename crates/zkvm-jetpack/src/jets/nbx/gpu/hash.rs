@@ -9,10 +9,18 @@ use crate::jets::nbx::gpu::Submission;
 use crate::jets::nbx::hash::{HashEngine, NounDigest, ReduceChunk};
 
 impl FromBuffer for Vec<NounDigest> {
-    fn from_buffer(b: &[u8]) -> Self {
-        let result: &[NounDigest] = bytemuck::cast_slice(&b);
+    fn from_buffers<T: AsRef<[u8]>>(b: &[T]) -> Self {
+        let result: Vec<NounDigest> = b
+            .iter()
+            .map(|v| {
+                let result: &[NounDigest] = bytemuck::cast_slice(v.as_ref());
+                result
+            })
+            .flatten()
+            .copied()
+            .collect::<Vec<_>>();
         println!("Result: {result:?}");
-        result.to_vec()
+        result
     }
 }
 
@@ -300,7 +308,7 @@ impl Submittable for HashEngine {
         Submission {
             device: gpu.device.clone(),
             si,
-            download,
+            downloads: vec![download],
             debug,
             _download_convert: Default::default(),
         }

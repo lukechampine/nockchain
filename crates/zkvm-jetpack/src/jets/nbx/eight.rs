@@ -510,7 +510,6 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
             //     dyns
             // ==
             let processed_constraints = process_composition_constraints(
-                stack,
                 constraints,
                 trace,
                 PolySlice(weights),
@@ -542,18 +541,15 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
 }
 
 #[tracing::instrument(skip_all)]
-fn process_composition_constraints<E: ElementEx>(
-    stack: &mut NockStack,
+fn process_composition_constraints(
     constraints: &ProcessedDeg,
-    trace: PolySlice<E>,
+    trace: PolySlice<Melt>,
     weights: BPolySlice,
     dyns: BPolySlice,
     fri_deg_bound: u64,
     max_height: u64,
-    chal_map: &BTreeMap<u64, Belt>, //Option<HoonMap>,
-) -> core::result::Result<PolyVec<E>, JetErr>
-where
-    Belt: Into<E>,
+    chal_map: &BTreeMap<u64, Belt>,
+) -> core::result::Result<PolyVec<Melt>, JetErr>
 {
     // |=  $:  constraints=(list [(list @) mp-ultra])
     //         trace=bpoly
@@ -567,7 +563,7 @@ where
     // ::  mp-substitute-ultra returns a list because the %comp
     // ::  constraint type can contain multiple mp-mega constraints.
     // ::
-    let mut acc = PolyVec(vec![E::zero()]);
+    let mut acc = PolyVec(vec![Melt::zero()]);
     let mut idx = 0;
 
     let mut engine = SubstituteEngine::new(max_height);
@@ -622,14 +618,14 @@ where
             pscal_inplace(beta, &mut beta_vec);
             // %-  %~  weld  bop
             //     (init-bpoly (reap (sub fri-deg-bound.dp deg) 0))
-            let mut alpha_vec = vec![E::zero(); (fri_deg_bound - *deg) as usize];
+            let mut alpha_vec = vec![Melt::zero(); (fri_deg_bound - *deg) as usize];
             alpha_vec.extend(comp_coeff.clone());
             // (bpscal alpha comp-coeff)
             pscal_inplace(alpha, &mut alpha_vec);
             padd_in_place(&mut alpha_vec, &beta_vec);
             let acc_len = acc.len();
             acc.0
-                .resize(core::cmp::max(acc_len, alpha_vec.len()), E::zero());
+                .resize(core::cmp::max(acc_len, alpha_vec.len()), Melt::zero());
             padd_in_place(&mut acc.0, &alpha_vec);
             idx += 1;
         }

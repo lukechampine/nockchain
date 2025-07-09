@@ -24,7 +24,7 @@ use nockvm::mug::mug;
 use std::path::Path;
 use std::time::Instant;
 use zkvm_jetpack::hot::produce_prover_hot_state;
-use zkvm_jetpack::jets::nbx::nbx_jets;
+use zkvm_jetpack::jets::nbx::{gpu, nbx_jets};
 
 pub enum MiningWire {
     Mined,
@@ -137,6 +137,8 @@ pub struct Test {
         requires = "permute"
     )]
     max_disable: Option<usize>,
+    #[arg(short, long, help = "do not call get_gpu before invoking the tests")]
+    dont_cache_gpu: bool,
 }
 
 fn hash_slab(s: &NounSlab) -> (usize, u64) {
@@ -155,6 +157,7 @@ impl Test {
             error_out,
             permute,
             max_disable,
+            dont_cache_gpu,
         } = self;
 
         let max_disable = if permute { max_disable } else { Some(0) };
@@ -174,6 +177,11 @@ impl Test {
         let src_effect = load_jam(effect.unwrap())?;
         let src_effect_hash = hash_slab(&src_effect);
         println!("Loaded source effect {src_effect_hash:?}");
+
+        if !dont_cache_gpu && gpu::should_use_gpu() {
+            gpu::cache_gpu();
+            println!("Cached GPU");
+        }
 
         for i in (0..=permute_jets.len())
             .rev()

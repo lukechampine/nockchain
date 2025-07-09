@@ -17,8 +17,7 @@ use crate::form::math::poly::{p_ntt, *};
 use crate::form::mega::{brek, MegaTyp};
 use crate::form::poly::Poly;
 use crate::form::{
-    binv, bneg, bpow, BPolySlice, BPolyVec, Belt, Element, ElementEx, FPolySlice, FPolySliceMut,
-    FPolyVec, Felt, PolySlice, PolyVec,
+    binv, bneg, bpow, BPolySlice, BPolyVec, Belt, Element, ElementEx, FPolySlice, FPolySliceMut, FPolyVec, Felt, MPolyVec, PolySlice, PolyVec
 };
 use crate::hand::handle::{
     finalize_mary, finalize_poly, new_handle_mut_felt, new_handle_mut_mary, new_handle_mut_slice,
@@ -355,6 +354,8 @@ pub fn fp_ifft_sam(stack: &mut NockStack, sam: Noun) -> Result {
     Ok(res_cell)
 }
 
+//static mut CNT: usize = 0;
+
 // ::  +mp-substitute-ultra
 // ::
 // ::  Handles substitution for %mega and %comp mp-ultra cases. If the multi-poly is a
@@ -389,9 +390,34 @@ pub fn mp_substitute_ultra(stack: &mut NockStack, inp: Noun) -> Result {
         return jet_err();
     };
 
+    //let mut engine = SubstituteEngine::new(height);
+    //mp_substitute_ultra_impl::<Belt>(&mut engine, 0, p, trace_evals, &chal_map, dyns)?;
+    //let (ret, poly_size) = engine.reduce_cpu();
+
+    /*let mut engine = SubstituteEngine::new(height);
+    let tevals = PolyVec(trace_evals.0.to_vec());
+    let tevals: MPolyVec = tevals.into();
+    mp_substitute_ultra_impl::<Melt>(&mut engine, 0, p, (&tevals).into(), &chal_map, dyns)?;
+    let (ret, poly_size) = engine.clone().reduce_cpu();
+    let (r2, poly_size) = engine.reduce();
+    if ret != r2 {
+        println!("RET MISMATCH R2 {:?} {:?}", &ret[0][..10], &r2[0][..10]);
+        let cnt = unsafe {
+            let ret = CNT;
+            CNT += 1;
+            ret
+        };
+        let path = format!("./jams/mp_substitute_ultra_mm_{cnt}");
+        let _ = std::fs::create_dir_all(&path);
+        let path = path.leak();
+        return Err(JetErr::PuntJam(path));
+    }
+
+    let ret = ret.into_iter().map(|v| <PolyVec<Belt>>::from(PolyVec(v)).0).collect::<Vec<Vec<Belt>>>();*/
+
     let mut engine = SubstituteEngine::new(height);
     mp_substitute_ultra_impl::<Belt>(&mut engine, 0, p, trace_evals, &chal_map, dyns)?;
-    let (ret, poly_size) = engine.reduce();
+    let (ret, poly_size) = engine.reduce_cpu();
 
     let mut ret = ret
         .iter()
@@ -696,7 +722,7 @@ pub fn mp_substitute_mega(stack: &mut NockStack, inp: Noun) -> Result {
         &mut engine, 0, p, trace_evals, &chal_map, dyns, &com_map,
     )?;
 
-    let (mut acc, poly_len) = engine.reduce();
+    let (mut acc, poly_len) = engine.reduce_cpu();
     assert_eq!(acc.len(), 1);
     assert_eq!(acc[0].len(), poly_len);
     let acc = PolyVec(acc.pop().unwrap());
