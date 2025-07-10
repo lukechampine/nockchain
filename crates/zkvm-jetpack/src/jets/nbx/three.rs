@@ -363,7 +363,7 @@ pub fn tog_felts(context: &mut Context, subj: Noun) -> Result {
 pub fn hash_hashable(stack: &mut NockStack, h: Noun) -> Result {
     let mut engine = HashEngine::default();
     engine.push(0, h)?;
-    let r = engine.reduce()[0];
+    let r = engine.reduce_cpu()[0];
     let r = r.map(Belt::from).map(|v| Atom::new(stack, v.0).as_noun());
     Ok(T(stack, &r))
 }
@@ -441,6 +441,7 @@ pub fn build_merk_heap_impl<T: ElementEx>(
     //   =/  high-bit  (lsh [6 (mul size 5)] 1)
     // NOTE: high bit is handled by new_handle_mut_mary
 
+    // NOTE: this has been moved to the `engine.push_mary` down below.
     //   ::  make leaves
     //   =/  res=(list (list @))
     //     %+  turn
@@ -448,15 +449,6 @@ pub fn build_merk_heap_impl<T: ElementEx>(
     //     |=  i=@
     //     =/  t  (~(snag-as-bpoly ave m) i)
     //     (leaf-sequence:shape (hash-hashable:tip5 (hashable-bpoly:tip5 t)))
-    //let mut res_l = Vec::with_capacity(m.len as usize);
-    let mut engine = HashEngine::default();
-    for i in 0..m.len {
-        let t = snag_as_poly_mary::<T>(m, i as usize);
-        let hbp = hashable_poly(t);
-        engine.push_mary(0, hbp);
-    }
-    let res_l = engine.reduce();
-    assert_eq!(res_l.len(), m.len as usize);
 
     //   :+  5
     //     size
@@ -498,13 +490,16 @@ pub fn build_merk_heap_impl<T: ElementEx>(
             }
         }
     }
-    engine.push_hashes(height - 1, &res_l);
 
+    for i in 0..m.len {
+        let t = snag_as_poly_mary::<T>(m, i as usize);
+        let hbp = hashable_poly(t);
+        engine.push_mary(height - 1, hbp);
+    }
+
+    engine.set_out_stages(height);
     let mut res = engine
-        .reduce_with_intermediates()
-        .rev()
-        .flatten()
-        .collect::<Vec<_>>();
+        .reduce();
 
     assert_eq!(res.len(), size as usize);
 

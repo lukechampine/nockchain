@@ -19,7 +19,7 @@ impl FromBuffer for Vec<NounDigest> {
             .flatten()
             .copied()
             .collect::<Vec<_>>();
-        println!("Result: {result:?}");
+        trace!("Result: {result:?}");
         result
     }
 }
@@ -43,12 +43,13 @@ struct VariableRunArgs {
 impl Submittable for HashEngine {
     type Output = Vec<NounDigest>;
 
+    #[tracing::instrument(skip_all)]
     fn submit(self) -> Submission<Self::Output> {
         let t = Instant::now();
 
         let gpu = get_gpu();
 
-        let mut stages = self.destruct();
+        let (mut stages, out_stages) = self.destruct();
 
         let workgroup_size = 256;
         let max_workgroup_insts = 65535;
@@ -62,10 +63,13 @@ impl Submittable for HashEngine {
 
         // First, allocate buffers for all outputs
         let mut stage_buffers = vec![];
+        let mut download_size = 0;
+        let mut buffers_to_download = vec![];
+
         for (i, s) in stages.iter().enumerate() {
             let mut usage = wgpu::BufferUsages::STORAGE;
 
-            if i == 0 {
+            if i < out_stages {
                 usage |= wgpu::BufferUsages::COPY_SRC;
             }
 
@@ -80,7 +84,7 @@ impl Submittable for HashEngine {
                 },
             ) in s.chunks.iter().enumerate()
             {
-                println!(
+                trace!(
                     "generating stage {i}-{o}: output_len={}, fixed_len={}, variable_len={}",
                     out.len(),
                     ops_fixed.len(),
@@ -94,6 +98,11 @@ impl Submittable for HashEngine {
                         contents: bytemuck::cast_slice(&out),
                         usage,
                     });
+
+                if i < out_stages {
+                    buffers_to_download.push((output.clone(), download_size));
+                    download_size += output.size();
+                }
 
                 let fixed = gpu
                     .device
@@ -158,7 +167,7 @@ impl Submittable for HashEngine {
 
                     // Add fixed chunks
                     for (chunk_idx, c) in chunk.ops_fixed.chunks(chunk_size).enumerate() {
-                        println!("Adding fixed substage");
+                        trace!("Adding fixed substage");
                         let offs = WgOffsets {
                             ops: ((chunk_idx * chunk_size) + fixed_off as usize) as _,
                             num_ops: c.len() as _,
@@ -188,7 +197,7 @@ impl Submittable for HashEngine {
 
                     // Add variable chunks
                     for (chunk_idx, c) in chunk.ops_variable.chunks(chunk_size).enumerate() {
-                        println!("Adding variable substage");
+                        trace!("Adding variable substage");
                         let offs = WgOffsets {
                             ops: ((chunk_idx * chunk_size) + variable_off as usize) as _,
                             num_ops: c.len() as _,
@@ -232,10 +241,9 @@ impl Submittable for HashEngine {
         );
         let t2 = Instant::now();
 
-        let download_size = prev_sb.as_ref().unwrap()[0].0.size();
         let download = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
-            size: download_size, // core::mem::size_of::<NounDigest>() as _,
+            size: download_size,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
@@ -346,9 +354,9 @@ impl Submittable for HashEngine {
         );
         let t2 = Instant::now();
 
-        let output = prev_sb.unwrap()[0].0.clone();
-
-        encoder.copy_buffer_to_buffer(&output, 0, &download, 0, output.size());
+        for (buf, off) in buffers_to_download {
+            encoder.copy_buffer_to_buffer(&buf, 0, &download, off, buf.size());
+        }
 
         let command_buffer = encoder.finish();
 

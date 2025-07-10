@@ -5,12 +5,12 @@ use nockvm::noun::{Atom, Noun, D};
 use nockvm_macros::tas;
 use tracing::log::*;
 
-use super::three::{hash_10, hash_varlen};
+use super::gpu::{self, Submittable};
+use super::three::{hash_10, hash_varlen_padded};
 use crate::form::mary::MarySlice;
 use crate::form::math::tip5::DIGEST_LENGTH;
 use crate::form::{Belt, Element, Melt};
 use crate::hand::structs::HoonList;
-use crate::jets::nbx::three::hash_varlen_padded;
 use crate::jets::utils::jet_err;
 use crate::noun::noun_ext::NounExt;
 
@@ -424,12 +424,25 @@ fn pad_chunk(buf: &mut Vec<Melt>, len: usize) {
     buf.resize(buf.len() + padded_chunk(len) - len - 1, Melt::zero())
 }
 
-#[derive(Default)]
 pub struct HashEngine {
     stages: Vec<ReduceStage>,
+    out_stages: usize,
+}
+
+impl Default for HashEngine {
+    fn default() -> Self {
+        Self {
+            stages: vec![],
+            out_stages: 1,
+        }
+    }
 }
 
 impl HashEngine {
+    pub fn set_out_stages(&mut self, stages: usize) {
+        self.out_stages = stages;
+    }
+
     pub fn push_varlen(&mut self, stage: usize, m: impl Iterator<Item = Melt>) -> (usize, usize) {
         if self.stages.len() <= stage {
             assert_eq!(self.stages.len(), stage);
@@ -521,62 +534,62 @@ impl HashEngine {
         Ok((ret, total_len))
     }
 
-    pub fn destruct(self) -> Vec<ReduceStage> {
-        self.stages
+    pub fn destruct(self) -> (Vec<ReduceStage>, usize) {
+        (self.stages, self.out_stages)
     }
 
     #[tracing::instrument(skip_all)]
-    pub fn reduce(mut self) -> Vec<NounDigest> {
+    pub fn reduce_cpu(mut self) -> Vec<NounDigest> {
+        let mut out_len = 0;
+        let out_pos = self
+            .stages
+            .iter()
+            .take(self.out_stages)
+            .map(|v| {
+                let sum = v.chunks.iter().map(|v| v.out.len()).sum::<usize>();
+                assert!(sum % DIGEST_LENGTH == 0);
+                let r = out_len;
+                out_len += sum / DIGEST_LENGTH;
+                r
+            })
+            .collect::<Vec<_>>();
+        let mut out = vec![NounDigest::default(); out_len];
+        assert!(out_len <= MAX_CHUNK_SIZE);
+
         let mut cur = vec![];
         //let mut cnt = 0;
         while let Some(stage) = self.stages.pop() {
+            let cur_stage = self.stages.len();
             //println!("Layer {cnt}: {} {}", stage.ops.len(), stage.out.len());
             //cnt += 1;
             //let t = std::time::Instant::now();
             cur = stage.reduce(cur[..].iter().map(|v: &Vec<_>| v.as_ref()));
+
+            if cur_stage < self.out_stages {
+                let stage_len = cur.iter().map(|v| v.len() / DIGEST_LENGTH).sum::<usize>();
+                out[out_pos[cur_stage]..(out_pos[cur_stage] + stage_len)]
+                    .iter_mut()
+                    .zip(cur.iter().flat_map(|v| {
+                        v.chunks(DIGEST_LENGTH)
+                            .map(|v| NounDigest::try_from(v).unwrap())
+                    }))
+                    .for_each(|(a, b)| *a = b);
+            }
             //println!("{:.02}s", t.elapsed().as_secs_f64())
         }
-        let mut cur = cur.concat();
-
-        assert_eq!(cur.len() % DIGEST_LENGTH, 0);
-        let p = cur.as_mut_ptr();
-        let l = cur.len() / DIGEST_LENGTH;
-        let c = cur.capacity() / DIGEST_LENGTH;
-        core::mem::forget(cur);
-        unsafe { Vec::from_raw_parts(p as *mut NounDigest, l, c) }
+        out
     }
 
-    #[tracing::instrument(skip_all)]
-    pub fn reduce_with_intermediates(
-        mut self,
-    ) -> impl Iterator<Item = Vec<NounDigest>> + DoubleEndedIterator {
-        let mut ret: Vec<Vec<Vec<Melt>>> = vec![];
-        //let mut cnt = 0;
-        while let Some(stage) = self.stages.pop() {
-            //println!("Layer {cnt}: {} {}", stage.ops.len(), stage.out.len());
-            //cnt += 1;
-            //let t = std::time::Instant::now();
-            let cur = stage.reduce(
-                if !ret.is_empty() {
-                    &ret[ret.len() - 1]
-                } else {
-                    &[][..]
-                }
-                .iter()
-                .map(|v| v.as_ref()),
-            );
-            ret.push(cur);
-            //println!("{:.02}s", t.elapsed().as_secs_f64())
+    pub fn reduce(self) -> Vec<NounDigest> {
+        if self.stages.is_empty() {
+            return vec![];
         }
-        ret.into_iter().map(|cur| {
-            let mut cur = cur.concat();
-            assert_eq!(cur.len() % DIGEST_LENGTH, 0);
-            let p = cur.as_mut_ptr();
-            let l = cur.len() / DIGEST_LENGTH;
-            let c = cur.capacity() / DIGEST_LENGTH;
-            core::mem::forget(cur);
-            unsafe { Vec::from_raw_parts(p as *mut NounDigest, l, c) }
-        })
+
+        if gpu::should_use_gpu() {
+            Submittable::gpu_process(self)
+        } else {
+            self.reduce_cpu()
+        }
     }
 
     pub fn push_mary(&mut self, stage: usize, ma: MarySlice) -> usize {
@@ -596,7 +609,8 @@ impl HashEngine {
         let len = self.push_noun(stage + 2, D(ma.len as _)).unwrap();
 
         //   hash+(hash-belts-list (bpoly-to-list array:(~(change-step ave p.h) 1)))
-        let (hash_src, pushed_len) = self.push_varlen(stage + 3, ma.dat.iter().copied().map(Melt::from_u64));
+        let (hash_src, pushed_len) =
+            self.push_varlen(stage + 3, ma.dat.iter().copied().map(Melt::from_u64));
         let stage2 = self.stages.get_mut(stage + 2).unwrap();
         let hash = stage2.push_variable(hash_src, pushed_len);
 
