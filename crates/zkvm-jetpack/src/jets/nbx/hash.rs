@@ -1,4 +1,5 @@
 use either::Either;
+use nbx_tip5::tip5::RATE;
 use nockvm::jets::JetErr;
 use nockvm::noun::{Atom, Noun, D};
 use nockvm_macros::tas;
@@ -9,6 +10,7 @@ use crate::form::mary::MarySlice;
 use crate::form::math::tip5::DIGEST_LENGTH;
 use crate::form::{Belt, Element, Melt};
 use crate::hand::structs::HoonList;
+use crate::jets::nbx::three::hash_varlen_padded;
 use crate::jets::utils::jet_err;
 use crate::noun::noun_ext::NounExt;
 
@@ -103,7 +105,7 @@ impl VariableReduceOp {
     ) {
         let Self { inner, len } = self;
 
-        let dig = hash_varlen(
+        let dig = hash_varlen_padded(
             &input
                 [(inner.source as usize - inp_start)..((inner.source + len) as usize - inp_start)],
         );
@@ -413,20 +415,34 @@ impl ReduceStage {
     }
 }
 
+fn padded_chunk(len: usize) -> usize {
+    (len + RATE) / RATE * RATE
+}
+
+fn pad_chunk(buf: &mut Vec<Melt>, len: usize) {
+    buf.push(Melt::one());
+    buf.resize(buf.len() + padded_chunk(len) - len - 1, Melt::zero())
+}
+
 #[derive(Default)]
 pub struct HashEngine {
     stages: Vec<ReduceStage>,
 }
 
 impl HashEngine {
-    pub fn push_varlen(&mut self, stage: usize, m: impl Iterator<Item = Melt>) -> usize {
+    pub fn push_varlen(&mut self, stage: usize, m: impl Iterator<Item = Melt>) -> (usize, usize) {
         if self.stages.len() <= stage {
             assert_eq!(self.stages.len(), stage);
             self.stages.push(ReduceStage::default());
         }
 
         let stage = self.stages.get_mut(stage).unwrap();
-        stage.push_const(&m.collect::<Vec<_>>())
+        let mut buf = m.collect::<Vec<_>>();
+
+        let buf_len = buf.len();
+        pad_chunk(&mut buf, buf_len);
+
+        (stage.push_const(&buf), buf.len())
     }
 
     pub fn push_noun(&mut self, stage: usize, n: Noun) -> core::result::Result<usize, JetErr> {
@@ -456,9 +472,9 @@ impl HashEngine {
             .chain(dyck)
             .map(Melt::from);
 
-        let source = self.push_varlen(stage + 1, melts);
+        let (source, pushed_len) = self.push_varlen(stage + 1, melts);
         let stage = self.stages.get_mut(stage).unwrap();
-        let ret = stage.push_variable(source, len);
+        let ret = stage.push_variable(source, pushed_len);
 
         Ok(ret)
     }
@@ -475,7 +491,8 @@ impl HashEngine {
 
         let l = l.collect::<Vec<_>>();
         let len = l.len();
-        let total_len = 2 + (DIGEST_LENGTH + 10) * l.len();
+        let orig_total_len = 2 + (DIGEST_LENGTH + 10) * l.len();
+        let total_len = padded_chunk(orig_total_len);
 
         let stage0 = self.stages.get_mut(stage).unwrap();
         let chunk = stage0.reserve_in_chunk(total_len);
@@ -496,6 +513,8 @@ impl HashEngine {
         chunk.out.push(Melt::zero());
         let shape = [0, 0, 1, 0, 1, 0, 1, 0, 1, 1].map(Melt::from_u64);
         chunk.out.extend(core::iter::repeat_n(shape, len).flatten());
+
+        pad_chunk(&mut chunk.out, orig_total_len);
 
         assert_eq!(chunk.out.len() - total_len, ret - chunk.out_start);
 
@@ -577,9 +596,9 @@ impl HashEngine {
         let len = self.push_noun(stage + 2, D(ma.len as _)).unwrap();
 
         //   hash+(hash-belts-list (bpoly-to-list array:(~(change-step ave p.h) 1)))
-        let hash_src = self.push_varlen(stage + 3, ma.dat.iter().copied().map(Melt::from_u64));
+        let (hash_src, pushed_len) = self.push_varlen(stage + 3, ma.dat.iter().copied().map(Melt::from_u64));
         let stage2 = self.stages.get_mut(stage + 2).unwrap();
-        let hash = stage2.push_variable(hash_src, ma.dat.len());
+        let hash = stage2.push_variable(hash_src, pushed_len);
 
         let stage1 = self.stages.get_mut(stage + 1).unwrap();
         let arr = stage1.push_fixed(len, hash);

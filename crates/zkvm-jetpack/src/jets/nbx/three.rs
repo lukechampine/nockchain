@@ -197,6 +197,23 @@ pub fn hash_varlen_sam(stack: &mut NockStack, sam: Noun) -> Result {
     Ok(T(stack, &output))
 }
 
+pub fn hash_varlen_padded<T: Into<Melt> + Copy>(input: &[T]) -> NounDigest {
+    // |=  input=(list belt)
+    // ^-  (list belt)
+    // =/  spo  (new:sponge)
+    let mut spo = new_sponge(true);
+
+    // =.  spo  (absorb:spo input)
+    absorb_sponge::<false, T>(&mut spo, input);
+
+    // =^  output  spo
+    //   (squeeze:spo)
+    let output = squeeze_sponge(spo);
+
+    // (scag digest-length output)
+    output[..DIGEST_LENGTH].try_into().unwrap()
+}
+
 pub fn hash_varlen<T: Into<Melt> + Copy>(input: &[T]) -> NounDigest {
     hash_any::<true, T>(input)
 }

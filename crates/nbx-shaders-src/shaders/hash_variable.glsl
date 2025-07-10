@@ -44,13 +44,15 @@ void main() {
     // - copy each input element (with length of tip5Rate) to tmp sponge (always beginning)
     // - run permute(sponge) for each input chunk
 
-    for (uint i = 0; i < tip5Rate; i += 1) {
-        spongeSet(tmp, i, inpBuf[op.inner.source + i - inpOffset]);
-    }
-
     tip5SpongePrint(tmp);
+
     // absorb_sponge::<true, T>(&mut spo, input);
-    tip5Permute(tmp);
+    for (uint j = 0; j < op.len; j += tip5Rate) {
+        for (uint i = 0; i < tip5Rate; i += 1) {
+            spongeSet(tmp, i, inpBuf[op.inner.source + j + i - inpOffset]);
+        }
+        tip5Permute(tmp);
+    }
     tip5SpongePrint(tmp);
 
     // let output = squeeze_sponge(spo);
