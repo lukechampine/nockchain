@@ -10,6 +10,11 @@ struct ReduceOp {
     uint destination;
 };
 
+struct VariableReduceOp {
+    ReduceOp inner;
+    uint len;
+};
+
 bool lessThan(uint64_t a, uint64_t b) {
     return a < b;
 }

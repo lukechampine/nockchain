@@ -1,6 +1,6 @@
 layout(local_size_x = 256) in;
 layout(std430, binding = 0) readonly buffer OpsBuf {
-    ReduceOp ops[];
+    VariableReduceOp ops[];
 };
 layout(std140, binding = 1) uniform Globals {
     uint opsOffset;
@@ -33,7 +33,7 @@ void main() {
     }
 
     // Do the multiply by two and write to the output.
-    ReduceOp op = ops[idx];
+    VariableReduceOp op = ops[idx];
 
     // let mut spo = new_sponge(true);
     Sponge tmp = variableSponge;
@@ -45,7 +45,7 @@ void main() {
     // - run permute(sponge) for each input chunk
 
     for (uint i = 0; i < tip5Rate; i += 1) {
-        spongeSet(tmp, i, inpBuf[op.source + i - inpOffset]);
+        spongeSet(tmp, i, inpBuf[op.inner.source + i - inpOffset]);
     }
 
     tip5SpongePrint(tmp);
@@ -56,6 +56,6 @@ void main() {
     // let output = squeeze_sponge(spo);
     // output[..DIGEST_LENGTH].try_into().unwrap()
     for (uint i = 0; i < 5; i += 1) {
-        outBuf[op.destination + i - outOffset] = spongeGet(tmp, i);
+        outBuf[op.inner.destination + i - outOffset] = spongeGet(tmp, i);
     }
 }
