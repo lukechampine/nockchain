@@ -1,12 +1,12 @@
 use core::num::NonZeroU64;
 use std::marker::PhantomData;
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use nbx_shaders::get_shader_module;
 use nockapp::Noun;
 use tracing::*;
-use wgpu::{Buffer, Device, SubmissionIndex};
+use wgpu::{Buffer, Device, PollType, SubmissionIndex};
 
 use self::substitute::{AccumUniform, MulUniform, SubstituteIterOps};
 use super::substitute::SubstituteEngine;
@@ -212,6 +212,20 @@ static GPU: OnceLock<Gpu> = OnceLock::new();
 
 fn get_gpu() -> &'static Gpu {
     GPU.get_or_init(|| Gpu::new().unwrap())
+}
+
+// If we have a GPU in low power mode, we want to keep it up, hence we do this poll to trigger
+// initialization on the PMU.
+pub fn gpu_pmu_trigger() {
+    let gpu = get_gpu();
+    let _ = gpu.device.poll(PollType::Poll);
+}
+
+pub async fn gpu_pmu_trigger_loop() {
+    loop {
+        gpu_pmu_trigger();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
 }
 
 #[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]

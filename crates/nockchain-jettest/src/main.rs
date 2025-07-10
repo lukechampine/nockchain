@@ -180,6 +180,7 @@ impl Test {
 
         if !dont_cache_gpu && gpu::should_use_gpu() {
             gpu::cache_gpu();
+            tokio::spawn(gpu::gpu_pmu_trigger_loop());
             println!("Cached GPU");
         }
 
