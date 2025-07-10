@@ -1,6 +1,6 @@
 layout(local_size_x = 256) in;
 
-#define U64 uint64_t
+#define U64 u64vec2
 
 layout(std140, binding = 0) uniform Globals {
     uint inpOffsetA;

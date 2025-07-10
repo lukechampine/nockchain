@@ -1,8 +1,8 @@
-#define U64 uint64_t
-#define U64SZ 1
+#define U64 u64vec2
+#define U64SZ 2
 
 struct SubstituteOps {
-    U64 scal;
+    uint64_t scal;
     uint vars;
     uint numVarsAndIterId;
 };
@@ -69,7 +69,7 @@ void main() {
         }* /
     }*/
 
-    U64 ret = ops.scal;
+    U64 ret = U64(ops.scal);
 
     for (uint i = 0; i < numVars; i += 1) {
         SubstituteOp op = subs[ops.vars + i];

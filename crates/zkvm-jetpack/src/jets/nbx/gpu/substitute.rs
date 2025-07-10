@@ -63,7 +63,7 @@ impl<'a> Submittable for SubstituteEngine<'a, Melt> {
 
         let workgroup_size = 256;
         let max_workgroup_insts = 65535;
-        let shader_stride = 1;
+        let shader_stride = 2;
         let poly_strides = poly_len / shader_stride;
 
         let chunks_per_buf = MAX_CHUNK_SIZE / poly_len;
