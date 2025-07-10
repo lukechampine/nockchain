@@ -36,7 +36,7 @@ layout(std430, binding = 3) readonly buffer SubsBuf {
 // Input to the shader. The length of the array is determined by what buffer is bound.
 //
 // Out of bounds accesses
-layout(std430, binding = 4) readonly buffer InputBuf {
+layout(std430, binding = 4) buffer InputBuf {
     U64 inpBuf[];
 };
 

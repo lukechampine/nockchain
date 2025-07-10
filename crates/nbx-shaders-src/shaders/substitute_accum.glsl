@@ -18,7 +18,7 @@ layout(std430, binding = 1) buffer OutputBuf {
 // Input to the shader. The length of the array is determined by what buffer is bound.
 //
 // Out of bounds accesses
-layout(std430, binding = 2) readonly buffer InputBuf {
+layout(std430, binding = 2) buffer InputBuf {
     U64 inpBuf[];
 };
 

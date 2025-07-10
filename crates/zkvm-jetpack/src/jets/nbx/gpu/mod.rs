@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use either::Either;
 use nbx_shaders::get_shader_module;
 use nockapp::Noun;
 use tracing::*;
@@ -71,24 +72,29 @@ impl Gpu {
             (
                 Some(size_of::<ReduceOp>()),
                 "hash_fixed",
-                1,
+                Either::Left(1),
                 Some(size_of::<WgOffsets>()),
             ),
             (
                 Some(size_of::<VariableReduceOp>()),
                 "hash_variable",
-                1,
+                Either::Left(1),
                 Some(size_of::<WgOffsets>()),
             ),
             (
                 Some(size_of::<SubstituteIterOps>()),
                 "substitute_mul",
-                2,
+                Either::Right(&[true, false][..]),
                 Some(size_of::<MulUniform>()),
             ),
-            (None, "substitute_accum", 1, Some(size_of::<AccumUniform>())),
+            (
+                None,
+                "substitute_accum",
+                Either::Right(&[false]),
+                Some(size_of::<AccumUniform>()),
+            ),
         ]
-        .map(|(ops_sz, source_label, num_inputs, uniform_sz)| {
+        .map(|(ops_sz, source_label, inputs, uniform_sz)| {
             debug!("Shader module");
             let module = get_shader_module(&device, source_label);
 
@@ -135,24 +141,25 @@ impl Gpu {
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        // This is the size of a single element in the buffer.
-                        min_binding_size: Some(NonZeroU64::new(8).unwrap()),
+                        min_binding_size: None,
                         has_dynamic_offset: false,
                     },
                     count: None,
                 },
             );
 
-            for _ in 0..num_inputs {
+            for read_only in inputs
+                .map_left(|sz| (0..sz).map(|_| true))
+                .map_right(|v| v.iter().copied())
+            {
                 entries.push(
                     // Input buffer
                     wgpu::BindGroupLayoutEntry {
                         binding: entries.len() as _,
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            // This is the size of a single element in the buffer.
-                            min_binding_size: Some(NonZeroU64::new(8).unwrap()),
+                            ty: wgpu::BufferBindingType::Storage { read_only },
+                            min_binding_size: None,
                             has_dynamic_offset: false,
                         },
                         count: None,
