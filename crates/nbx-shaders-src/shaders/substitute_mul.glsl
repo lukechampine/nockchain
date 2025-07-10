@@ -1,5 +1,8 @@
+#define U64 uint64_t
+#define U64SZ 1
+
 struct SubstituteOps {
-    uint64_t scal;
+    U64 scal;
     uint vars;
     uint numVarsAndIterId;
 };
@@ -24,7 +27,7 @@ layout(std140, binding = 1) uniform Globals {
 };
 // Output of the shader.
 layout(std430, binding = 2) buffer OutputBuf {
-    uint64_t outBuf[];
+    U64 outBuf[];
 };
 // Actual substitutions to be performed. Fixed
 layout(std430, binding = 3) readonly buffer SubsBuf {
@@ -34,14 +37,14 @@ layout(std430, binding = 3) readonly buffer SubsBuf {
 //
 // Out of bounds accesses
 layout(std430, binding = 4) readonly buffer InputBuf {
-    uint64_t inpBuf[];
+    U64 inpBuf[];
 };
 
 // Ideal workgroup size depends on the hardware, the workload, and other factors. However, it should
 // _generally_ be a multiple of 64. Common sizes are 64x1x1, 256x1x1; or 8x8x1, 16x16x1 for 2D workloads.
 void main() {
     // While compute invocations are 3d, we're only using one dimension.
-    uint idx = opsOffset + gl_WorkGroupID.x * gl_WorkGroupSize.x / polyLen;
+    uint idx = opsOffset + gl_WorkGroupID.x * U64SZ * gl_WorkGroupSize.x / polyLen;
 
     // Because we're using a workgroup size of 64, if the input size isn't a multiple of 64,
     // we will have some "extra" invocations. This is fine, but we should tell them to stop
@@ -51,7 +54,7 @@ void main() {
         return;
     }
 
-    uint bufOffset = gl_GlobalInvocationID.x % polyLen;
+    uint bufOffset = gl_GlobalInvocationID.x % (polyLen / U64SZ);
 
     SubstituteOps ops = allOps[idx];
 
@@ -66,7 +69,7 @@ void main() {
         }* /
     }*/
 
-    uint64_t ret = ops.scal;
+    U64 ret = ops.scal;
 
     for (uint i = 0; i < numVars; i += 1) {
         SubstituteOp op = subs[ops.vars + i];
@@ -74,16 +77,16 @@ void main() {
         /*if (bufOffset == 0 && idx > pt) {
             debugPrintfEXT("%u: %u (%u) %u", i, op.chunk, chunk, op.e);
         }*/
-        uint64_t v = inpBuf[inpOffset + chunk * polyLen + bufOffset];
+        U64 v = inpBuf[inpOffset + chunk * (polyLen / U64SZ) + bufOffset];
         for (uint j = 0; j < op.e; j += 1) {
             ret = montiply(ret, v);
         }
     }
 
-    uint64_t mask = uint64_t(accumMask) | (uint64_t(accumMask) << 32);
-    uint obOffset = outOffset + iterId * polyLen + bufOffset;
-    uint64_t accum = (outBuf[obOffset] & mask) | (oneMelt & ~mask);
-    uint64_t accumed = montiply(accum, ret);
+    U64 mask = U64(accumMask) | (U64(accumMask) << 32);
+    uint obOffset = outOffset + iterId * (polyLen / U64SZ) + bufOffset;
+    U64 accum = (outBuf[obOffset] & mask) | (oneMelt & ~mask);
+    U64 accumed = montiply(accum, ret);
     /*if (obOffset == 0 || obOffset == 4194304) {
         debugPrintfEXT("2. %u %x%x %x%x | %x%x | %x%x", obOffset, uint(mask >> 32), uint(mask), uint(accum >> 32), uint(accum), uint(ret >> 32), uint(ret), uint(accumed >> 32), uint(accumed));
     }*/
