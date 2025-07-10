@@ -30,6 +30,7 @@ use super::utils::*;
 // ++  r2  0xffff.fffe.0000.0001
 // ++  rp  0xffff.ffff.0000.0001.0000.0000.0000.0000
 // ++  g  7
+pub const G: Belt = Belt(7);
 // ++  h  20.033.703.337
 
 // ++  range

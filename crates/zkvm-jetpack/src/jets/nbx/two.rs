@@ -1,35 +1,31 @@
 use std::collections::BTreeMap;
 use std::iter::{repeat, repeat_n};
-use std::sync::Arc;
 
-use crate::form::bpoly::{bp_coseword, bpadd_in_place, bpscal_inplace};
-use crate::form::fext::{fadd_, fdiv_, finv_, fmul_, fneg_};
-use crate::form::mary::MarySlice;
-use crate::form::math::poly::p_ntt;
-use crate::form::math::poly::*;
-use crate::form::mega::{brek, MegaTyp};
-use crate::form::{
-    binv, bneg, bpow, BPolyVec, Element, ElementEx, FPolySlice, FPolySliceMut, FPolyVec, Felt,
-    Melt, PolySlice, PolyVec,
-};
-use crate::form::{poly::Poly, BPolySlice, Belt};
-use crate::hand::handle::{
-    finalize_mary, finalize_poly, new_handle_mut_felt, new_handle_mut_mary, new_handle_mut_slice,
-};
-use crate::hand::structs::{HoonList, HoonMap, HoonMapIter};
-use crate::noun::noun_ext::NounExt;
 use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::noun::*;
 use nockvm_macros::tas;
 use rayon::prelude::*;
-
 use tracing::log::*;
-
-use crate::jets::utils::jet_err;
 
 use super::one::{p_decompose_impl, peval_impl};
 use super::utils::*;
+use crate::form::bpoly::{bp_coseword, bpscal_inplace};
+use crate::form::fext::{fadd_, fdiv_, finv_, fmul_, fneg_};
+use crate::form::mary::{MarySlice, MarySliceMut};
+use crate::form::math::poly::{p_ntt, *};
+use crate::form::mega::{brek, MegaTyp};
+use crate::form::poly::Poly;
+use crate::form::{
+    binv, bneg, bpow, BPolySlice, BPolyVec, Belt, Element, ElementEx, FPolySlice, FPolySliceMut,
+    FPolyVec, Felt, PolySlice, PolyVec,
+};
+use crate::hand::handle::{
+    finalize_mary, finalize_poly, new_handle_mut_felt, new_handle_mut_mary, new_handle_mut_slice,
+};
+use crate::hand::structs::{HoonList, HoonMap, HoonMapIter};
+use crate::jets::utils::jet_err;
+use crate::noun::noun_ext::NounExt;
 
 pub fn new_fpoly<'a>(d: &[Felt]) -> FPolyVec {
     copy_slice(PolySlice(d))
@@ -384,14 +380,7 @@ pub fn mp_substitute_ultra(stack: &mut NockStack, inp: Noun) -> Result {
 
     let mut engine = SubstituteEngine::default();
     mp_substitute_ultra_impl::<Belt>(
-        stack,
-        &mut engine,
-        0,
-        p,
-        trace_evals,
-        height,
-        &chal_map,
-        dyns,
+        stack, &mut engine, 0, p, trace_evals, height, &chal_map, dyns,
     )?;
     let ret = engine.reduce();
 
@@ -526,15 +515,7 @@ pub fn mp_substitute_ultra_impl<'a, E: ElementEx>(
                 // |=  mp=mp-mega
                 // (mp-substitute-mega mp trace-evals height chal-map dyns com-map)
                 mp_substitute_mega_impl::<E, E>(
-                    stack,
-                    engine,
-                    stage,
-                    mp,
-                    trace_evals,
-                    height,
-                    chal_map,
-                    dyns,
-                    &com_map,
+                    stack, engine, stage, mp, trace_evals, height, chal_map, dyns, &com_map,
                 )?;
                 ret += 1;
             }
@@ -1194,13 +1175,26 @@ pub fn turn_coseword(stack: &mut NockStack, sam: Noun) -> Result {
     let order = order.as_direct()?.data() as u32;
     let root = Belt(order as _).ordered_root()?;
 
-    // ^-  mary
-    // %-  zing-bpolys
-
     // NOTE: bp-coseword returns a bpoly of length `order`
     let (ret_ma, h_ma) = new_handle_mut_mary(stack, order as _, polys.len as _);
 
-    h_ma.dat
+    turn_coseword_impl(polys, offset, order, root, h_ma);
+
+    // ^-  mary
+    // %-  zing-bpolys
+    Ok(finalize_mary(stack, order as _, polys.len as _, ret_ma))
+}
+
+pub fn turn_coseword_impl(
+    polys: MarySlice,
+    offset: Belt,
+    order: u32,
+    root: Belt,
+    out: MarySliceMut,
+) {
+    assert_eq!(out.step, order);
+    assert_eq!(out.len, polys.len);
+    out.dat
         .chunks_mut(order as _)
         .zip(polys.dat.chunks_exact(polys.step as _))
         // %+  turn  (range len.array.polys)
@@ -1219,8 +1213,6 @@ pub fn turn_coseword(stack: &mut NockStack, sam: Noun) -> Result {
             // (bp-coseword bp offset order)
             a.copy_from_slice(&bp_coseword(bp, &offset, order, &root));
         });
-
-    Ok(finalize_mary(stack, order as _, polys.len as _, ret_ma))
 }
 
 pub fn fp_decompose(stack: &mut NockStack, sam: Noun) -> Result {

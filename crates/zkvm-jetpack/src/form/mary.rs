@@ -42,6 +42,23 @@ impl Mary {
     }
 }
 
+impl MarySliceMut<'_> {
+    pub fn as_slice(&self) -> MarySlice {
+        MarySlice {
+            step: self.step,
+            len: self.len,
+            dat: self.dat,
+        }
+    }
+    pub fn as_mut_slice(&mut self) -> MarySliceMut {
+        MarySliceMut {
+            step: self.step,
+            len: self.len,
+            dat: self.dat,
+        }
+    }
+}
+
 impl TryFrom<MarySlice<'_>> for &[Felt] {
     type Error = ();
 

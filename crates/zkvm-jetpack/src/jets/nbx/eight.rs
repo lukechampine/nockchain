@@ -1,27 +1,27 @@
 use std::collections::BTreeMap;
 
-use crate::form::fext::{fmul_, fpow_};
-use crate::form::mary::MarySlice;
-use crate::form::math::poly::*;
-use crate::form::{
-    binv, bneg, BPolyVec, Element, ElementEx, FPolySlice, FPolyVec, Felt, Melt, PolySlice, PolyVec,
-};
-use crate::form::{poly::Poly, BPolySlice, Belt};
-use crate::hand::handle::{finalize_poly, new_handle_mut_slice};
-use crate::hand::structs::{HoonList, HoonMap, HoonMapIter};
-use crate::jets::utils::det_err;
-use crate::noun::noun_ext::NounExt;
 use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::noun::{IndirectAtom, Noun, D};
-
 use tracing::log::*;
-
-use crate::jets::utils::jet_err;
 
 use super::one::*;
 use super::two::*;
 use super::utils::*;
+use crate::form::fext::{fmul_, fpow_};
+use crate::form::mary::{MarySlice, MarySliceMut};
+use crate::form::math::poly::*;
+use crate::form::poly::Poly;
+use crate::form::{
+    binv, bneg, BPolySlice, BPolyVec, Belt, Element, ElementEx, FPolySlice, FPolyVec, Felt, Melt,
+    PolySlice, PolyVec,
+};
+use crate::hand::handle::{
+    finalize_mary, finalize_poly, new_handle_mut_mary, new_handle_mut_slice,
+};
+use crate::hand::structs::{HoonList, HoonMap, HoonMapIter};
+use crate::jets::utils::{det_err, jet_err};
+use crate::noun::noun_ext::NounExt;
 
 pub fn weighted_linear_combo<'a>(
     stack: &mut NockStack,
@@ -486,13 +486,8 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
         let transition_zerofier = pdiv(row_zerofier.0, last_row.0);
         let transition_zerofier = PolySlice(&transition_zerofier);
 
-        let dividends = [
-            boundary_zerofier,
-            row_zerofier,
-            transition_zerofier,
-            last_row,
-            row_zerofier,
-        ];
+        let dividends =
+            [boundary_zerofier, row_zerofier, transition_zerofier, last_row, row_zerofier];
 
         let mut chals = chals2.0;
         for (o, ((constraints, count), dividend)) in
@@ -809,4 +804,70 @@ pub fn precompute_ntts(stack: &mut NockStack, inp: Noun) -> Result {
     res_slice.copy_from_slice(&acc.0);
 
     Ok(finalize_poly(stack, Some(acc.len()), res_atom))
+}
+
+pub fn compute_lde_sam(stack: &mut NockStack, sam: Noun) -> Result {
+    // ~/  %compute-lde
+    // |=  $:  table-polys=(list mary)
+    //         fri-domain-len=@
+    //         num-cols=@
+    //     ==
+    let [table_polys, fri_domain_len, num_cols] = sam.uncell()?;
+    let mut table_polys_vec = vec![];
+    for poly in HoonList::try_from(table_polys).ok().into_iter().flatten() {
+        let Ok(poly) = MarySlice::try_from(poly) else {
+            return jet_err();
+        };
+        table_polys_vec.push(poly);
+    }
+    let fri_domain_len = fri_domain_len.as_atom()?.as_u64()?;
+    let num_cols = num_cols.as_atom()?.as_u64()?;
+    let (h, mut ma) = new_handle_mut_mary(stack, fri_domain_len as _, num_cols as _);
+    compute_lde(
+        &table_polys_vec,
+        fri_domain_len as _,
+        num_cols,
+        ma.as_mut_slice(),
+    );
+    // ^-  mary
+    Ok(finalize_mary(stack, ma.step as _, ma.len as _, h))
+}
+
+pub fn compute_lde(
+    table_polys: &[MarySlice],
+    fri_domain_len: u32,
+    num_cols: u64,
+    out: MarySliceMut,
+) {
+    assert_eq!(out.step, fri_domain_len as u32);
+    assert_eq!(out.len, num_cols as u32);
+    // =/  fps=(list mary)
+    //   %+  turn  table-polys
+    //   |=  t=mary
+    //   (turn-coseword t g fri-domain-len)
+    // =/  res=mary
+    //   :+  step=fri-domain-len
+    //     len=num-cols
+    //   dat=(lsh [6 (mul fri-domain-len num-cols)] 1)
+    // =;  [@ ret=mary]
+    //   ret
+    // %+  roll
+    //   fps
+    // |=  [curr=mary [idx=@ res=_res]]
+    // ?>  =(step.curr fri-domain-len)
+    // =/  chunk  (mul step.curr len.array.curr)
+    // :-  (add idx chunk)
+    // res(dat.array (sew 6 [idx chunk dat.array.curr] dat.array.res))
+    let fri_domain_root = Belt(fri_domain_len as _).ordered_root().unwrap();
+    let mut out = out.dat;
+    for ma in table_polys {
+        let (cout, nout) = out.split_at_mut(fri_domain_len as usize * ma.len as usize);
+        let ma_out = MarySliceMut {
+            step: fri_domain_len as _,
+            len: ma.len,
+            dat: cout,
+        };
+        out = nout;
+        turn_coseword_impl(*ma, G, fri_domain_len, fri_domain_root, ma_out);
+    }
 }
