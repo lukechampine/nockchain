@@ -24,11 +24,6 @@ impl FromBuffer for Vec<NounDigest> {
     }
 }
 
-enum RunArgs {
-    Fixed(FixedRunArgs),
-    Variable(VariableRunArgs),
-}
-
 struct FixedRunArgs {
     input: Buffer,
     output: Buffer,
@@ -132,7 +127,8 @@ impl Submittable for HashEngine {
         while let Some(mut stage) = stages.pop() {
             let sb = stage_buffers.pop().unwrap();
 
-            let mut run_args = vec![];
+            let mut fixed_run_args = vec![];
+            let mut variable_run_args = vec![];
 
             let chunks = stage
                 .chunks
@@ -162,7 +158,7 @@ impl Submittable for HashEngine {
 
                     // Add fixed chunks
                     for (chunk_idx, c) in chunk.ops_fixed.chunks(chunk_size).enumerate() {
-                        println!("Adding fixed stage");
+                        println!("Adding fixed substage");
                         let offs = WgOffsets {
                             ops: ((chunk_idx * chunk_size) + fixed_off as usize) as _,
                             num_ops: c.len() as _,
@@ -181,18 +177,18 @@ impl Submittable for HashEngine {
                                     usage: wgpu::BufferUsages::UNIFORM,
                                 });
 
-                        run_args.push(RunArgs::Fixed(FixedRunArgs {
+                        fixed_run_args.push(FixedRunArgs {
                             input: psb[inp_idx].0.clone(),
                             output: output.clone(),
                             fixed: fixed.clone(),
                             ops_len: c.len(),
                             uniform,
-                        }));
+                        });
                     }
 
                     // Add variable chunks
                     for (chunk_idx, c) in chunk.ops_variable.chunks(chunk_size).enumerate() {
-                        println!("Adding variable stage");
+                        println!("Adding variable substage");
                         let offs = WgOffsets {
                             ops: ((chunk_idx * chunk_size) + variable_off as usize) as _,
                             num_ops: c.len() as _,
@@ -211,20 +207,20 @@ impl Submittable for HashEngine {
                                     usage: wgpu::BufferUsages::UNIFORM,
                                 });
 
-                        run_args.push(RunArgs::Variable(VariableRunArgs {
+                        variable_run_args.push(VariableRunArgs {
                             input: psb[inp_idx].0.clone(),
                             output: output.clone(),
                             variable: variable.clone(),
                             ops_len: c.len(),
                             uniform,
-                        }));
+                        });
                     }
                 } else {
                     unreachable!();
                 }
             }
 
-            processed_stages.push(run_args);
+            processed_stages.push((fixed_run_args, variable_run_args));
             prev_sb = Some(sb);
             cur_inputs = stage.chunks.into_iter().map(|v| v.out).collect::<Vec<_>>();
         }
@@ -274,76 +270,71 @@ impl Submittable for HashEngine {
                 timestamp_writes: None,
             });
 
-            for stage in processed_stages {
-                for run in stage {
-                    match run {
-                        RunArgs::Fixed(runargs) => {
-                            compute_pass.set_pipeline(&gpu.hash_fixed.pipeline);
+            for (fixed_runs, variable_runs) in processed_stages {
+                compute_pass.set_pipeline(&gpu.hash_fixed.pipeline);
+                for runargs in fixed_runs {
+                    let bind_group =
+                        gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: None,
+                            layout: &gpu.hash_fixed.bind_group_layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: runargs.fixed.as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: runargs.uniform.as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 2,
+                                    resource: runargs.output.as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 3,
+                                    resource: runargs.input.as_entire_binding(),
+                                },
+                            ],
+                        });
 
-                            let bind_group =
-                                gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                                    label: None,
-                                    layout: &gpu.hash_fixed.bind_group_layout,
-                                    entries: &[
-                                        wgpu::BindGroupEntry {
-                                            binding: 0,
-                                            resource: runargs.fixed.as_entire_binding(),
-                                        },
-                                        wgpu::BindGroupEntry {
-                                            binding: 1,
-                                            resource: runargs.uniform.as_entire_binding(),
-                                        },
-                                        wgpu::BindGroupEntry {
-                                            binding: 2,
-                                            resource: runargs.output.as_entire_binding(),
-                                        },
-                                        wgpu::BindGroupEntry {
-                                            binding: 3,
-                                            resource: runargs.input.as_entire_binding(),
-                                        },
-                                    ],
-                                });
+                    // Set the bind group that we want to use
+                    compute_pass.set_bind_group(0, &bind_group, &[]);
 
-                            // Set the bind group that we want to use
-                            compute_pass.set_bind_group(0, &bind_group, &[]);
+                    let workgroup_count = runargs.ops_len.div_ceil(workgroup_size as _);
+                    compute_pass.dispatch_workgroups(workgroup_count as u32, 1, 1);
+                }
 
-                            let workgroup_count = runargs.ops_len.div_ceil(workgroup_size as _);
-                            compute_pass.dispatch_workgroups(workgroup_count as u32, 1, 1);
-                        }
-                        RunArgs::Variable(runargs) => {
-                            compute_pass.set_pipeline(&gpu.hash_variable.pipeline);
+                compute_pass.set_pipeline(&gpu.hash_variable.pipeline);
+                for runargs in variable_runs {
+                    let bind_group =
+                        gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: None,
+                            layout: &gpu.hash_variable.bind_group_layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: runargs.variable.as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: runargs.uniform.as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 2,
+                                    resource: runargs.output.as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 3,
+                                    resource: runargs.input.as_entire_binding(),
+                                },
+                            ],
+                        });
 
-                            let bind_group =
-                                gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                                    label: None,
-                                    layout: &gpu.hash_variable.bind_group_layout,
-                                    entries: &[
-                                        wgpu::BindGroupEntry {
-                                            binding: 0,
-                                            resource: runargs.variable.as_entire_binding(),
-                                        },
-                                        wgpu::BindGroupEntry {
-                                            binding: 1,
-                                            resource: runargs.uniform.as_entire_binding(),
-                                        },
-                                        wgpu::BindGroupEntry {
-                                            binding: 2,
-                                            resource: runargs.output.as_entire_binding(),
-                                        },
-                                        wgpu::BindGroupEntry {
-                                            binding: 3,
-                                            resource: runargs.input.as_entire_binding(),
-                                        },
-                                    ],
-                                });
+                    // Set the bind group that we want to use
+                    compute_pass.set_bind_group(0, &bind_group, &[]);
 
-                            // Set the bind group that we want to use
-                            compute_pass.set_bind_group(0, &bind_group, &[]);
-
-                            let workgroup_count = runargs.ops_len.div_ceil(workgroup_size as _);
-                            compute_pass.dispatch_workgroups(workgroup_count as u32, 1, 1);
-                        }
-                    }
+                    let workgroup_count = runargs.ops_len.div_ceil(workgroup_size as _);
+                    compute_pass.dispatch_workgroups(workgroup_count as u32, 1, 1);
                 }
             }
         }

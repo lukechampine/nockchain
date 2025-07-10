@@ -273,7 +273,7 @@ fn get_engine() -> HashEngine {
 
     // add some test data to trigger variable hashing
     let list: NounDigest = [Melt(1), Melt(2), Melt(3), Melt(4), Melt(5)];
-    engine.push_list(0, [list; 1].into_iter());
+    engine.push_list(0, [list; 1].into_iter()).unwrap();
 
     engine
 }
