@@ -32,7 +32,8 @@ use crate::noun::slab::NounSlab;
 use crate::noun::slam;
 use crate::save::SaveableCheckpoint;
 use crate::utils::{
-    create_context, current_da, NOCK_STACK_SIZE, NOCK_STACK_SIZE_BIG, NOCK_STACK_SIZE_HUGE,
+    create_context, current_da, NOCK_STACK_SIZE, NOCK_STACK_SIZE_HUGE, NOCK_STACK_SIZE_LARGE,
+    NOCK_STACK_SIZE_MEDIUM, NOCK_STACK_SIZE_SMALL, NOCK_STACK_SIZE_TINY,
 };
 use crate::{AtomExt, CrownError, NounExt, Result, ToBytesExt};
 
@@ -99,7 +100,7 @@ pub enum SerfAction<C> {
     Stop,
 }
 
-pub(crate) struct SerfThread<C> {
+pub struct SerfThread<C> {
     handle: Option<std::thread::JoinHandle<()>>,
     action_sender: mpsc::Sender<SerfAction<C>>,
     pub cancel_token: NockCancelToken,
@@ -108,7 +109,7 @@ pub(crate) struct SerfThread<C> {
 }
 
 impl<C: SerfCheckpoint + Send + 'static> SerfThread<C> {
-    async fn new(
+    pub async fn new(
         kernel_bytes: Vec<u8>,
         checkpoint: Option<C>,
         constant_hot_state: Vec<HotEntry>,
@@ -221,11 +222,7 @@ impl<C> SerfThread<C> {
     }
 
     // We are very carefully ensuring that the future does not contain the &self reference, to allow spawning a task without lifetime issues
-    pub(crate) fn poke(
-        &self,
-        wire: WireRepr,
-        cause: NounSlab,
-    ) -> impl Future<Output = Result<NounSlab>> {
+    pub fn poke(&self, wire: WireRepr, cause: NounSlab) -> impl Future<Output = Result<NounSlab>> {
         let (result, result_fut) = oneshot::channel();
         let action_sender = self.action_sender.clone();
         async move {
@@ -269,7 +266,7 @@ impl<C> SerfThread<C> {
     }
 
     #[cfg(target_os = "linux")]
-    pub(crate) fn set_affinity(&self, affinity: Vec<usize>) -> impl Future<Output = Result<()>> {
+    pub fn set_affinity(&self, affinity: Vec<usize>) -> impl Future<Output = Result<()>> {
         let (result, result_fut) = oneshot::channel();
         let action_sender = self.action_sender.clone();
         async move {
@@ -281,7 +278,7 @@ impl<C> SerfThread<C> {
     }
 
     #[cfg(not(target_os = "linux"))]
-    pub(crate) fn set_affinity(&self, _affinity: Vec<usize>) -> impl Future<Output = Result<()>> {
+    pub fn set_affinity(&self, _affinity: Vec<usize>) -> impl Future<Output = Result<()>> {
         async move { Ok(()) }
     }
 
@@ -574,7 +571,7 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         Ok(Self { serf })
     }
 
-    pub async fn load_with_hot_state_big(
+    pub async fn load_with_hot_state_tiny(
         kernel: &[u8],
         checkpoint: Option<C>,
         hot_state: &[HotEntry],
@@ -584,7 +581,55 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
         let serf = SerfThread::new(
-            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_BIG, test_jets, trace_info,
+            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_TINY, test_jets, trace_info,
+        )
+        .await?;
+        Ok(Self { serf })
+    }
+
+    pub async fn load_with_hot_state_small(
+        kernel: &[u8],
+        checkpoint: Option<C>,
+        hot_state: &[HotEntry],
+        test_jets: Vec<NounSlab>,
+        trace_info: Option<TraceInfo>,
+    ) -> Result<Self> {
+        let kernel_vec = Vec::from(kernel);
+        let hot_state_vec = Vec::from(hot_state);
+        let serf = SerfThread::new(
+            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_SMALL, test_jets, trace_info,
+        )
+        .await?;
+        Ok(Self { serf })
+    }
+
+    pub async fn load_with_hot_state_medium(
+        kernel: &[u8],
+        checkpoint: Option<C>,
+        hot_state: &[HotEntry],
+        test_jets: Vec<NounSlab>,
+        trace: Option<TraceInfo>,
+    ) -> Result<Self> {
+        let kernel_vec = Vec::from(kernel);
+        let hot_state_vec = Vec::from(hot_state);
+        let serf = SerfThread::new(
+            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_MEDIUM, test_jets, trace,
+        )
+        .await?;
+        Ok(Self { serf })
+    }
+
+    pub async fn load_with_hot_state_large(
+        kernel: &[u8],
+        checkpoint: Option<C>,
+        hot_state: &[HotEntry],
+        test_jets: Vec<NounSlab>,
+        trace: Option<TraceInfo>,
+    ) -> Result<Self> {
+        let kernel_vec = Vec::from(kernel);
+        let hot_state_vec = Vec::from(hot_state);
+        let serf = SerfThread::new(
+            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_LARGE, test_jets, trace,
         )
         .await?;
         Ok(Self { serf })

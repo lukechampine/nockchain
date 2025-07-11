@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use nockapp::save::SaveableCheckpoint;
+use nockvm::noun::FullDebugCellDepth;
 use core::iter::once;
 use flume::Receiver;
 use futures::Stream;
@@ -120,8 +121,9 @@ impl Test {
             for comb in (0..permute_jets.len()).combinations(i) {
                 let mut enabled = vec![false; permute_jets.len()];
                 comb.iter().for_each(|i| enabled[*i] = true);
-                let mut hot_state = hot_state.clone();
-                hot_state.extend(comb.iter().map(|i| permute_jets[*i]));
+                let mut final_hot_state = vec![];
+                final_hot_state.extend(comb.iter().map(|i| permute_jets[*i]));
+                final_hot_state.extend(hot_state.iter().cloned());
 
                 println!("Testing combination:");
 
@@ -130,7 +132,7 @@ impl Test {
                 }
 
                 let time = Instant::now();
-                let res = on_kernel(src_event.clone(), hot_state, cli.clone()).await?;
+                let res = on_kernel(src_event.clone(), final_hot_state, cli.clone()).await?;
                 let res_hash = hash_slab(&res);
 
                 println!(
@@ -220,7 +222,7 @@ async fn on_kernel(slab: NounSlab, hot_state: Vec<HotEntry>, cli: Cli) -> Result
             continue;
         };
 
-        if effect_cell.head().eq_bytes("command") {
+        if effect_cell.head().eq_bytes("mine-result") {
             return Ok(effect);
         }
     }

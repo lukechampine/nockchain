@@ -3,12 +3,14 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 use std::sync::Arc;
 
+use libp2p::core::ConnectedPoint;
 use libp2p::swarm::ConnectionId;
-use libp2p::{Multiaddr, PeerId};
+use libp2p::{Multiaddr, PeerId, Swarm};
 use nockapp::noun::slab::NounSlab;
 use nockapp::{AtomExt, NockAppError, NounExt};
 use nockvm::noun::{Noun, D};
 use nockvm_macros::tas;
+use rand::prelude::SliceRandom;
 use tracing::{info, trace, warn};
 
 use crate::metrics::NockchainP2PMetrics;
@@ -53,6 +55,8 @@ pub struct MessageTracker {
     peer_to_block_ids: BTreeMap<PeerId, BTreeSet<String>>,
     // It's stupid that we must track this state instead of just getting it from libp2p.
     connections: BTreeMap<ConnectionId, PeerId>,
+    // subset of connections: all inbound connections
+    inbound_connections: BTreeMap<ConnectionId, PeerId>,
     peer_connections: BTreeMap<PeerId, BTreeMap<ConnectionId, Multiaddr>>,
     request_counts_by_ip: BTreeMap<Ipv4Addr, u64>,
     pub seen_blocks: BTreeSet<String>,
@@ -62,16 +66,20 @@ pub struct MessageTracker {
     pub elders_cache: BTreeMap<String, NounSlab>,
     pub elders_negative_cache: BTreeSet<String>,
     pub seen_elders: BTreeSet<String>,
+    // Highest block height seen
     pub first_negative: u64,
+    pub seen_tx_clear_interval: u64,
+    pub last_tx_cache_clear_height: u64,
 }
 
 impl MessageTracker {
-    pub fn new(metrics: Arc<NockchainP2PMetrics>) -> Self {
+    pub fn new(metrics: Arc<NockchainP2PMetrics>, seen_tx_clear_interval: u64) -> Self {
         Self {
             metrics,
             block_id_to_peers: BTreeMap::new(),
             peer_to_block_ids: BTreeMap::new(),
             connections: BTreeMap::new(),
+            inbound_connections: BTreeMap::new(),
             peer_connections: BTreeMap::new(),
             request_counts_by_ip: BTreeMap::new(),
             seen_blocks: BTreeSet::new(),
@@ -82,6 +90,8 @@ impl MessageTracker {
             elders_negative_cache: BTreeSet::new(),
             seen_elders: BTreeSet::new(),
             first_negative: 0,
+            seen_tx_clear_interval,
+            last_tx_cache_clear_height: 0,
         }
     }
 
@@ -90,8 +100,12 @@ impl MessageTracker {
         connection_id: ConnectionId,
         peer_id: PeerId,
         addr: &Multiaddr,
+        endpoint: ConnectedPoint,
     ) {
         self.connections.insert(connection_id, peer_id);
+        if let ConnectedPoint::Listener { .. } = endpoint {
+            self.inbound_connections.insert(connection_id, peer_id);
+        }
         if let Some(c) = self.peer_connections.get_mut(&peer_id) {
             c.insert(connection_id, addr.clone());
         } else {
@@ -105,15 +119,36 @@ impl MessageTracker {
 
     pub(crate) fn lost_connection(&mut self, connection_id: ConnectionId) {
         if let Some(peer_id) = self.connections.remove(&connection_id) {
+            self.inbound_connections.remove(&connection_id);
             if let Some(c) = self.peer_connections.get_mut(&peer_id) {
                 c.remove(&connection_id);
                 if c.is_empty() {
                     self.peer_connections.remove(&peer_id);
+                    self.remove_peer(&peer_id);
                 }
             }
         }
         let peer_count = self.peer_connections.len() as f64;
         let _ = self.metrics.peer_count.swap(peer_count);
+    }
+
+    pub(crate) fn prune_inbound_connections(
+        &mut self,
+        metrics: Arc<NockchainP2PMetrics>,
+        swarm: &mut Swarm<crate::p2p::NockchainBehaviour>,
+        prune_n: usize,
+    ) {
+        let mut inbound_connections_vec = self
+            .inbound_connections
+            .keys()
+            .cloned()
+            .collect::<Vec<ConnectionId>>();
+        inbound_connections_vec.shuffle(&mut rand::thread_rng());
+        let prune_actual = std::cmp::min(prune_n, inbound_connections_vec.len());
+        for connection_id in &inbound_connections_vec[0..prune_actual] {
+            metrics.incoming_connections_pruned.increment();
+            swarm.close_connection(*connection_id);
+        }
     }
 
     pub(crate) fn requested(&mut self, ip4: Ipv4Addr, threshhold: u64) -> Option<u64> {
@@ -450,10 +485,15 @@ impl NockchainDataRequest {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::LazyLock;
+
     use nockapp::noun::slab::NounSlab;
     use nockvm::noun::{D, T};
 
     use super::*;
+    use crate::config::LibP2PConfig;
+
+    pub static LIBP2P_CONFIG: LazyLock<LibP2PConfig> = LazyLock::new(|| LibP2PConfig::default());
 
     #[test]
     #[cfg_attr(miri, ignore)] // ibig has a memory leak so miri fails this test
@@ -462,7 +502,7 @@ mod tests {
             NockchainP2PMetrics::register(gnort::global_metrics_registry())
                 .expect("Could not register metrics"),
         );
-        let mut tracker = MessageTracker::new(metrics);
+        let mut tracker = MessageTracker::new(metrics, LIBP2P_CONFIG.seen_tx_clear_interval);
         let peer_id = PeerId::random();
 
         // Create a block ID as [1 2 3 4 5]
@@ -517,7 +557,7 @@ mod tests {
             NockchainP2PMetrics::register(gnort::global_metrics_registry())
                 .expect("Could not register metrics"),
         );
-        let mut tracker = MessageTracker::new(metrics);
+        let mut tracker = MessageTracker::new(metrics, LIBP2P_CONFIG.seen_tx_clear_interval);
         let peer_id = PeerId::random();
 
         // Create a block ID
@@ -587,7 +627,7 @@ mod tests {
             NockchainP2PMetrics::register(gnort::global_metrics_registry())
                 .expect("Could not register metrics"),
         );
-        let mut tracker = MessageTracker::new(metrics);
+        let mut tracker = MessageTracker::new(metrics, LIBP2P_CONFIG.seen_tx_clear_interval);
         let peer_id1 = PeerId::random();
         let peer_id2 = PeerId::random();
 
@@ -647,7 +687,7 @@ mod tests {
             NockchainP2PMetrics::register(gnort::global_metrics_registry())
                 .expect("Could not register metrics"),
         );
-        let mut tracker = MessageTracker::new(metrics);
+        let mut tracker = MessageTracker::new(metrics, LIBP2P_CONFIG.seen_tx_clear_interval);
         let peer_id1 = PeerId::random();
         let peer_id2 = PeerId::random();
 
@@ -729,7 +769,7 @@ mod tests {
             NockchainP2PMetrics::register(gnort::global_metrics_registry())
                 .expect("Could not register metrics"),
         );
-        let mut tracker = MessageTracker::new(metrics);
+        let mut tracker = MessageTracker::new(metrics, LIBP2P_CONFIG.seen_tx_clear_interval);
         let peer_id1 = PeerId::random();
         let peer_id2 = PeerId::random();
 

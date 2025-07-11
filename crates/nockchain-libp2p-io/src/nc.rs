@@ -14,7 +14,7 @@ use libp2p::peer_store::Store;
 use libp2p::request_response::Event::*;
 use libp2p::request_response::Message::*;
 use libp2p::request_response::{self};
-use libp2p::swarm::{ConnectionId, DialError, SwarmEvent};
+use libp2p::swarm::{ConnectionId, DialError, ListenError, SwarmEvent};
 use libp2p::{
     allow_block_list, connection_limits, memory_connection_limits, Multiaddr, PeerId, Swarm,
 };
@@ -168,6 +168,7 @@ pub fn make_libp2p_driver(
     memory_limits: Option<memory_connection_limits::Behaviour>,
     initial_peers: &[Multiaddr],
     force_peers: &[Multiaddr],
+    prune_inbound_size: Option<usize>,
     equix_builder: equix::EquiXBuilder,
     chain_interval: Duration,
     init_complete_tx: Option<tokio::sync::oneshot::Sender<()>>,
@@ -190,6 +191,7 @@ pub fn make_libp2p_driver(
             let request_high_threshold = libp2p_config.request_high_threshold;
             let peer_status_log_interval = libp2p_config.peer_status_log_interval_secs();
             let elders_debounce_reset = libp2p_config.elders_debounce_reset();
+            let seen_tx_clear_interval = libp2p_config.seen_tx_clear_interval();
             let mut swarm = match crate::p2p::start_swarm(
                 libp2p_config, keypair, bind, allowed, limits, memory_limits,
             ) {
@@ -207,7 +209,10 @@ pub fn make_libp2p_driver(
             };
             let (swarm_tx, mut swarm_rx) = mpsc::channel::<SwarmAction>(1000); // number needs to be high enough to send gossips to peers
             let mut join_set = TrackedJoinSet::<Result<(), NockAppError>>::new();
-            let message_tracker = Arc::new(Mutex::new(MessageTracker::new(metrics.clone())));
+            let message_tracker = Arc::new(Mutex::new(MessageTracker::new(
+                metrics.clone(),
+                seen_tx_clear_interval,
+            )));
             let mut kad_bootstrap = tokio::time::interval(kademlia_bootstrap_interval);
             kad_bootstrap.set_missed_tick_behavior(MissedTickBehavior::Skip);
             let mut force_peer_dial = tokio::time::interval(force_peer_dial_interval);
@@ -273,19 +278,29 @@ pub fn make_libp2p_driver(
                                 identify_received(&mut swarm, peer_id, info)?;
                             },
                             SwarmEvent::ConnectionEstablished { connection_id, peer_id, endpoint, .. } => {
-                                message_tracker.lock().await.track_connection(connection_id, peer_id, endpoint.get_remote_address());
+                                message_tracker.lock().await.track_connection(connection_id, peer_id, endpoint.get_remote_address(), endpoint.clone());
                                 debug!("SEvent: {peer_id} is new friend via: {endpoint:?}");
                             },
                             SwarmEvent::ConnectionClosed { connection_id, peer_id, endpoint, cause, .. } => {
                                 message_tracker.lock().await.lost_connection(connection_id);
-                                info!("SEvent: friendship ended with {peer_id} via: {endpoint:?}. cause: {cause:?}");
-                                // Clean up the message tracker when a peer disconnects
-                                let mut tracker = message_tracker.lock().await;
-                                tracker.remove_peer(&peer_id);
+                                debug!("SEvent: friendship ended with {peer_id} via: {endpoint:?}. cause: {cause:?}");
                             },
                             SwarmEvent::IncomingConnectionError { local_addr, send_back_addr, error, .. } => {
                                trace!("SEvent: Failed incoming connection from {} to {}: {}",
                                send_back_addr, local_addr, error);
+
+                               // When connection limits are reached, randomly prune inbound connections
+                               match error {
+                                   ListenError::Denied { cause } => {
+                                       metrics.incoming_connections_blocked_by_limits.increment();
+                                       if let Some(prune_factor) = prune_inbound_size {
+                                           if let Ok(_exceeded) = cause.downcast::<libp2p::connection_limits::Exceeded>() {
+                                               message_tracker.lock().await.prune_inbound_connections(metrics.clone(), &mut swarm, prune_factor);
+                                           }
+                                       }
+                                   }
+                                   _ => {}
+                               }
                             },
                             SwarmEvent::Behaviour(NockchainEvent::RequestResponse(Message { connection_id , peer, message })) => {
                                 trace!("SEvent: received RequestResponse");
@@ -616,6 +631,17 @@ async fn handle_effect(
                 connected_peers.clone()
             };
 
+            if request_type.data() == tas!(b"raw-tx") {
+                if let Ok(raw_tx_cell) = request_body.tail().as_cell() {
+                    if raw_tx_cell.head().eq_bytes(b"by-id") {
+                        trace!("Requesting raw transaction by ID, removing ID from seen set");
+                        let tx_id = tip5_hash_to_base58(raw_tx_cell.tail())?;
+                        let mut tracker_guard = message_tracker.clone().lock_owned().await;
+                        tracker_guard.seen_txs.remove(&tx_id);
+                    }
+                }
+            }
+
             debug!("Sending request to {} peers", target_peers.len());
 
             for peer_id in target_peers {
@@ -730,6 +756,16 @@ async fn handle_effect(
                         metrics.highest_block_height_seen.swap(block_height as f64);
                         tracker.first_negative = block_height + 1;
                         trace!("Setting tracker.first_negative to {:?}", tracker.first_negative);
+
+                        // Check if we should clear the tx cache
+                        if block_height
+                            >= tracker.last_tx_cache_clear_height + tracker.seen_tx_clear_interval
+                        {
+                            debug!("Clearing seen_txs cache at block height {}", block_height);
+                            debug!("Cache before clearing: {:?}", tracker.seen_txs);
+                            tracker.seen_txs.clear();
+                            tracker.last_tx_cache_clear_height = block_height;
+                        }
                     }
                 }
             } else if seen_type.eq_bytes(b"tx") {
@@ -1356,11 +1392,15 @@ fn prepend_tas(slab: &mut NounSlab, tas_str: &str, nouns: Vec<Noun>) -> Result<N
 
 #[cfg(test)]
 mod tests {
+    use std::sync::LazyLock;
+
     use nockapp::noun::slab::NounSlab;
     use nockvm::noun::{D, T};
     use nockvm_macros::tas;
 
     use super::*;
+
+    pub static LIBP2P_CONFIG: LazyLock<LibP2PConfig> = LazyLock::new(|| LibP2PConfig::default());
 
     #[test]
     #[cfg_attr(miri, ignore)] // ibig has a memory leak so miri fails this test
@@ -1688,7 +1728,10 @@ mod tests {
             EquiXBuilder::new(),
             PeerId::random(), // local peer ID (not relevant for this test)
             vec![],           // connected peers (not relevant for this test)
-            Arc::new(Mutex::new(MessageTracker::new(metrics.clone()))),
+            Arc::new(Mutex::new(MessageTracker::new(
+                metrics.clone(),
+                LIBP2P_CONFIG.seen_tx_clear_interval,
+            ))),
             metrics,
         )
         .await;
@@ -1743,7 +1786,10 @@ mod tests {
             NockchainP2PMetrics::register(gnort::global_metrics_registry())
                 .expect("Could not register metrics"),
         );
-        let message_tracker = Arc::new(Mutex::new(MessageTracker::new(metrics.clone())));
+        let message_tracker = Arc::new(Mutex::new(MessageTracker::new(
+            metrics.clone(),
+            LIBP2P_CONFIG.seen_tx_clear_interval,
+        )));
 
         // Call handle_effect with the track add effect
         let result = handle_effect(
@@ -1802,7 +1848,10 @@ mod tests {
                 .expect("Could not register metrics"),
         );
         // Create a message tracker and add an entry that we'll later remove
-        let message_tracker = Arc::new(Mutex::new(MessageTracker::new(metrics)));
+        let message_tracker = Arc::new(Mutex::new(MessageTracker::new(
+            metrics.clone(),
+            LIBP2P_CONFIG.seen_tx_clear_interval,
+        )));
 
         // Create block ID as [1 2 3 4 5]
         let mut setup_slab: NounSlab = NounSlab::new();
@@ -1904,7 +1953,10 @@ mod tests {
                 .expect("Could not register metrics"),
         );
         // Create a message tracker and add entries
-        let message_tracker = Arc::new(Mutex::new(MessageTracker::new(metrics)));
+        let message_tracker = Arc::new(Mutex::new(MessageTracker::new(
+            metrics.clone(),
+            LIBP2P_CONFIG.seen_tx_clear_interval,
+        )));
 
         // Create block IDs
         let mut setup_slab: NounSlab = NounSlab::new();
@@ -2108,7 +2160,10 @@ mod tests {
                 .expect("Could not register metrics"),
         );
 
-        let message_tracker = Arc::new(Mutex::new(MessageTracker::new(metrics.clone())));
+        let message_tracker = Arc::new(Mutex::new(MessageTracker::new(
+            metrics.clone(),
+            LIBP2P_CONFIG.seen_tx_clear_interval,
+        )));
         let message_tracker_clone = Arc::clone(&message_tracker); // Clone the Arc, not the MessageTracker
         let result = handle_effect(
             effect_slab,
@@ -2155,7 +2210,10 @@ mod tests {
                 .expect("Could not register metrics"),
         );
 
-        let message_tracker = Arc::new(Mutex::new(MessageTracker::new(metrics.clone())));
+        let message_tracker = Arc::new(Mutex::new(MessageTracker::new(
+            metrics.clone(),
+            LIBP2P_CONFIG.seen_tx_clear_interval,
+        )));
         let message_tracker_clone = Arc::clone(&message_tracker); // Clone the Arc, not the MessageTracker
         let result = handle_effect(
             effect_slab,
@@ -2384,7 +2442,7 @@ fn log_outbound_failure(
             debug!("Connection to peer {} closed with request pending", peer)
         }
         request_response::OutboundFailure::Io(err) => {
-            warn!("Error making request to peer {}: {}", peer, err)
+            debug!("Error making request to peer {}: {}", peer, err)
         }
         request_response::OutboundFailure::UnsupportedProtocols => {
             debug!("Unsupported protocol when making request to peer {}", peer)

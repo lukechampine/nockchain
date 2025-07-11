@@ -6,6 +6,7 @@ use std::cmp::{max, min};
 use crate::interpreter::Context;
 use crate::jets::util::*;
 use crate::jets::Result;
+use crate::mem::NockStack;
 use crate::noun::{IndirectAtom, Noun, D};
 
 crate::gdb!();
@@ -147,6 +148,8 @@ pub fn jet_rap(context: &mut Context, subject: Noun) -> Result {
 }
 
 pub fn jet_rep(context: &mut Context, subject: Noun) -> Result {
+    let stack = &mut context.stack;
+
     let arg = slot(subject, 6)?;
     let (bloq, step) = bite(slot(arg, 2)?)?;
     let original_list = slot(arg, 3)?;

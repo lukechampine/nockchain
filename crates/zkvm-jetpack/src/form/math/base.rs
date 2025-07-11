@@ -114,29 +114,32 @@ pub const fn montify(x: u64) -> u64 {
 
 /// Reduce a 128 bit number
 #[inline(always)]
-pub fn reduce(prod: u128) -> u64 {
-    // NOTE: see https://docs.rs/risc0-core/1.2.6/src/risc0_core/field/goldilocks.rs.html#299
-    let ret: u64 = prod as u64;
-    // Get two high words
-    let med: u32 = (prod >> 64) as u32;
-    let high: u32 = (prod >> 96) as u32;
-    // Subtract out high bits, add in P if underflow
-    let ret = if ret >= (high as u64) {
-        ret.wrapping_sub(high as u64)
-    } else {
-        ret.wrapping_sub(high as u64).wrapping_add(PRIME)
-    };
+pub fn reduce(n: u128) -> u64 {
+    reduce_159(n as u64, (n >> 64) as u32, (n >> 96) as u64)
+}
 
-    // Compute shifted effect of medium
-    let med_shift = ((med as u64) << 32).wrapping_sub(med as u64);
-
-    // Add in, if overflow, subtract a P
-    let ret = ret.wrapping_add(med_shift);
-    if ret < med_shift || ret >= PRIME {
-        ret.wrapping_sub(PRIME)
-    } else {
-        ret
+/// Reduce a 159 bit number
+/// See <https://cp4space.hatsya.com/2021/09/01/an-efficient-prime-for-number-theoretic-transforms/>
+/// See <https://github.com/mir-protocol/plonky2/blob/3a6d693f3ffe5aa1636e0066a4ea4885a10b5cdf/field/src/goldilocks_field.rs#L340-L356>
+#[inline(always)]
+pub fn reduce_159(low: u64, mid: u32, high: u64) -> u64 {
+    let (mut low2, carry) = low.overflowing_sub(high);
+    if carry {
+        low2 = low2.wrapping_add(PRIME);
     }
+
+    let mut product = (mid as u64) << 32;
+    product -= product >> 32;
+
+    let (mut result, carry) = product.overflowing_add(low2);
+    if carry {
+        result = result.wrapping_sub(PRIME);
+    }
+
+    if result >= PRIME {
+        result -= PRIME;
+    }
+    result
 }
 
 #[inline(always)]
