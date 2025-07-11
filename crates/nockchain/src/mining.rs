@@ -251,7 +251,7 @@ pub fn create_mining_driver(
             let test_jets_str = std::env::var("NOCK_TEST_JETS").unwrap_or_default();
             let test_jets = nockapp::kernel::boot::parse_test_jets(test_jets_str.as_str());
             let affinity_map = AffinityMap::new(&pin_miner_threads, num_threads);
-            let save_mine_attempts = SaveMineAttempts::All;
+            let save_mine_attempts = SaveMineAttempts::Blocks;
 
             let mining_data: Mutex<Option<MiningData>> = Mutex::new(None);
 
