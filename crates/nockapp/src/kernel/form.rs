@@ -90,6 +90,10 @@ pub enum SerfAction<C> {
         metrics: Arc<NockAppMetrics>,
         result: oneshot::Sender<()>,
     },
+    // Call a function within Serf's thread
+    CallFn {
+        func: Box<dyn FnOnce() + Send>,
+    },
     // Stop the loop
     Stop,
 }
@@ -276,6 +280,27 @@ impl<C> SerfThread<C> {
         async move {
             action_sender.send(SerfAction::Export { result }).await?;
             Ok(result_fut.await??)
+        }
+    }
+
+    pub fn call_fn<T: Send + 'static>(
+        &self,
+        func: impl FnOnce() -> T + Send + 'static,
+    ) -> impl Future<Output = Result<T>> {
+        let (fn_res, fn_res_fut) = oneshot::channel();
+        let action_sender = self.action_sender.clone();
+        async move {
+            action_sender
+                .send(SerfAction::CallFn {
+                    func: Box::new(move || {
+                        let _ = fn_res.send(func()).map_err(|e| {
+                            debug!("Failed to send call-fn result from serf thread");
+                            e
+                        });
+                    }),
+                })
+                .await?;
+            Ok(fn_res_fut.await?)
         }
     }
 }
@@ -470,6 +495,10 @@ fn serf_loop<C: SerfCheckpoint>(
                         .serf_loop_provide_metrics
                         .add_timing(&action_elapsed);
                 };
+            }
+            SerfAction::CallFn { func, result } => {
+                func();
+                let _ = result.send(());
             }
         };
         let elapsed = start.elapsed();
