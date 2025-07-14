@@ -24,8 +24,6 @@ use nockvm::noun::{D, T, YES};
 use nockvm_macros::tas;
 use tracing::{debug, info, instrument};
 
-use crate::mining::MiningKeyConfig;
-
 /// Module for handling driver initialization signals
 pub mod driver_init {
     use nockapp::driver::{make_driver, IODriverFn, PokeResult};
@@ -441,37 +439,11 @@ pub async fn init_with_kernel<J: Jammer + Send + 'static>(
     };
     setup::poke(&mut nockapp, setup::SetupCommand::PokeSetBtcData).await?;
 
-    let mining_config = cli.as_ref().and_then(|c| {
-        if let Some(pubkey) = &c.mining_pubkey {
-            Some(vec![MiningKeyConfig {
-                share: 1,
-                m: 1,
-                keys: vec![pubkey.clone()],
-            }])
-        } else if let Some(mining_key_adv) = &c.mining_key_adv {
-            Some(mining_key_adv.clone())
-        } else {
-            None
-        }
-    });
+    let mining_config = cli.as_ref().map(|c| c.miner.clone()).unwrap_or_default();
 
     let prune_inbound = cli.as_ref().and_then(|c| c.prune_inbound);
 
-    let mine = cli.as_ref().map_or(false, |c| c.mine);
-
-    let threads = cli
-        .as_ref()
-        .and_then(|c| {
-            if let Some(num_threads) = &c.num_threads {
-                Some(*num_threads)
-            } else {
-                Some(1)
-            }
-        })
-        .expect("Failed to get number of threads for mining");
-
-    let mining_driver =
-        crate::mining::create_mining_driver(mining_config, mine, threads, Some(mining_init_tx));
+    let mining_driver = crate::mining::create_mining_driver(mining_config, Some(mining_init_tx));
     nockapp.add_io_driver(mining_driver).await;
 
     let libp2p_driver = nockchain_libp2p_io::nc::make_libp2p_driver(

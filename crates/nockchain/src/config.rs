@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use clap::{arg, command, value_parser, ArgAction, Parser};
+use clap::{arg, command, ArgAction, Parser};
 
-use crate::mining::MiningKeyConfig;
+use crate::mining::MiningConfig;
 
 // TODO: command-line/configure
 /** Path to read current node's identity from */
@@ -40,26 +40,14 @@ pub const GENESIS_HEIGHT: u64 = 897767;
 pub struct NockchainCli {
     #[command(flatten)]
     pub nockapp_cli: nockapp::kernel::boot::Cli,
+    #[command(flatten)]
+    pub miner: MiningConfig,
     #[arg(
         long,
         help = "npc socket path",
         default_value = ".socket/nockchain_npc.sock"
     )]
     pub npc_socket: String,
-    #[arg(long, help = "Mine in-kernel", default_value = "false")]
-    pub mine: bool,
-    #[arg(
-        long,
-        help = "Pubkey to mine to (mutually exclusive with --mining-key-adv)"
-    )]
-    pub mining_pubkey: Option<String>,
-    #[arg(
-        long,
-        help = "Advanced mining key configuration (mutually exclusive with --mining-pubkey). Format: share,m:key1,key2,key3",
-        value_parser = value_parser!(MiningKeyConfig),
-        num_args = 1..,
-    )]
-    pub mining_key_adv: Option<Vec<MiningKeyConfig>>,
     #[arg(long, help = "Whether to run as fakenet", default_value_t = false)]
     pub fakenet: bool,
     #[arg(long, short, help = "Initial peer", action = ArgAction::Append)]
@@ -99,8 +87,6 @@ pub struct NockchainCli {
     pub max_system_memory_fraction: Option<f64>,
     #[arg(long, help = "Maximum process memory for connection limits (bytes)")]
     pub max_system_memory_bytes: Option<usize>,
-    #[arg(long, help = "Number of threads to mine with defaults to one less than the number of cpus available.", default_value = None)]
-    pub num_threads: Option<u64>,
     #[arg(
         long,
         help = "Size of Proof of Work puzzle for mining on fakenet. Mainnet uses 64. Must be a power of 2. Defaults to 2. Ignored on mainnet.",
@@ -119,18 +105,6 @@ pub struct NockchainCli {
 
 impl NockchainCli {
     pub fn validate(&self) -> Result<(), String> {
-        if self.mine && !(self.mining_pubkey.is_some() || self.mining_key_adv.is_some()) {
-            return Err(
-                "Cannot specify mine without either mining_pubkey or mining_key_adv".to_string(),
-            );
-        }
-
-        if self.mining_pubkey.is_some() && self.mining_key_adv.is_some() {
-            return Err(
-                "Cannot specify both mining_pubkey and mining_key_adv at the same time".to_string(),
-            );
-        }
-
-        Ok(())
+        self.miner.validate()
     }
 }

@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use clap::{value_parser, Args};
 use kernels::miner::KERNEL;
 use nockapp::kernel::form::SerfThread;
 use nockapp::nockapp::driver::{IODriverFn, NockAppHandle, PokeResult};
@@ -78,6 +79,62 @@ impl FromStr for MiningKeyConfig {
     }
 }
 
+#[derive(Args, Clone, Debug, Default)]
+pub struct MiningConfig {
+    #[arg(long, help = "Mine in-kernel", default_value = "false")]
+    pub mine: bool,
+    #[arg(long, help = "Number of threads to mine with defaults to one less than the number of cpus available.", default_value = None)]
+    pub num_threads: Option<u64>,
+    #[arg(
+        long,
+        help = "Pubkey to mine to (mutually exclusive with --mining-key-adv)"
+    )]
+    pub mining_pubkey: Option<String>,
+    #[arg(
+        long,
+        help = "Advanced mining key configuration (mutually exclusive with --mining-pubkey). Format: share,m:key1,key2,key3",
+        value_parser = value_parser!(MiningKeyConfig),
+        num_args = 1..,
+    )]
+    pub mining_key_adv: Option<Vec<MiningKeyConfig>>,
+}
+
+impl MiningConfig {
+    pub fn mining_key_config(&self) -> Option<Vec<MiningKeyConfig>> {
+        if let Some(pubkey) = &self.mining_pubkey {
+            Some(vec![MiningKeyConfig {
+                share: 1,
+                m: 1,
+                keys: vec![pubkey.clone()],
+            }])
+        } else if let Some(mining_key_adv) = &self.mining_key_adv {
+            Some(mining_key_adv.clone())
+        } else {
+            None
+        }
+    }
+
+    pub fn num_threads(&self) -> u64 {
+        self.num_threads.unwrap_or(1)
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.mine && !(self.mining_pubkey.is_some() || self.mining_key_adv.is_some()) {
+            return Err(
+                "Cannot specify mine without either mining_pubkey or mining_key_adv".to_string(),
+            );
+        }
+
+        if self.mining_pubkey.is_some() && self.mining_key_adv.is_some() {
+            return Err(
+                "Cannot specify both mining_pubkey and mining_key_adv at the same time".to_string(),
+            );
+        }
+
+        Ok(())
+    }
+}
+
 struct MiningData {
     pub block_header: NounSlab,
     pub version: NounSlab,
@@ -86,14 +143,12 @@ struct MiningData {
 }
 
 pub fn create_mining_driver(
-    mining_config: Option<Vec<MiningKeyConfig>>,
-    mine: bool,
-    num_threads: u64,
+    cfg: MiningConfig,
     init_complete_tx: Option<tokio::sync::oneshot::Sender<()>>,
 ) -> IODriverFn {
     Box::new(move |handle| {
         Box::pin(async move {
-            let Some(configs) = mining_config else {
+            let Some(configs) = cfg.mining_key_config() else {
                 enable_mining(&handle, false).await?;
 
                 if let Some(tx) = init_complete_tx {
@@ -114,7 +169,7 @@ pub fn create_mining_driver(
             } else {
                 set_mining_key_advanced(&handle, configs).await?;
             }
-            enable_mining(&handle, mine).await?;
+            enable_mining(&handle, cfg.mine).await?;
 
             if let Some(tx) = init_complete_tx {
                 tx.send(()).map_err(|_| {
@@ -123,10 +178,11 @@ pub fn create_mining_driver(
                 })?;
             }
 
-            if !mine {
+            if !cfg.mine {
                 return Ok(());
             }
 
+            let num_threads = cfg.num_threads();
             info!("Starting mining driver with {} threads", num_threads);
 
             let mut mining_attempts = tokio::task::JoinSet::<(
