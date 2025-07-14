@@ -228,6 +228,7 @@ tokio-rustls = "0.26.0"
 x509-parser = "0.16.0"
 rcgen = "0.13.0"
 webpki-roots = "0.26.0"
+gdt-cpus = "25"
 
 
 metrics = "0.24"
