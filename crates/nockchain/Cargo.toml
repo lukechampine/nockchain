@@ -44,6 +44,7 @@ rand = { workspace = true }
 jemallocator.workspace = true
 
 zkvm-jetpack.workspace = true
+nbx-jetpack.workspace = true
 
 [build-dependencies]
 vergen = { workspace = true, features = [

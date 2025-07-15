@@ -1,14 +1,14 @@
 use std::iter::once;
 
-use crate::form::mary::{Mary, MarySlice};
-use crate::form::math::poly::{p_decompose, peval};
-use crate::form::{binv, BPolySlice, Belt, Element, ElementEx, FPolySlice, Felt};
-use crate::form::{BPolyVec, PolySlice};
-use crate::hand::handle::{
+use zkvm_jetpack::form::mary::{Mary, MarySlice};
+use zkvm_jetpack::form::math::poly::{p_decompose, peval};
+use zkvm_jetpack::form::{binv, BPolySlice, Belt, Element, ElementEx, FPolySlice, Felt};
+use zkvm_jetpack::form::{BPolyVec, PolySlice};
+use zkvm_jetpack::hand::handle::{
     finalize_mary, finalize_poly, new_handle_mut_mary, new_handle_mut_slice,
 };
-use crate::jets::utils::jet_err;
-use crate::noun::noun_ext::NounExt;
+use zkvm_jetpack::jets::utils::jet_err;
+use zkvm_jetpack::noun::noun_ext::NounExt;
 use either::Either;
 use ibig::Stack;
 use nockvm::interpreter::Context;
@@ -20,7 +20,7 @@ use nockvm::jets::Result;
 use nockvm::mem::NockStack;
 use nockvm::noun::{Atom, Cell, IndirectAtom, Noun, D, T};
 
-use crate::jets::bp_jets::init_bpoly;
+use zkvm_jetpack::jets::bp_jets::init_bpoly;
 
 use super::utils::*;
 

@@ -7,8 +7,8 @@ edition.workspace = true
 
 [features]
 default = []
-gpu = ["zkvm-jetpack/gpu"]
-gpu-prod = ["gpu", "zkvm-jetpack/gpu-prod"]
+gpu = ["nbx-jetpack/gpu"]
+gpu-prod = ["gpu", "nbx-jetpack/gpu-prod"]
 
 [dependencies]
 hoonc.workspace = true
@@ -35,6 +35,7 @@ itertools.workspace = true
 jemallocator.workspace = true
 
 zkvm-jetpack.workspace = true
+nbx-jetpack.workspace = true
 
 [build-dependencies]
 vergen = { workspace = true, features = [

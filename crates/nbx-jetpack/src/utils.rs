@@ -1,9 +1,9 @@
-use crate::form::mary::MarySlice;
-use crate::form::Element;
-use crate::hand::handle::{
+use zkvm_jetpack::form::mary::MarySlice;
+use zkvm_jetpack::form::Element;
+use zkvm_jetpack::hand::handle::{
     finalize_mary, finalize_poly, new_handle_mut_mary, new_handle_mut_slice,
 };
-use crate::jets::utils::jet_err;
+use zkvm_jetpack::jets::utils::jet_err;
 use nockvm::jets::util;
 use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;

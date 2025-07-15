@@ -9,20 +9,20 @@ use super::one::*;
 use super::substitute::SubstituteEngine;
 use super::two::*;
 use super::utils::*;
-use crate::form::fext::{fmul_, fpow_};
-use crate::form::mary::{MarySlice, MarySliceMut};
-use crate::form::math::poly::*;
-use crate::form::poly::Poly;
-use crate::form::{
+use zkvm_jetpack::form::fext::{fmul_, fpow_};
+use zkvm_jetpack::form::mary::{MarySlice, MarySliceMut};
+use zkvm_jetpack::form::math::poly::*;
+use zkvm_jetpack::form::poly::Poly;
+use zkvm_jetpack::form::{
     binv, bneg, BPolySlice, BPolyVec, Belt, Element, ElementEx, FPolySlice, FPolyVec, Felt, Melt,
     PolySlice, PolyVec,
 };
-use crate::hand::handle::{
+use zkvm_jetpack::hand::handle::{
     finalize_mary, finalize_poly, new_handle_mut_mary, new_handle_mut_slice,
 };
-use crate::hand::structs::{HoonList, HoonMap, HoonMapIter};
-use crate::jets::utils::{det_err, jet_err};
-use crate::noun::noun_ext::NounExt;
+use zkvm_jetpack::hand::structs::{HoonList, HoonMap, HoonMapIter};
+use zkvm_jetpack::jets::utils::{det_err, jet_err};
+use zkvm_jetpack::noun::noun_ext::NounExt;
 
 pub fn weighted_linear_combo<'a>(
     stack: &mut NockStack,

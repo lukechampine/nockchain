@@ -14,7 +14,6 @@ use crate::jets::mary_jets::*;
 use crate::jets::mega_jets::*;
 use crate::jets::memory_table_jets_v0_v1::*;
 use crate::jets::memory_table_jets_v2::*;
-use crate::jets::nbx::nbx_jets;
 use crate::jets::proof_gen_jets::*;
 use crate::jets::shape_jets::*;
 use crate::jets::tip5_jets::*;

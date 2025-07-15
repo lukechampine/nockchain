@@ -5,12 +5,12 @@ use nockvm::mem::NockStack;
 use nockvm::noun::*;
 use nockvm_macros::tas;
 
-use crate::form::mary::{Mary, MarySlice};
-use crate::form::{binv, bsub, PRIME};
-use crate::hand::handle::{finalize_mary, new_handle_mut_mary};
-use crate::hand::structs::{HoonList, HoonMap};
-use crate::jets::utils::jet_err;
-use crate::noun::noun_ext::NounExt;
+use zkvm_jetpack::form::mary::{Mary, MarySlice};
+use zkvm_jetpack::form::{binv, bsub, PRIME};
+use zkvm_jetpack::hand::handle::{finalize_mary, new_handle_mut_mary};
+use zkvm_jetpack::hand::structs::{HoonList, HoonMap};
+use zkvm_jetpack::jets::utils::jet_err;
+use zkvm_jetpack::noun::noun_ext::NounExt;
 
 use super::utils::xeb;
 

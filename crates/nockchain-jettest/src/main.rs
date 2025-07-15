@@ -18,7 +18,7 @@ use nockvm::mug::mug;
 use std::path::Path;
 use std::time::Instant;
 use zkvm_jetpack::hot::produce_prover_hot_state;
-use zkvm_jetpack::jets::nbx::nbx_jets;
+use nbx_jetpack::nbx_jets;
 #[cfg(feature = "gpu")]
 use zkvm_jetpack::jets::nbx::gpu;
 

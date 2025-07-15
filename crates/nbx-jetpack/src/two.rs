@@ -10,21 +10,21 @@ use tracing::log::*;
 use super::one::{p_decompose_impl, peval_impl};
 use super::substitute::{SubstituteEngine, SubstituteMulStage, SubstituteOp};
 use super::utils::*;
-use crate::form::bpoly::{bp_coseword, bpscal_inplace};
-use crate::form::fext::{fadd_, fdiv_, finv_, fmul_, fneg_};
-use crate::form::mary::{MarySlice, MarySliceMut};
-use crate::form::math::poly::{p_ntt, *};
-use crate::form::mega::{brek, MegaTyp};
-use crate::form::poly::Poly;
-use crate::form::{
+use zkvm_jetpack::form::bpoly::{bp_coseword, bpscal_inplace};
+use zkvm_jetpack::form::fext::{fadd_, fdiv_, finv_, fmul_, fneg_};
+use zkvm_jetpack::form::mary::{MarySlice, MarySliceMut};
+use zkvm_jetpack::form::math::poly::{p_ntt, *};
+use zkvm_jetpack::form::mega::{brek, MegaTyp};
+use zkvm_jetpack::form::poly::Poly;
+use zkvm_jetpack::form::{
     binv, bneg, bpow, BPolySlice, BPolyVec, Belt, Element, ElementEx, FPolySlice, FPolySliceMut, FPolyVec, Felt, MPolyVec, PolySlice, PolyVec
 };
-use crate::hand::handle::{
+use zkvm_jetpack::hand::handle::{
     finalize_mary, finalize_poly, new_handle_mut_felt, new_handle_mut_mary, new_handle_mut_slice,
 };
-use crate::hand::structs::{HoonList, HoonMapIter};
-use crate::jets::utils::jet_err;
-use crate::noun::noun_ext::NounExt;
+use zkvm_jetpack::hand::structs::{HoonList, HoonMapIter};
+use zkvm_jetpack::jets::utils::jet_err;
+use zkvm_jetpack::noun::noun_ext::NounExt;
 
 pub fn new_fpoly<'a>(d: &[Felt]) -> FPolyVec {
     copy_slice(PolySlice(d))

@@ -3,11 +3,6 @@ name = "zkvm-jetpack"
 version.workspace = true
 edition.workspace = true
 
-[features]
-default = []
-gpu = ["nbx-shaders"]
-gpu-prod = ["gpu", "nbx-shaders/comptime", "nbx-shaders/spirv_passthrough"]
-
 [dependencies]
 argon2.workspace = true
 arrayref.workspace = true
@@ -24,20 +19,8 @@ nockvm.workspace = true
 nockvm_macros.workspace = true
 tracing.workspace = true
 bitvec.workspace = true
-array-concat.workspace = true
-array-util.workspace = true
-const_for.workspace = true
-rayon.workspace = true
-wgpu.workspace = true
-naga.workspace = true
-tokio.workspace = true
-bytemuck.workspace = true
-pollster.workspace = true
 nbx-tip5.workspace = true
-nbx-shaders = { workspace = true, optional = true, features = [
-    # "comptime",
-    "spirv_passthrough"
-] }
+bytemuck.workspace = true
 
 [dev-dependencies]
 quickcheck.workspace = true

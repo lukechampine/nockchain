@@ -4,11 +4,12 @@ use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::noun::*;
 
-use crate::form::{Belt, ElementEx, Felt};
-use crate::hand::structs::HoonList;
-use crate::jets::nbx::utils::DP;
-use crate::jets::utils::jet_err;
-use crate::noun::noun_ext::NounExt;
+use zkvm_jetpack::form::{Belt, ElementEx, Felt};
+use zkvm_jetpack::hand::structs::HoonList;
+use zkvm_jetpack::jets::utils::jet_err;
+use zkvm_jetpack::noun::noun_ext::NounExt;
+
+use super::utils::DP;
 
 // +$  pelt-stack
 //   $:  alf=pelt

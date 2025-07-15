@@ -2,9 +2,9 @@ use std::sync::OnceLock;
 
 use nbx_tip5::melt::Melt;
 
-use crate::form::math::poly::*;
-use crate::form::poly::Poly;
-use crate::form::{ElementEx, PolySlice, PolyVec};
+use zkvm_jetpack::form::math::poly::*;
+use zkvm_jetpack::form::poly::Poly;
+use zkvm_jetpack::form::{ElementEx, PolySlice, PolyVec};
 
 #[cfg(feature = "gpu")]
 use super::gpu;

@@ -5,12 +5,12 @@ use nockvm::mem::NockStack;
 use nockvm::noun::*;
 use nockvm_macros::tas;
 
-use crate::form::mary::Mary;
-use crate::form::PRIME;
-use crate::hand::handle::{finalize_mary, new_handle_mut_mary};
-use crate::hand::structs::HoonList;
-use crate::jets::utils::jet_err;
-use crate::noun::noun_ext::NounExt;
+use zkvm_jetpack::form::mary::Mary;
+use zkvm_jetpack::form::PRIME;
+use zkvm_jetpack::hand::handle::{finalize_mary, new_handle_mut_mary};
+use zkvm_jetpack::hand::structs::HoonList;
+use zkvm_jetpack::jets::utils::jet_err;
+use zkvm_jetpack::noun::noun_ext::NounExt;
 
 // ++  num-randomizers  1
 const NUM_RANDOMIZERS: u64 = 1;

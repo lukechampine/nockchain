@@ -1,4 +1,4 @@
-use crate::noun::noun_ext::NounExt;
+use zkvm_jetpack::noun::noun_ext::NounExt;
 use nockvm::interpreter::Context;
 use nockvm::jets::Result;
 use nockvm::mem::NockStack;

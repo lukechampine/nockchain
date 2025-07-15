@@ -1,13 +1,11 @@
 use std::iter::once;
 
-use crate::form::mary::Mary;
-use crate::form::math::poly::*;
-use crate::form::{poly::Poly, Belt};
-use crate::form::{FPolySlice, FPolyVec, Felt, PolySlice, PolyVec};
-use crate::hand::handle::{finalize_mary, new_handle_mut_mary};
-use crate::jets::nbx::four::{absorb_proof_objects_impl, Proof, ProofData};
-use crate::jets::nbx::three::build_merk_heap_impl;
-use crate::noun::noun_ext::NounExt;
+use zkvm_jetpack::form::mary::Mary;
+use zkvm_jetpack::form::math::poly::*;
+use zkvm_jetpack::form::{poly::Poly, Belt};
+use zkvm_jetpack::form::{FPolySlice, FPolyVec, Felt, PolySlice, PolyVec};
+use zkvm_jetpack::hand::handle::{finalize_mary, new_handle_mut_mary};
+use zkvm_jetpack::noun::noun_ext::NounExt;
 use nockvm::interpreter::Context;
 use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
@@ -15,11 +13,11 @@ use nockvm::noun::{Atom, Noun, Slots, D, T};
 
 use num_traits::Pow;
 
-use crate::jets::utils::jet_err;
+use zkvm_jetpack::jets::utils::jet_err;
 
 use super::one::*;
-use super::three::MerkHeap;
-use super::two::*;
+use super::three::{build_merk_heap_impl, MerkHeap};
+use super::four::{absorb_proof_objects_impl, Proof, ProofData};
 
 // $:  offset=belt
 //     omega=belt

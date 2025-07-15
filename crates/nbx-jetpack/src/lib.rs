@@ -37,7 +37,7 @@ use zoon::*;
 
 pub use two::mp_substitute_ultra_impl;
 
-use super::utils::jet_err;
+use zkvm_jetpack::jets::utils::jet_err;
 
 macro_rules! jam_err {
     ($name:ident) => {{

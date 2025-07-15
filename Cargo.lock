@@ -4143,6 +4143,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "nbx-jetpack"
+version = "0.1.0"
+dependencies = [
+ "array-concat",
+ "array-util",
+ "bytemuck",
+ "const_for",
+ "either",
+ "ibig",
+ "naga",
+ "nbx-shaders",
+ "nbx-tip5",
+ "nockvm",
+ "nockvm_macros",
+ "num-traits",
+ "rayon",
+ "tokio",
+ "tracing",
+ "wgpu",
+ "zkvm-jetpack",
+]
+
+[[package]]
 name = "nbx-shaders"
 version = "0.1.0"
 dependencies = [
@@ -4353,6 +4376,7 @@ dependencies = [
  "jemallocator",
  "kernels",
  "libp2p",
+ "nbx-jetpack",
  "nockapp",
  "nockchain-libp2p-io",
  "nockvm",
@@ -4383,6 +4407,7 @@ dependencies = [
  "itertools 0.14.0",
  "jemallocator",
  "kernels",
+ "nbx-jetpack",
  "nockapp",
  "nockvm",
  "nockvm_macros",
@@ -5051,12 +5076,6 @@ dependencies = [
  "tracing",
  "windows-sys 0.59.0",
 ]
-
-[[package]]
-name = "pollster"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f3a9f18d041e6d0e102a0a46750538147e5e8992d3b4873aaafee2520b00ce3"
 
 [[package]]
 name = "portable-atomic"
@@ -8236,31 +8255,22 @@ name = "zkvm-jetpack"
 version = "0.1.0"
 dependencies = [
  "argon2",
- "array-concat",
- "array-util",
  "arrayref",
  "bitvec",
  "bytemuck",
  "bytes",
- "const_for",
  "either",
  "hex-literal",
  "ibig",
- "naga",
- "nbx-shaders",
  "nbx-tip5",
  "nockapp",
  "nockvm",
  "nockvm_macros",
  "num-traits",
- "pollster",
  "quickcheck",
- "rayon",
  "smallvec",
  "strum",
- "tokio",
  "tracing",
- "wgpu",
 ]
 
 [[package]]

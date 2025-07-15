@@ -11,18 +11,18 @@ use nockvm::noun::{Atom, Noun, D, T};
 use super::one::*;
 use super::utils::*;
 use super::hash::{NounDigest, HashEngine, leaf_sequence_impl};
-use crate::form::mary::{Mary, MarySlice};
-use crate::form::math::tip5::{self, CAPACITY, DIGEST_LENGTH, RATE, STATE_SIZE};
-use crate::form::poly::Poly;
-use crate::form::tip5::permute;
-use crate::form::{
+use zkvm_jetpack::form::mary::{Mary, MarySlice};
+use zkvm_jetpack::form::math::tip5::{self, CAPACITY, DIGEST_LENGTH, RATE, STATE_SIZE};
+use zkvm_jetpack::form::poly::Poly;
+use zkvm_jetpack::form::tip5::permute;
+use zkvm_jetpack::form::{
     BPolyVec, Belt, Element, ElementEx, Felt,
     Melt, PolySlice, PolyVec,
 };
-use crate::hand::handle::{finalize_mary, new_handle_mut_mary};
-use crate::hand::structs::HoonList;
-use crate::jets::utils::jet_err;
-use crate::noun::noun_ext::NounExt;
+use zkvm_jetpack::hand::handle::{finalize_mary, new_handle_mut_mary};
+use zkvm_jetpack::hand::structs::HoonList;
+use zkvm_jetpack::jets::utils::jet_err;
+use zkvm_jetpack::noun::noun_ext::NounExt;
 
 pub fn leaf_sequence(stack: &mut NockStack, t: Noun) -> Result {
     let mut r = leaf_sequence_impl(t)?;

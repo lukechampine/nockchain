@@ -246,7 +246,7 @@ pub fn create_mining_driver(
             info!("Starting mining driver with {} threads", num_threads);
 
             let mut mining_attempts = tokio::task::JoinSet::new();
-            let mut hot_state = zkvm_jetpack::jets::nbx::nbx_jets().collect::<Vec<_>>();
+            let mut hot_state = nbx_jetpack::nbx_jets().collect::<Vec<_>>();
             hot_state.extend(zkvm_jetpack::hot::produce_prover_hot_state());
             let test_jets_str = std::env::var("NOCK_TEST_JETS").unwrap_or_default();
             let test_jets = nockapp::kernel::boot::parse_test_jets(test_jets_str.as_str());
