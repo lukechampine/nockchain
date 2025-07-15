@@ -8,7 +8,7 @@ use nockapp::kernel::form::SerfThread;
 use nockapp::nockapp::driver::{IODriverFn, NockAppHandle, PokeResult};
 use nockapp::nockapp::wire::Wire;
 use nockapp::nockapp::NockAppError;
-use nockapp::noun::slab::NounSlab;
+use nockapp::noun::slab::{slab_equality, NounSlab};
 use nockapp::noun::{AtomExt, NounExt};
 use nockapp::save::SaveableCheckpoint;
 use nockapp::utils::NOCK_STACK_SIZE_TINY;
@@ -237,6 +237,24 @@ struct MiningData {
     pub pow_len: u64,
 }
 
+impl PartialEq for MiningData {
+    fn eq(&self, other: &Self) -> bool {
+        if self.pow_len != other.pow_len {
+            return false;
+        }
+        if !slab_equality(&self.block_header, &other.block_header) {
+            return false;
+        }
+        if !slab_equality(&self.version, &other.version) {
+            return false;
+        }
+        if !slab_equality(&self.target, &other.target) {
+            return false;
+        }
+        true
+    }
+}
+
 pub fn create_mining_driver(
     cfg: MiningConfig,
     init_complete_tx: Option<tokio::sync::oneshot::Sender<()>>,
@@ -304,7 +322,8 @@ pub fn create_mining_driver(
                 );
                 miners.spawn(miner_fut);
             }
-            let miners = miners.join_all().await;
+            let mut miners = miners.join_all().await;
+            miners.sort_by_key(|v| v.id);
 
             loop {
                 tokio::select! {
@@ -320,7 +339,7 @@ pub fn create_mining_driver(
                             if hed.is_atom() && hed.eq_bytes("poke") {
                                 //  mining attempt was cancelled. restart with current block header.
                                 debug!("mining attempt cancelled. restarting on new block header. thread={id}");
-                                start_mining_attempt(miner, mining_data.lock().await, None).await;
+                                start_mining_attempt(miner, mining_data.lock().await, None, false).await;
                             } else {
                                 //  there should only be one effect
                                 let effect = result.as_cell().expect("Expected result to be a cell").head();
@@ -342,7 +361,7 @@ pub fn create_mining_driver(
                                         debug!("didn't find block, starting new attempt. thread={id}");
                                         let mut nonce_slab = NounSlab::new();
                                         nonce_slab.copy_into(tail);
-                                        start_mining_attempt(miner, mining_data.lock().await, Some(nonce_slab)).await;
+                                        start_mining_attempt(miner, mining_data.lock().await, Some(nonce_slab), false).await;
                                     }
                                 }
                             }
@@ -388,16 +407,24 @@ pub fn create_mining_driver(
                                 tip5_hash_to_base58(*unsafe { header_slab.root() })
                                 .expect("Failed to convert header to Base58")
                             );
-                            *(mining_data.lock().await) = Some(MiningData {
+
+                            let mut mining_data_guard = mining_data.lock().await;
+
+                            let new_mining_data = Some(MiningData {
                                 block_header: header_slab,
                                 version: version_slab,
                                 target: target_slab,
                                 pow_len: pow_len
                             });
 
-                            // Cancel any existing mining attempts, and create new attempts
-                            for m in &miners {
-                                start_mining_attempt(m, mining_data.lock().await, None).await;
+                            if &*mining_data_guard != &new_mining_data {
+                                debug!("Creating new mining attempts");
+                                *mining_data_guard = new_mining_data;
+                                core::mem::drop(mining_data_guard);
+                                // Cancel any existing mining attempts, and create new attempts
+                                for m in &miners {
+                                    start_mining_attempt(m, mining_data.lock().await, None, true).await;
+                                }
                             }
                         }
                     }
@@ -509,6 +536,7 @@ async fn start_mining_attempt(
     miner: &MinerHandle,
     mining_data: tokio::sync::MutexGuard<'_, Option<MiningData>>,
     nonce: Option<NounSlab>,
+    cancel_previous: bool,
 ) {
     let nonce = nonce.unwrap_or_else(|| {
         let mut rng = rand::thread_rng();
@@ -536,7 +564,7 @@ async fn start_mining_attempt(
         tip5_hash_to_base58(*unsafe { nonce.root() }).expect("Failed to convert nonce to Base58"),
     );
     let poke_slab = create_poke(mining_data_ref, &nonce);
-    miner.send_poke(poke_slab);
+    miner.send_poke(poke_slab, cancel_previous);
 }
 
 struct Miner {
@@ -599,6 +627,7 @@ impl MinerHandle {
         let cancellation = serf.cancel_token.clone();
 
         if let Some(core_id) = thread_pin {
+            debug!("Pinning miner {id} to core {core_id}");
             serf.call_fn(move || gdt_cpus::pin_thread_to_core(core_id))
                 .await
                 .expect("Could not invoke core pinning")
@@ -624,12 +653,14 @@ impl MinerHandle {
         }
     }
 
-    pub fn send_poke(&self, poke_slab: NounSlab) {
+    pub fn send_poke(&self, poke_slab: NounSlab, cancel_previous: bool) {
         self.reqs.send_modify(|v| {
             let mut guard = v.lock().expect("Poisoned lock");
             *guard = Some(poke_slab);
-            // Cancel while holding the guard to prevent the miner from racing to a stale request.
-            self.cancel_current_poke();
+            if cancel_previous {
+                // Cancel while holding the guard to prevent the miner from racing to a stale request.
+                self.cancel_current_poke();
+            }
         });
     }
 

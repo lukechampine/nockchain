@@ -496,9 +496,8 @@ fn serf_loop<C: SerfCheckpoint>(
                         .add_timing(&action_elapsed);
                 };
             }
-            SerfAction::CallFn { func, result } => {
+            SerfAction::CallFn { func } => {
                 func();
-                let _ = result.send(());
             }
         };
         let elapsed = start.elapsed();
