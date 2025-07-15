@@ -41,6 +41,7 @@ tracing.workspace = true
 tracing-test.workspace = true
 num_cpus = { workspace = true }
 rand = { workspace = true }
+jemallocator.workspace = true
 
 zkvm-jetpack.workspace = true
 

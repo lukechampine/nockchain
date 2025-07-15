@@ -6,6 +6,10 @@ use nockapp::kernel::boot;
 use nockapp::NockApp;
 use zkvm_jetpack::hot::produce_prover_hot_state;
 use zkvm_jetpack::jets::nbx::nbx_jets;
+use jemallocator::Jemalloc;
+
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
