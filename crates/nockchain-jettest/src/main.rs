@@ -1,13 +1,7 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 use nockapp::save::SaveableCheckpoint;
-use nockvm::jets::util::slot;
-use zkvm_jetpack::form::{BPolySlice, BPolyVec, Belt, MPolyVec, Melt, PolyVec};
-use zkvm_jetpack::hand::structs::HoonMapIter;
-use zkvm_jetpack::jets::nbx::{substitute::SubstituteEngine, mp_substitute_ultra_impl};
-use zkvm_jetpack::noun::noun_ext::NounExt as ZNounExt;
 use core::iter::once;
-use std::collections::BTreeMap;
 use flume::Receiver;
 use futures::Stream;
 use futures::{stream::iter, StreamExt};
@@ -24,7 +18,9 @@ use nockvm::mug::mug;
 use std::path::Path;
 use std::time::Instant;
 use zkvm_jetpack::hot::produce_prover_hot_state;
-use zkvm_jetpack::jets::nbx::{gpu, nbx_jets};
+use zkvm_jetpack::jets::nbx::nbx_jets;
+#[cfg(feature = "gpu")]
+use zkvm_jetpack::jets::nbx::gpu;
 
 pub enum MiningWire {
     Mined,
@@ -62,10 +58,12 @@ unsafe impl Sync for SendSlab {}
 #[derive(Subcommand, Debug, Clone)]
 pub enum Mode {
     Test(Test),
+    #[cfg(feature = "gpu")]
     #[command(subcommand)]
     GpuTest(GpuTest),
 }
 
+#[cfg(feature = "gpu")]
 #[derive(Subcommand, Debug, Clone)]
 pub enum GpuTest {
     Hash,
@@ -75,8 +73,17 @@ pub enum GpuTest {
     },
 }
 
+#[cfg(feature = "gpu")]
 impl GpuTest {
     async fn run(self, _: Cli) -> Result<()> {
+        use anyhow::anyhow;
+        use nockvm::jets::util::slot;
+        use zkvm_jetpack::form::{BPolySlice, BPolyVec, Belt, MPolyVec, Melt, PolyVec};
+        use zkvm_jetpack::hand::structs::HoonMapIter;
+        use zkvm_jetpack::jets::nbx::{substitute::SubstituteEngine, mp_substitute_ultra_impl};
+        use zkvm_jetpack::noun::noun_ext::NounExt as ZNounExt;
+        use std::collections::BTreeMap;
+
         match self {
             Self::Hash => Ok(zkvm_jetpack::jets::nbx::gpu::gpu_test().unwrap()),
             Self::Sub { mpsub_sam } => {
@@ -137,6 +144,7 @@ pub struct Test {
         requires = "permute"
     )]
     max_disable: Option<usize>,
+    #[cfg(feature = "gpu")]
     #[arg(short, long, help = "do not call get_gpu before invoking the tests")]
     dont_cache_gpu: bool,
 }
@@ -157,6 +165,7 @@ impl Test {
             error_out,
             permute,
             max_disable,
+            #[cfg(feature = "gpu")]
             dont_cache_gpu,
         } = self;
 
@@ -178,6 +187,7 @@ impl Test {
         let src_effect_hash = hash_slab(&src_effect);
         println!("Loaded source effect {src_effect_hash:?}");
 
+        #[cfg(feature = "gpu")]
         if !dont_cache_gpu && gpu::should_use_gpu() {
             gpu::cache_gpu();
             tokio::spawn(gpu::gpu_pmu_trigger_loop());
@@ -308,6 +318,7 @@ async fn main() -> Result<()> {
 
     match cli.mode {
         Mode::Test(p) => p.run(cli.nockapp_cli).await,
+        #[cfg(feature = "gpu")]
         Mode::GpuTest(p) => p.run(cli.nockapp_cli).await,
     }
 }

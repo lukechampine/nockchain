@@ -5,6 +5,7 @@ use nockvm::noun::{Atom, Noun, D};
 use nockvm_macros::tas;
 use tracing::log::*;
 
+#[cfg(feature = "gpu")]
 use super::gpu::{self, Submittable};
 use super::three::{hash_10, hash_varlen_padded};
 use crate::form::mary::MarySlice;
@@ -585,11 +586,15 @@ impl HashEngine {
             return vec![];
         }
 
+        #[cfg(feature = "gpu")]
         if gpu::should_use_gpu() {
             Submittable::gpu_process(self)
         } else {
             self.reduce_cpu()
         }
+
+        #[cfg(not(feature = "gpu"))]
+        self.reduce_cpu()
     }
 
     pub fn push_mary(&mut self, stage: usize, ma: MarySlice) -> usize {

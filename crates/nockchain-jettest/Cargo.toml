@@ -5,6 +5,11 @@ publish = false
 version.workspace = true
 edition.workspace = true
 
+[features]
+default = []
+gpu = ["zkvm-jetpack/gpu"]
+gpu-prod = ["gpu", "zkvm-jetpack/gpu-prod"]
+
 [dependencies]
 hoonc.workspace = true
 kernels = { workspace = true, features = ["dumb", "miner"] }

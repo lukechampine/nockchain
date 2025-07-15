@@ -6,6 +6,7 @@ use crate::form::math::poly::*;
 use crate::form::poly::Poly;
 use crate::form::{ElementEx, PolySlice, PolyVec};
 
+#[cfg(feature = "gpu")]
 use super::gpu;
 
 // 64MB in melts/belts
@@ -134,6 +135,7 @@ pub struct SubstituteEngine<'a, E: ElementEx> {
 
 impl SubstituteEngine<'_, Melt> {
     #[tracing::instrument(skip_all)]
+    #[cfg(feature = "gpu")]
     pub fn reduce_gpu(self) -> (Vec<Vec<Melt>>, usize) {
         use super::gpu::Submittable;
         let poly_len = self.poly_len;
@@ -141,11 +143,15 @@ impl SubstituteEngine<'_, Melt> {
     }
 
     pub fn reduce(self) -> (Vec<Vec<Melt>>, usize) {
+        #[cfg(feature = "gpu")]
         if gpu::should_use_gpu() {
             self.reduce_gpu()
         } else {
             self.reduce_cpu()
         }
+
+        #[cfg(not(feature = "gpu"))]
+        self.reduce_cpu()
     }
 }
 

@@ -20,6 +20,7 @@ mod utils;
 mod zoon;
 mod hash;
 
+#[cfg(feature = "gpu")]
 pub mod gpu;
 pub mod substitute;
 
