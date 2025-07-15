@@ -898,6 +898,49 @@
   """
   (make-markdown-effect nodes)
 ::
+++  display-draft-cord
+  |=  [name=@t p=inputs:transact]
+  ^-  @t
+  =/  inputs  `(list [nname:transact input:transact])`~(tap z-by:zo p)
+  =/  by-addrs
+    %+  roll  inputs
+    |=  [[name=nname:transact input=input:transact] acc=_`(z-map:zo lock:transact coins:transact)`~]
+    =/  seeds  ~(tap z-in:zo seeds:spend:input)
+    %+  roll  seeds
+    |=  [seed=seed:transact acc=_acc]
+    =/  lock  recipient:seed
+    =/  cur  (~(gut z-by:zo acc) lock 0)
+    =/  gift  gift:seed
+    =/  new-bal  (add cur gift)
+    (~(put z-by:zo acc) lock new-bal)
+  %+  roll  ~(tap z-by:zo by-addrs)
+  =/  acc=@t
+    %-  crip
+    """
+    ## draft
+
+    - {<name>}
+    """
+  |=  [[recipient=lock:transact amt=coins:transact] acc=_acc]
+  =/  r58  (to-b58:lock:transact recipient)
+  =/  amtdiv  (dvr amt 65.536)
+  %^  cat  3
+    ;:  (cury cat 3)
+      acc
+      '\0a\0a- assets: '
+      (scot %ud amt)
+      '\0a  - nocks: '
+      (scot %ud p.amtdiv)
+      '\0a  - nicks: '
+      (scot %ud q.amtdiv)
+      '\0a- m: '
+      (scot %ud m.recipient)
+      '\0a- signers: '
+    ==
+  %-  crip
+  %+  join  ' '
+  (serialize-lock recipient)
+::
 ++  display-note-cord
   |=  note=nnote:transact
   ^-  @t
@@ -1801,15 +1844,8 @@
         name  draft-name
       ==
     =/  draft-jam  (jam draft)
-    =/  markdown-text=@t
-      %-  crip
-      """
-      ## draft
-
-      - {<draft-name>}
-
-      {<draft>}
-      """
+    :: Only extract recipients and the totals to them, because otherwise printing them is painful
+    =/  markdown-text=@t  (display-draft-cord draft)
     =/  path=@t
       %-  crip
       "./drafts/{(trip name.draft)}.draft"
