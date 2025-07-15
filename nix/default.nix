@@ -1,7 +1,7 @@
 { stdenv, pkgs, lib, craneLib, ... }:
 let
   base = pkgs.callPackage ./base.nix { inherit pkgs lib; };
-  hoonc = pkgs.callPackage ./hoonc.nix { inherit stdenv lib base craneLib; };
+  hoonc = pkgs.callPackage ./hoonc.nix { inherit stdenv lib base craneLib commonArgs; };
   jam-pkg = pkgs.callPackage ./jam.nix { inherit base hoonc; };
 
   src = base.noNix ../.;
@@ -10,7 +10,7 @@ let
     strictDeps = true;
     pname = "nockchain-deps";
     # Additional environment variables can be set directly
-    # MY_CUSTOM_VAR = "some value";
+    SHADERC_LIB_DIR="${pkgs.shaderc.static}/lib";
   };
   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 

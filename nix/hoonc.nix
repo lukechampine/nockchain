@@ -1,4 +1,4 @@
-{ lib, stdenv, base, craneLib, ... }:
+{ lib, stdenv, base, craneLib, commonArgs, ... }:
 let
   keepList = [
     "crates/nockapp"
@@ -22,16 +22,12 @@ let
       builtins.any (k: lib.strings.hasInfix "${k}" path) keepList
   );
 
-  commonArgs = {
-    inherit src;
-    strictDeps = true;
+  hooncCommonArgs = commonArgs // {
     pname = "hoonc-deps";
-    # Additional environment variables can be set directly
-    # MY_CUSTOM_VAR = "some value";
   };
-  cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+  cargoArtifacts = craneLib.buildDepsOnly hooncCommonArgs;
 
-  individualCrateArgs = commonArgs // {
+  individualCrateArgs = hooncCommonArgs // {
     inherit cargoArtifacts;
     inherit (craneLib.crateNameFromCargoToml { inherit src; }) version;
     # NB: we disable tests since we'll run them all via cargo-nextest
