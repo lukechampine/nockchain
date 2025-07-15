@@ -6,10 +6,11 @@ use nockapp::kernel::boot;
 use nockapp::NockApp;
 use zkvm_jetpack::hot::produce_prover_hot_state;
 use nbx_jetpack::nbx_jets;
-use jemallocator::Jemalloc;
 
+// When enabled, use jemalloc for more stable memory allocation
+#[cfg(feature = "jemalloc")]
 #[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
+static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {

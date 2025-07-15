@@ -32,7 +32,7 @@ reedline.workspace = true
 anyhow.workspace = true
 flume.workspace = true
 itertools.workspace = true
-jemallocator.workspace = true
+tikv-jemallocator.workspace = true
 
 zkvm-jetpack.workspace = true
 nbx-jetpack.workspace = true

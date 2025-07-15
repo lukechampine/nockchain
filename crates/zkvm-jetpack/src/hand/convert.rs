@@ -273,7 +273,7 @@ impl TryFrom<Noun> for HoonList {
                 )
             })))
         } else {
-            not_cell()
+            Ok(HoonList { next: None })
         }
     }
 }

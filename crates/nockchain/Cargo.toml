@@ -7,6 +7,7 @@ edition.workspace = true
 
 [features]
 bazel_build = []
+jemalloc = ["tikv-jemallocator"]
 
 [dependencies]
 hoonc.workspace = true
@@ -36,12 +37,12 @@ libp2p = { workspace = true, features = [
 nockchain-libp2p-io.workspace = true
 tempfile = { workspace = true }
 termcolor.workspace = true
+tikv-jemallocator = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["full"] }
 tracing.workspace = true
 tracing-test.workspace = true
 num_cpus = { workspace = true }
 rand = { workspace = true }
-jemallocator.workspace = true
 
 zkvm-jetpack.workspace = true
 nbx-jetpack.workspace = true

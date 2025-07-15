@@ -3166,27 +3166,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a5f13b858c8d314ee3e8f639011f7ccefe71f97f96e50151fb991f267928e2c"
 
 [[package]]
-name = "jemalloc-sys"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d3b9f3f5c9b31aa0f5ed3260385ac205db665baa41d49bb8338008ae94ede45"
-dependencies = [
- "cc",
- "fs_extra",
- "libc",
-]
-
-[[package]]
-name = "jemallocator"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43ae63fcfc45e99ab3d1b29a46782ad679e98436c3169d15a167a1108a724b69"
-dependencies = [
- "jemalloc-sys",
- "libc",
-]
-
-[[package]]
 name = "jni-sys"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4373,7 +4352,6 @@ dependencies = [
  "futures",
  "hoonc",
  "ibig",
- "jemallocator",
  "kernels",
  "libp2p",
  "nbx-jetpack",
@@ -4385,6 +4363,7 @@ dependencies = [
  "rand 0.8.5",
  "tempfile",
  "termcolor",
+ "tikv-jemallocator",
  "tokio",
  "tracing",
  "tracing-test",
@@ -4405,7 +4384,6 @@ dependencies = [
  "futures",
  "hoonc",
  "itertools 0.14.0",
- "jemallocator",
  "kernels",
  "nbx-jetpack",
  "nockapp",
@@ -4414,6 +4392,7 @@ dependencies = [
  "reedline",
  "tempfile",
  "termcolor",
+ "tikv-jemallocator",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -6497,6 +6476,26 @@ dependencies = [
  "flate2",
  "jpeg-decoder",
  "weezl",
+]
+
+[[package]]
+name = "tikv-jemalloc-sys"
+version = "0.6.0+5.3.0-1-ge13ca993e8ccb9ba9847cc330696e02839f328f7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd3c60906412afa9c2b5b5a48ca6a5abe5736aec9eb48ad05037a677e52e4e2d"
+dependencies = [
+ "cc",
+ "libc",
+]
+
+[[package]]
+name = "tikv-jemallocator"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4cec5ff18518d81584f477e9bfdf957f5bb0979b0bac3af4ca30b5b3ae2d2865"
+dependencies = [
+ "libc",
+ "tikv-jemalloc-sys",
 ]
 
 [[package]]

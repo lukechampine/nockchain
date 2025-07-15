@@ -955,14 +955,14 @@
       =+  (to-b58:nname:transact name.note)
       :((cury cat 3) '[' first ' ' last ']')
       '\0a- assets: '
-      (scot %ud assets.note)
+      (scot %ui assets.note)
       '\0a- block height: '
-      (scot %ud origin-page.note)
+      (scot %ui origin-page.note)
       '\0a- source: '
       (to-b58:hash:transact p.source.note)
       '\0a## lock'
       '\0a- m: '
-      (scot %ud m.lock.note)
+      (scot %ui m.lock.note)
       '\0a- signers: '
     ==
   %-  crip
@@ -1271,7 +1271,13 @@
       (~(del z-by:zo pending-commands.state) pid)
     ::
     =^  cmd-effs  state
-      (poke ov)
+      =+  try-poke=(mule |.((poke ov)))
+      ?-  -.try-poke
+          %|
+        ~>  %slog.[%0 leaf+"poke failed, exiting"]
+        ((slog p.try-poke) [[%exit 0]~ state])
+        %&  p.try-poke
+      ==
     $(cmds t.cmds, effs (weld effs cmd-effs))
   ::
   ++  do-sync-run
@@ -1787,11 +1793,8 @@
     ::  the fee is subtracted from the first note that permits doing so without overspending
     =/  fee=coins:transact  fee.cause
     ::  get private key at specified index, or first derived key if no index
-    =/  private-keys=(list coil)  ~(coils get:v %prv)
-    ?~  private-keys
-      ~|("No private keys available for signing" !!)
     =/  sender=coil
-      ?~  index.cause  i.private-keys
+      ?~  index.cause  ~(master get:v %prv)
       =/  key-at-index=meta  (~(by-index get:v %prv) u.index.cause)
       ?>  ?=(%coil -.key-at-index)
       key-at-index
@@ -1821,7 +1824,7 @@
         %-  with-choice:with-refund:simple-from-note:new:input:transact
        [recipient gift fee note sender-key assert-receive-address:v]
       ::  we cannot subtract the fee from this note, or we already have from a previous one
-      :_  %.n
+      :_  spent-fee
       %-  with-choice:with-refund:simple-from-note:new:input:transact
       [recipient gift 0 note sender-key assert-receive-address:v]
     ::

@@ -169,8 +169,14 @@
       ==
     ::
     ::  ensure constants get updated to defaults set tx-engine core
+    ::  unless we are running fakenet, then we do nothing.
     ++  update-constants
       |=  arg=kernel-state:dk
+      =/  mainnet=(unit ?)  (~(is-mainnet dumb-derived d.arg constants.arg) c.arg)
+      ?~  mainnet
+        arg
+      ?.  u.mainnet
+        arg
       arg(constants *blockchain-constants:t)
     ::
     ++  check-checkpoints
@@ -348,20 +354,17 @@
         ?>  ?=(%fact -.cause)
         (handle-fact wir eny our now p.cause)
       ==
-    ::  possibly update timestamp on candidate block for mining
+    ::  possibly update candidate block for mining
     ::nbx disable
-    ::=.  m.k  (update-timestamp:min now)
+    ::=^  candidate-changed  m.k  (update-candidate-block:min c.k now)
+    =/  candidate-changed  %.n
     :_  k
-    ?.  mining.m.k
-      effs
-    ?:  =(candidate-block.m.k candidate-block.old-state)
-      effs
-    ::  emit effect if candidate block changed
-    =/  target  (~(got z-by targets.c.k) parent.candidate-block.m.k)
+    ?.  candidate-changed  effs
+    :_  effs
     =/  version=proof-version:sp
       (height-to-proof-version:con height.candidate-block.m.k)
+    =/  target  (~(got z-by targets.c.k) parent.candidate-block.m.k)
     =/  commit  (block-commitment:page:t candidate-block.m.k)
-    :_  effs
     ?-  version
       %0  [%mine %0 commit target pow-len:t]
       %1  [%mine %1 commit target pow-len:t]
@@ -524,7 +527,7 @@
         %-  trip
         %^  cat  3
           'heard elders starting at height '
-        (scot %ud oldest)
+        (rsh [3 2] (scot %ui oldest))
       ~>  %slog.[0 leaf+log-message]
       ::  find highest block we have in the ancestor list
       =/  latest-known=(unit [=block-id:t =page-number:t])
@@ -556,7 +559,7 @@
           :~  'DEEP REORG: processed elders and asking for oldest: requesting elders for block '
               (to-b58:hash:t last-id)
               ' at height '
-              (scot %ud oldest)
+              (rsh [3 2] (scot %ui oldest))
           ==
         ~>  %slog.[0 %leaf^log-message]
         :_  k
@@ -565,7 +568,7 @@
         %-  trip
         %^  cat  3
           'processed elders and found intersection: requesting next block '
-        (scot %ud +(page-number.u.latest-known))
+        (rsh [3 2] (scot %ui +(page-number.u.latest-known)))
       ~>  %slog.[0 %leaf^print-var]
       ::  request next block after our highest known block
       ::  this will trigger either catchup or reorg from this point
@@ -742,11 +745,7 @@
       :: no blocks were depending on this so work should be empty
       ?>  =(~ work)
       ::
-      ::  next we would process blocks made ready by tx but we already
-      ::  determined that no pending blocks were waiting on this this,
-      ::  so we just tell the miner.
-      =.  m.k  (heard-new-tx:min raw)
-      ~>  %slog.[3 leaf+"heard-new-tx"]
+      ~>  %slog.[3 leaf+"heard new valid tx"]
       :-  ~[[%seen %tx id.raw] [%gossip %0 %heard-tx raw]]
       k
     ::
@@ -773,12 +772,6 @@
         ::  remove the block from pending blocks. at this point, its either
         ::  been discarded by the kernel or lives in the consensus state
         [(weld new-effs effs) k]
-      ::
-      ::  tell the miner about the new transaction. this might look strange
-      ::  informing it here, potentially after new blocks have been made ready
-      ::  by it, but this tx may be part of a reorg, so the processed blocks
-      ::  might not be the heaviest.
-      =.  m.k  (heard-new-tx:min raw-tx)
       ::
       eff^k
     ::
@@ -828,14 +821,14 @@
           ?:  check-pow-flag:t
             ?>  ?=(^ pow.pag)
             %+  rap  3
-            :~  ' with proof version '  (scot %u version.u.pow.pag)
+            :~  ' with proof version '  (rsh [3 2] (scot %ui version.u.pow.pag))
             ==
           '. Skipping pow check because check-pow-flag was disabled'
         %-  trip
         ^-  @t
         %+  rap  3
         :~  'block '  (to-b58:hash:t digest.pag)
-            ' added to validated blocks at '  (scot %u height.pag)
+            ' added to validated blocks at '  (rsh [3 2] (scot %ui height.pag))
             pow-print
         ==
       ~>  %slog.[0 %leaf^print-var]
@@ -915,7 +908,7 @@
       ::  update derived state
       =.  d.k  (update:der c.k pag)
       ?.  =(old-heavy heaviest-block.c.k)
-        =^  mining-effs  k  (do-mine (hash-noun-varlen:tip5:zeke [%nonce (mod eny p.zeke)]))
+        =^  mining-effs  k  do-mine
         =.  effs  (weld mining-effs effs)
         effs^k
       ::
@@ -1034,10 +1027,9 @@
           :~  [%request %block %by-height height]
               [%seen %block u.heaviest-block.c.k `height]
           ==
-        =/  nonce=noun-digest:tip5:zeke  (hash-noun-varlen:tip5:zeke [%nonce (mod eny p:zeke)])
         =/  k=kernel-state:dk  k
         =^  mine-effects=(list effect:dk)  k
-          (do-mine nonce)
+          do-mine
         ~>  %slog.[0 leaf+"dumbnet born"]
         :_  k
         (weld mine-effects born-effects)
@@ -1049,19 +1041,16 @@
           (block-commitment:page:t candidate-block.m.k)
         ?.  =(bc.command commit)
           ~&  "mined for wrong (old) block commitment"
-          (do-mine nonce.command)
+          [~ k]
         ?:  %+  check-target:mine  dig.command
             (~(got z-by targets.c.k) parent.candidate-block.m.k)
           =.  m.k  (set-pow:min prf.command)
           =.  m.k  set-digest:min
           ~&  "lucky proof! calling heard block"
           =^  heard-block-effs  k  (heard-block /poke/miner now candidate-block.m.k eny)
-          =^  mine-effs  k  (do-mine (atom-to-digest:tip5:zeke dig.command))
           :_  k
-          (weld heard-block-effs mine-effs)
-        :: mine the next nonce
-        ~&  "unlucky :( calling do-mine"
-        (do-mine (atom-to-digest:tip5:zeke dig.command))
+          heard-block-effs
+        [~ k]
       ::
       ++  do-set-mining-key
         ^-  [(list effect:dk) kernel-state:dk]
@@ -1095,10 +1084,10 @@
                   shares=(list [lock:t @])
                   crash=_`?`%|
               ==
-          =+  r=(mole |.((from-b58:lock:t m ks)))
-          ?~  r
-            [~ ~ %&]
-          [[u.r locks] [[u.r s] shares] crash]
+          =+  r=(mule |.((from-b58:lock:t m ks)))
+          ?:  ?=(%| -.r)
+            ((slog p.r) [~ ~ %&])
+          [[p.r locks] [[p.r s] shares] crash]
         ?:  crash
           ~>  %slog.[0 leaf+"invalid public keys provided, exiting"]
           [[%exit 1]~ k]
@@ -1199,7 +1188,6 @@
       ==
       ::
       ++  do-mine
-        |=  nonce=noun-digest:tip5:zeke
         ^-  [(list effect:dk) kernel-state:dk]
         ?.  mining.m.k
           `k
@@ -1216,8 +1204,6 @@
             %1  [%1 commit target pow-len:t]
             %2  [%2 commit target pow-len:t]
           ==
-        =.  next-nonce.m.k  nonce
-        ~&  mining-on+nonce
         :_  k
         [%mine mine-start]~
       ::
@@ -1245,9 +1231,9 @@
             :~  'heard block '
                 (to-b58:hash:t block-id)
                 ' at height '
-                (scot %ud block-height)
+                (rsh [3 2] (scot %ui block-height))
                 ' but we only have blocks up to height '
-                (scot %ud u.highest-block-height.d.k)
+                (rsh [3 2] (scot %ui u.highest-block-height.d.k))
                 ': requesting next highest block.'
             ==
           ~>  %slog.[0 leaf+log-message]
@@ -1259,7 +1245,7 @@
           :~  'potential reorg: requesting elders for block '
               (to-b58:hash:t block-id)
               ' at height '
-              (scot %ud block-height)
+              (rsh [3 2] (scot %ui block-height))
           ==
         ~>  %slog.[0 leaf+log-message]
         [%request %block %elders block-id peer-id]~ :: ask for elders
@@ -1269,7 +1255,7 @@
     ++  regossip-block-txs-effects
       |=  =page:t
       ^-  (list effect:dk)
-      ?.  mining.m.k  ~
+      ?.  mining-pubkeys-set:min  ~
       %-  ~(rep z-in tx-ids.page)
       |=  [=tx-id:t effects=(list effect:dk)]
       ^-  (list effect:dk)

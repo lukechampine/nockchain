@@ -33,6 +33,7 @@ pub fn produce_prover_hot_state() -> Vec<HotEntry> {
     jets.extend(EXTENSION_FIELD_JETS);
     jets.extend(ZKVM_TABLE_JETS_V0_V1);
     jets.extend(ZKVM_TABLE_JETS_V2);
+    jets.extend(CUSTOM_LIST_JETS);
 
     jets
 }
@@ -673,6 +674,51 @@ pub const EXTENSION_FIELD_JETS: &[HotEntry] = &[
         1,
         fp_ntt_jet,
     ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"init-fpoly"),
+        ],
+        1,
+        init_fpoly_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"fpeval"),
+        ],
+        1,
+        fpeval_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"lift-to-fpoly"),
+        ],
+        1,
+        lift_to_fpoly_jet,
+    ),
 ];
 
 pub const BASE_FIELD_JETS: &[HotEntry] = &[
@@ -890,6 +936,20 @@ pub const BASE_POLY_JETS: &[HotEntry] = &[
         ],
         1,
         bp_hadamard_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"bpdvr"),
+        ],
+        1,
+        bpdvr_jet,
     ),
 ];
 
@@ -1300,4 +1360,19 @@ pub const CURVE_JETS: &[HotEntry] = &[(
     ],
     1,
     ch_scal_jet,
+)];
+
+pub const CUSTOM_LIST_JETS: &[HotEntry] = &[(
+    &[
+        K_138,
+        Left(b"one"),
+        Left(b"two"),
+        Left(b"tri"),
+        Left(b"qua"),
+        Left(b"pen"),
+        Left(b"zeke"),
+        Left(b"range"),
+    ],
+    1,
+    range_jet,
 )];
