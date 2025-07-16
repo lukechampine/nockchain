@@ -928,13 +928,13 @@
     ;:  (cury cat 3)
       acc
       '\0a\0a- assets: '
-      (scot %ud amt)
+      (rsh [3 2] (scot %ui amt))
       '\0a  - nocks: '
-      (scot %ud p.amtdiv)
+      (rsh [3 2] (scot %ui p.amtdiv))
       '\0a  - nicks: '
-      (scot %ud q.amtdiv)
+      (rsh [3 2] (scot %ui q.amtdiv))
       '\0a- m: '
-      (scot %ud m.recipient)
+      (rsh [3 2] (scot %ui m.recipient))
       '\0a- signers: '
     ==
   %-  crip

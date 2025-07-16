@@ -3,7 +3,7 @@
 set -e
 
 WALLET="./target/release/nockchain-wallet"
-SOCK=("--nockchain-socket" "miner4/miner.sock")
+SOCK=("--nockchain-socket" "miner4/.socket/nockchain_npc.sock")
 ADDR="$1"
 
 exec "$WALLET" ${SOCK[*]} list-notes-by-pubkey -p "$ADDR" | tee txnotes_$ADDR.txt
