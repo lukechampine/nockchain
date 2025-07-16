@@ -48,8 +48,6 @@ pub struct NockchainCli {
     pub npc_socket: String,
     #[arg(long, help = "Mine in-kernel", default_value = "false")]
     pub mine: bool,
-    #[arg(long, help = "Pin miner threads to specific threads")]
-    pub miner_pin_threads: Vec<usize>,
     #[arg(
         long,
         help = "Pubkey to mine to (mutually exclusive with --mining-key-adv)"

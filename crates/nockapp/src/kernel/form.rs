@@ -90,12 +90,6 @@ pub enum SerfAction<C> {
         metrics: Arc<NockAppMetrics>,
         result: oneshot::Sender<()>,
     },
-    // Set the thread affinity
-    #[cfg(target_os = "linux")]
-    SetAffinity {
-        affinity: Vec<usize>,
-        result: oneshot::Sender<()>,
-    },
     // Stop the loop
     Stop,
 }
@@ -263,23 +257,6 @@ impl<C> SerfThread<C> {
                 .await?;
             Ok(result_fut.await?)
         }
-    }
-
-    #[cfg(target_os = "linux")]
-    pub fn set_affinity(&self, affinity: Vec<usize>) -> impl Future<Output = Result<()>> {
-        let (result, result_fut) = oneshot::channel();
-        let action_sender = self.action_sender.clone();
-        async move {
-            action_sender
-                .send(SerfAction::SetAffinity { affinity, result })
-                .await?;
-            Ok(result_fut.await?)
-        }
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    pub fn set_affinity(&self, _affinity: Vec<usize>) -> impl Future<Output = Result<()>> {
-        async move { Ok(()) }
     }
 
     pub fn import(&self, state: LoadState) -> impl Future<Output = Result<()>> {
@@ -494,14 +471,6 @@ fn serf_loop<C: SerfCheckpoint>(
                         .add_timing(&action_elapsed);
                 };
             }
-            #[cfg(target_os = "linux")]
-            SerfAction::SetAffinity { affinity, result } => {
-                if let Err(e) = affinity::set_thread_affinity(affinity) {
-                    warn!("Failed to set affinity on serf: {e:?}");
-                } else {
-                    let _ = result.send(());
-                }
-            }
         };
         let elapsed = start.elapsed();
         if let Some(nockapp_metrics) = &serf.metrics {
@@ -678,17 +647,6 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
 }
 
 impl<C> Kernel<C> {
-    /// Sets thread affinity for serf
-    #[cfg(target_os = "linux")]
-    pub fn set_affinity(&self, affinity: Vec<usize>) -> impl Future<Output = Result<()>> {
-        self.serf.set_affinity(affinity)
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    pub fn set_affinity(&self, _affinity: Vec<usize>) -> impl Future<Output = Result<()>> {
-        async move { Ok(()) }
-    }
-
     // We are very carefully ensuring the future does not contain the "self" reference to ensure no lifetime issues when spawning tasks
     pub fn poke(&self, wire: WireRepr, cause: NounSlab) -> impl Future<Output = Result<NounSlab>> {
         self.serf.poke(wire, cause)
