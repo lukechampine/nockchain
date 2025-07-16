@@ -25,7 +25,7 @@ let
   individualCrateArgs // {
     pname = "nockchain";
     CARGO_PROFILE = profile;
-    cargoExtraArgs = "-p nockchain ${extraArgs}";
+    cargoExtraArgs = "-p nockchain --features nockchain/jemalloc ${extraArgs}";
     buildInputs = [ hoonc.hoonc ];
     preBuild = "mkdir -p assets && cp ${jam-pkg.dumb-jam.out} './assets/dumb.jam' && cp ${jam-pkg.miner-jam.out} './assets/miner.jam'";
   });
