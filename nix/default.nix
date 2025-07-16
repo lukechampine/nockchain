@@ -21,11 +21,11 @@ let
     doCheck = false;
   };
 
-  nockchain-base = profile: craneLib.buildPackage (
+  nockchain-base = profile: extraArgs: craneLib.buildPackage (
   individualCrateArgs // {
     pname = "nockchain";
     CARGO_PROFILE = profile;
-    cargoExtraArgs = "-p nockchain";
+    cargoExtraArgs = "-p nockchain ${extraArgs}";
     buildInputs = [ hoonc.hoonc ];
     preBuild = "mkdir -p assets && cp ${jam-pkg.dumb-jam.out} './assets/dumb.jam' && cp ${jam-pkg.miner-jam.out} './assets/miner.jam'";
   });
@@ -44,11 +44,17 @@ let
     cargoExtraArgs = "-p nockchain-metrics-exporter";
     nativeBuildInputs = [ ];
   });
+
+  nockchain = extraArgs: (nockchain-base "release" extraArgs);
+  nockchain-v4 = extraArgs: if lib.strings.hasInfix "x86_64-" pkgs.system then (nockchain-base "release-v4" extraArgs) else throw "release-v4 is only supported on x86_64 targets!";
+  makeGpu = call: call "--features nockchain/gpu --features nbx-jetpack/gpu-prod";
 in
 {
   hoonc = hoonc.hoonc;
-  nockchain = (nockchain-base "release");
-  nockchain-v4 = if lib.strings.hasInfix "x86_64-" pkgs.system then (nockchain-base "release-v4") else throw "release-v4 is only supported on x86_64 targets!";
+  nockchain = nockchain "";
+  nockchain-gpu = makeGpu nockchain;
+  nockchain-v4 = nockchain-v4 "";
+  nockchain-v4-gpu = makeGpu nockchain-v4;
   nockchain-native = (nockchain-base "release-native");
   nockchain-wallet = wallet-base;
   nockchain-metrics-exporter = metrics-exporter-base;
