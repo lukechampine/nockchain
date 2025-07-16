@@ -5,8 +5,8 @@ use wgpu::util::DeviceExt;
 use wgpu::Buffer;
 
 use super::{get_gpu, FromBuffer, Submittable, WgOffsets};
-use crate::jets::nbx::gpu::Submission;
-use crate::jets::nbx::hash::{HashEngine, NounDigest, ReduceChunk};
+use crate::gpu::Submission;
+use crate::hash::{HashEngine, NounDigest, ReduceChunk};
 
 impl FromBuffer for Vec<NounDigest> {
     fn from_buffers<T: AsRef<[u8]>>(b: &[T]) -> Self {
@@ -19,7 +19,6 @@ impl FromBuffer for Vec<NounDigest> {
             .flatten()
             .copied()
             .collect::<Vec<_>>();
-        trace!("Result: {result:?}");
         result
     }
 }

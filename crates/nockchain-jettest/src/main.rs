@@ -7,8 +7,8 @@ use futures::Stream;
 use futures::{stream::iter, StreamExt};
 use itertools::Itertools;
 use nockapp::kernel::boot::{self, Cli};
-use nockapp::kernel::form::Kernel;
-use nockapp::utils::NOCK_STACK_1KB;
+use nockapp::kernel::form::{Kernel, SerfThread};
+use nockapp::utils::{NOCK_STACK_1KB, NOCK_STACK_SIZE_TINY};
 use nockapp::wire::Wire;
 use nockapp::{noun::slab::NounSlab, NounExt};
 use nockvm::jets::hot::HotEntry;
@@ -20,7 +20,7 @@ use std::time::Instant;
 use zkvm_jetpack::hot::produce_prover_hot_state;
 use nbx_jetpack::nbx_jets;
 #[cfg(feature = "gpu")]
-use zkvm_jetpack::jets::nbx::gpu;
+use nbx_jetpack::gpu;
 
 pub enum MiningWire {
     Mined,
@@ -80,12 +80,12 @@ impl GpuTest {
         use nockvm::jets::util::slot;
         use zkvm_jetpack::form::{BPolySlice, BPolyVec, Belt, MPolyVec, Melt, PolyVec};
         use zkvm_jetpack::hand::structs::HoonMapIter;
-        use zkvm_jetpack::jets::nbx::{substitute::SubstituteEngine, mp_substitute_ultra_impl};
+        use nbx_jetpack::{substitute::SubstituteEngine, mp_substitute_ultra_impl};
         use zkvm_jetpack::noun::noun_ext::NounExt as ZNounExt;
         use std::collections::BTreeMap;
 
         match self {
-            Self::Hash => Ok(zkvm_jetpack::jets::nbx::gpu::gpu_test().unwrap()),
+            Self::Hash => Ok(nbx_jetpack::gpu::gpu_test().unwrap()),
             Self::Sub { mpsub_sam } => {
                 let subject = load_jam(mpsub_sam)?;
                 let subject = *unsafe { subject.root() };
@@ -119,7 +119,7 @@ impl GpuTest {
                     &chal_map,
                     dyns,
                 ).unwrap();
-                zkvm_jetpack::jets::nbx::gpu::gpu_sub_test(engine).unwrap();
+                nbx_jetpack::gpu::gpu_sub_test(engine).unwrap();
 
                 Ok(())
             }
@@ -145,8 +145,14 @@ pub struct Test {
     )]
     max_disable: Option<usize>,
     #[cfg(feature = "gpu")]
-    #[arg(short, long, help = "do not call get_gpu before invoking the tests")]
-    dont_cache_gpu: bool,
+    #[arg(short = 'g', long, help = "Use GPU when testing?")]
+    use_gpu: bool,
+    #[cfg(feature = "gpu")]
+    #[arg(short = 'F', long, help = "Target GPU to filter against")]
+    gpu_filter: Option<String>,
+    #[cfg(feature = "gpu")]
+    #[arg(short = 'I', long, help = "Target GPU ID to use in tests (post-filtering)", default_value = "0")]
+    gpu_id: usize,
 }
 
 fn hash_slab(s: &NounSlab) -> (usize, u64) {
@@ -166,8 +172,20 @@ impl Test {
             permute,
             max_disable,
             #[cfg(feature = "gpu")]
-            dont_cache_gpu,
+            use_gpu,
+            #[cfg(feature = "gpu")]
+            gpu_filter,
+            #[cfg(feature = "gpu")]
+            gpu_id,
         } = self;
+
+        let init_call = move || {
+            #[cfg(feature = "gpu")]
+            if use_gpu {
+                gpu::init_gpu(gpu_filter.as_deref(), gpu_id);
+            }
+        };
+        let init_call = Some(init_call);
 
         let max_disable = if permute { max_disable } else { Some(0) };
 
@@ -187,13 +205,6 @@ impl Test {
         let src_effect_hash = hash_slab(&src_effect);
         println!("Loaded source effect {src_effect_hash:?}");
 
-        #[cfg(feature = "gpu")]
-        if !dont_cache_gpu && gpu::should_use_gpu() {
-            gpu::cache_gpu();
-            tokio::spawn(gpu::gpu_pmu_trigger_loop());
-            println!("Cached GPU");
-        }
-
         for i in (0..=permute_jets.len())
             .rev()
             .take(max_disable.unwrap_or(permute_jets.len()) + 1)
@@ -212,7 +223,7 @@ impl Test {
                 }
 
                 let time = Instant::now();
-                let res = on_kernel(src_event.clone(), final_hot_state, cli.clone()).await?;
+                let res = on_kernel(src_event.clone(), final_hot_state, cli.clone(), init_call.clone()).await?;
                 let res_hash = hash_slab(&res);
 
                 println!(
@@ -259,24 +270,30 @@ async fn run_kernel(
     pokes: impl Stream<Item = SendSlab> + Send + 'static,
     hot_state: Vec<HotEntry>,
     cli: Cli,
+    init_call: Option<impl FnOnce() + Send + 'static>
 ) -> Receiver<SendSlab> {
 
-    let kernel = Kernel::<SaveableCheckpoint>::load_with_hot_state(
-        kernels::miner::KERNEL,
+    let serf = SerfThread::<SaveableCheckpoint>::new(
+        kernels::miner::KERNEL.into(),
         None,
-        &hot_state,
+        hot_state,
+        NOCK_STACK_SIZE_TINY,
         vec![],
         cli.trace_opts.into(),
     )
     .await
-    .expect("Could not load jojo kernel");
+    .expect("Could not load mining kernel");
+
+    if let Some(init_call) = init_call {
+        serf.call_fn(init_call).await.unwrap();
+    }
 
     let (tx, rx) = flume::bounded(0);
 
     let task = async move {
         let mut pokes = core::pin::pin!(pokes);
         while let Some(slab) = pokes.next().await {
-            let effects = kernel
+            let effects = serf
                 .poke(MiningWire::Candidate.to_wire(), slab.0)
                 .await
                 .expect("Could not poke jojo kernel with slab");
@@ -292,8 +309,8 @@ async fn run_kernel(
     rx
 }
 
-async fn on_kernel(slab: NounSlab, hot_state: Vec<HotEntry>, cli: Cli) -> Result<NounSlab> {
-    let effects = run_kernel(iter(once(SendSlab(slab))), hot_state, cli).await;
+async fn on_kernel(slab: NounSlab, hot_state: Vec<HotEntry>, cli: Cli, init_call: Option<impl FnOnce() + Send + 'static>) -> Result<NounSlab> {
+    let effects = run_kernel(iter(once(SendSlab(slab))), hot_state, cli, init_call).await;
     let effects_slab = effects.recv_async().await.unwrap().0;
 
     for effect in effects_slab.to_vec() {

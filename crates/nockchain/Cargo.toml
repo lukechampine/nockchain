@@ -8,6 +8,7 @@ edition.workspace = true
 [features]
 bazel_build = []
 jemalloc = ["tikv-jemallocator"]
+gpu = ["nbx-jetpack/gpu-prod"]
 
 [dependencies]
 hoonc.workspace = true

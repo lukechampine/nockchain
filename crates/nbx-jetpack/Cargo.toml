@@ -5,12 +5,13 @@ edition.workspace = true
 
 [features]
 default = []
-gpu = ["nbx-shaders", "wgpu", "naga"]
+gpu = ["nbx-shaders", "pollster", "wgpu", "naga"]
 gpu-prod = ["gpu", "nbx-shaders/comptime", "nbx-shaders/spirv_passthrough"]
 
 [dependencies]
 nockvm.workspace = true
 nockvm_macros.workspace = true
+nockapp.workspace = true
 zkvm-jetpack.workspace = true
 either.workspace = true
 num-traits.workspace = true
@@ -25,6 +26,7 @@ tokio.workspace = true
 bytemuck.workspace = true
 nbx-tip5.workspace = true
 
+pollster = { workspace = true, optional = true }
 wgpu = { workspace = true, optional = true }
 naga = { workspace = true, optional = true }
 nbx-shaders = { workspace = true, optional = true, features = [

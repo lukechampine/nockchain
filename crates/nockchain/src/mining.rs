@@ -169,6 +169,38 @@ impl PinThreads {
     }
 }
 
+#[cfg(feature = "gpu")]
+#[derive(Clone, Debug, Default)]
+struct GpuConfig {
+    miner: usize,
+    gpu_index: usize,
+    name_filter: Option<String>,
+}
+
+#[cfg(feature = "gpu")]
+impl FromStr for GpuConfig {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (miner, rest) = s.split_once("=").unwrap_or((s, ""));
+        let (gpu_index, name_filter) = rest.split_once(":").map(|(a, b)| (a, Some(b.to_string()))).unwrap_or((rest, None));
+
+        let miner = miner.parse::<usize>().map_err(|_| format!("Invalid miner id: {miner}"))?;
+
+        let gpu_index = if gpu_index.is_empty() {
+            0
+        } else {
+            gpu_index.parse::<usize>().map_err(|_| format!("Invalid GPU index: {gpu_index}"))?
+        };
+
+        Ok(Self {
+            miner,
+            gpu_index,
+            name_filter,
+        })
+    }
+}
+
 #[derive(Args, Clone, Debug, Default)]
 pub struct MiningConfig {
     #[arg(long, help = "Mine in-kernel", default_value = "false")]
@@ -192,6 +224,13 @@ pub struct MiningConfig {
         help = "Pin miner threads to given CPU cores. Format: sequence=starting_core, exact=core1,core2,core3, or performance"
     )]
     pub pin_threads: Option<PinThreads>,
+    #[cfg(feature = "gpu")]
+    #[arg(
+        long,
+        help = "Which miner threads to enable the GPU mining for. Format: miner1,miner2=gpuNum1,miner3=gpuNum2,miner5=gpuNum2:gpuNameFilter",
+        value_delimiter = ',',
+    )]
+    pub gpu_miners: Vec<GpuConfig>,
 }
 
 impl MiningConfig {
@@ -321,6 +360,8 @@ pub fn create_mining_driver(
                     i,
                     core_id,
                     mining_attempt_results.clone(),
+                    #[cfg(feature = "gpu")]
+                    cfg.gpu_miners.iter().find(|v| v.miner == i).cloned()
                 );
                 miners.spawn(miner_fut);
             }
@@ -613,6 +654,8 @@ impl MinerHandle {
         id: usize,
         thread_pin: Option<usize>,
         results: mpsc::Sender<(usize, Result<NounSlab, CrownError>)>,
+        #[cfg(feature = "gpu")]
+        gpu_miner: Option<GpuConfig>,
     ) -> Self {
         let kernel = Vec::from(KERNEL);
         let serf = SerfThread::<SaveableCheckpoint>::new(
@@ -634,6 +677,14 @@ impl MinerHandle {
                 .await
                 .expect("Could not invoke core pinning")
                 .expect("Could not pin the miner thread");
+        }
+
+        #[cfg(feature = "gpu")]
+        if let Some(config) = gpu_miner {
+            debug!("Initializing gpu {config:?}");
+            serf.call_fn(move || nbx_jetpack::gpu::init_gpu(config.name_filter.as_deref(), config.gpu_index))
+                .await
+                .expect("Could not invoke gpu initialization");
         }
 
         let (tx, rx) = watch::channel(SyncMutex::new(None));

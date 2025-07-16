@@ -1,19 +1,19 @@
 use core::num::NonZeroU64;
+use std::cell::OnceCell;
 use std::marker::PhantomData;
-use std::sync::{mpsc, Arc, Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::rc::Rc;
+use std::sync::{mpsc, Arc, Mutex};
+use std::time::Instant;
 
 use either::Either;
 use nbx_shaders::get_shader_module;
-use nockapp::Noun;
 use tracing::*;
-use wgpu::{Buffer, Device, PollType, SubmissionIndex};
+use wgpu::{Backends, Buffer, Device, DeviceType, SubmissionIndex};
+use zkvm_jetpack::form::Melt;
 
 use self::substitute::{AccumUniform, MulUniform, SubstituteIterOps};
 use super::substitute::SubstituteEngine;
-use crate::form::Melt;
-use crate::hand::structs::HoonList;
-use crate::jets::nbx::hash::{HashEngine, NounDigest, ReduceOp, VariableReduceOp};
+use crate::hash::{HashEngine, NounDigest, ReduceOp, VariableReduceOp};
 
 mod hash;
 mod substitute;
@@ -34,13 +34,32 @@ struct Gpu {
 }
 
 impl Gpu {
-    fn new() -> Result<Self, Box<dyn std::error::Error>> {
+    fn new(gpu_name_filter: Option<&str>, gpu_idx: usize) -> Result<Self, Box<dyn std::error::Error>> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::from_env_or_default());
 
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            ..Default::default()
-        }))?;
+        let mut adapters = instance.enumerate_adapters(Backends::from_env().unwrap_or_default());
+
+        fn dt_to_weight(dt: DeviceType) -> usize {
+            match dt {
+                DeviceType::Other => 0,
+                DeviceType::Cpu => 1,
+                DeviceType::VirtualGpu => 2,
+                DeviceType::IntegratedGpu => 3,
+                DeviceType::DiscreteGpu => 4,
+            }
+        }
+
+        adapters.sort_by_key(|v| !dt_to_weight(v.get_info().device_type));
+
+        for adapter in &adapters {
+            trace!("Potential adapter {:?}", adapter.get_info());
+        }
+
+        let adapter = if let Some(target_gpu) = gpu_name_filter {
+            adapters.into_iter().filter(|v| v.get_info().name.contains(target_gpu)).nth(gpu_idx)
+        } else {
+            adapters.into_iter().nth(gpu_idx)
+        }.ok_or("Adapter not found")?;
 
         debug!("Adapter found {:?}", adapter.get_info());
 
@@ -215,24 +234,12 @@ impl Gpu {
     }
 }
 
-static GPU: OnceLock<Gpu> = OnceLock::new();
-
-fn get_gpu() -> &'static Gpu {
-    GPU.get_or_init(|| Gpu::new().unwrap())
+thread_local! {
+    static GPU: OnceCell<Rc<Gpu>> = OnceCell::new();
 }
 
-// If we have a GPU in low power mode, we want to keep it up, hence we do this poll to trigger
-// initialization on the PMU.
-pub fn gpu_pmu_trigger() {
-    let gpu = get_gpu();
-    let _ = gpu.device.poll(PollType::Poll);
-}
-
-pub async fn gpu_pmu_trigger_loop() {
-    loop {
-        gpu_pmu_trigger();
-        tokio::time::sleep(Duration::from_millis(500)).await;
-    }
+fn get_gpu() -> Rc<Gpu> {
+    GPU.with(|v| v.get().expect("GPU not initialized").clone())
 }
 
 #[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
@@ -426,14 +433,14 @@ pub fn gpu_sub_test(engine: SubstituteEngine<Melt>) -> Result<(), Box<dyn std::e
     Ok(())
 }
 
-pub fn cache_gpu() {
-    get_gpu();
+pub fn init_gpu(gpu_name_filter: Option<&str>, gpu_idx: usize) {
+    GPU.with(|v| v.set(Gpu::new(gpu_name_filter, gpu_idx).unwrap().into()))
+        .ok()
+        .expect("GPU already initialized");
 }
 
 pub fn should_use_gpu() -> bool {
-    // TODO: move this into proper configuration
-    static USE_GPU: OnceLock<bool> = OnceLock::new();
-    *USE_GPU.get_or_init(|| std::env::var("NBX_USE_GPU").as_deref().unwrap_or("false") == "true")
+    GPU.with(|v| v.get().is_some())
 }
 
 pub struct Submission<T> {

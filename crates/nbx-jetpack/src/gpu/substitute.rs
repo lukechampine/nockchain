@@ -8,8 +8,8 @@ use wgpu::util::DeviceExt;
 use wgpu::Buffer;
 
 use super::{get_gpu, FromBuffer, Submittable};
-use crate::jets::nbx::gpu::Submission;
-use crate::jets::nbx::substitute::{SubstituteEngine, MAX_CHUNK_SIZE};
+use crate::gpu::Submission;
+use crate::substitute::{SubstituteEngine, MAX_CHUNK_SIZE};
 
 #[derive(Clone, Copy, Pod, Zeroable, Debug)]
 #[repr(C)]
@@ -179,7 +179,7 @@ impl<'a> Submittable for SubstituteEngine<'a, Melt> {
                                             iter_id: u as _,
                                         };
                                         buf_ids.push((Some(buf), com_ops.len()));
-                                        trace!("coms: {com_ops:?}");
+                                        //trace!("coms: {com_ops:?}");
                                         subs.extend(com_ops);
                                         let e = ops_map.entry(Some(buf)).or_default();
                                         cur_splits.insert(Some(buf), e.len());
