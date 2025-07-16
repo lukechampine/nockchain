@@ -303,6 +303,8 @@ pub fn create_mining_driver(
                 .map(|v| v.logical_core_ids(num_threads as _));
 
             let hot_state = zkvm_jetpack::hot::produce_prover_hot_state();
+            let nbx_jets = nbx_jetpack::nbx_jets().collect::<Vec<_>>();
+            let hot_state = [nbx_jets, hot_state].concat();
             let test_jets_str = std::env::var("NOCK_TEST_JETS").unwrap_or_default();
             let test_jets = nockapp::kernel::boot::parse_test_jets(test_jets_str.as_str());
 
