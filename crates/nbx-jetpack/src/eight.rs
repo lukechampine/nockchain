@@ -439,6 +439,47 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
     // =/  boundary-zerofier  (init-bpoly ~[(bneg 1) 1])          ::  f(X)=X-1
     let boundary_zerofier = [Elem::from_u64(bneg(1)), Elem::one()];
     let boundary_zerofier = PolySlice(&boundary_zerofier);
+
+    // Substitution moved out from process_degree_constraints to have everything done in one go.
+    let mut engine = SubstituteEngine::new(max_height);
+    let mut comp_cnts = vec![];
+    let tworow_trace_polys = tworow_trace_polys
+        .iter()
+        .map(|v| PolyVec(v.0.to_vec()))
+        .map(<PolyVec<Elem>>::from)
+        .collect::<Vec<_>>();
+    for i in 0..omicrons.len() {
+        // =/  trace  (snag i tworow-trace-polys)
+        let trace = &tworow_trace_polys[i];
+        let trace: PolySlice<Elem> = trace.into();
+        // =/  constraints  (~(got by constraint-w-deg-map.dp) i)
+        let constraints2 = constraint_w_deg_map.get(&(i as u64)).unwrap();
+        // =/  dyns  (~(got by dyn-map) i)
+        let dyns = dyn_map
+            .and_then(|v| v.get(stack, D(i as _)))
+            .ok_or_else(det_err)?;
+        let dyns = BPolySlice::try_from(dyns)?;
+
+        for constraints in constraints2 {
+            for (_, mp) in constraints.iter() {
+                // =/  comps=(list bpoly)
+                //   (mp-substitute-ultra mp trace max-height chal-map dyns)
+                comp_cnts.push(mp_substitute_ultra_impl(
+                        &mut engine,
+                        0,
+                        *mp,
+                        trace,
+                        &chal_map,
+                        dyns,
+                )?);
+            }
+        }
+    }
+
+    let (all_comps, poly_len) = engine.reduce();
+    let mut all_comps = all_comps.iter().flat_map(|m| m.chunks(poly_len));
+    let mut comp_cnts = comp_cnts.into_iter();
+
     // ::
     // %+  roll  (range len.omicrons)
     // |=  [i=@ acc=_zero-bpoly]
@@ -456,14 +497,6 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
             .and_then(|v| v.get(stack, D(i as _)))
             .ok_or_else(det_err)?;
         let chals2 = BPolySlice::try_from(chals)?;
-        // =/  trace  (snag i tworow-trace-polys)
-        let trace = tworow_trace_polys[i];
-        //#[cfg(not(target_feature = "avx2"))]
-        let trace: PolyVec<Elem> = PolyVec(trace.0.to_vec()).into();
-        //#[cfg(not(target_feature = "avx2"))]
-        let trace: PolySlice<Elem> = (&trace).into();
-        // =/  constraints  (~(got by constraint-w-deg-map.dp) i)
-        let constraints2 = constraint_w_deg_map.get(&(i as u64)).unwrap();
         // =/  counts  (~(got by constraint-counts) i)
         let counts = constraint_counts
             .and_then(|v| v.get(stack, D(i as _)))
@@ -471,11 +504,8 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
         let counts: [_; 5] = counts
             .uncell()?
             .map(|v| v.as_atom().unwrap().as_u64().unwrap());
-        // =/  dyns  (~(got by dyn-map) i)
-        let dyns = dyn_map
-            .and_then(|v| v.get(stack, D(i as _)))
-            .ok_or_else(det_err)?;
-        let dyns = BPolySlice::try_from(dyns)?;
+        // =/  constraints  (~(got by constraint-w-deg-map.dp) i)
+        let constraints2 = constraint_w_deg_map.get(&(i as u64)).unwrap();
         // ::
         // =/  row-zerofier                                           ::  f(X) = (X^N-1)
         //   (bpsub (bppow id-bpoly height) one-bpoly)
@@ -493,7 +523,7 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
 
         let mut chals = chals2.0;
         for (o, ((constraints, count), dividend)) in
-            constraints2.iter().zip(counts).zip(dividends).enumerate()
+            constraints2.iter().zip(counts.into_iter()).zip(dividends).enumerate()
         {
             //   ?.  is-extra  zero-bpoly
             if o == dividends.len() - 1 && !is_extra {
@@ -511,13 +541,11 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
             //     dyns
             // ==
             let processed_constraints = process_composition_constraints(
+                &mut all_comps,
+                &mut comp_cnts,
                 constraints,
-                trace,
                 PolySlice(weights),
-                dyns,
                 fri_deg_bound,
-                max_height,
-                &chal_map,
             )?;
             // %-  bpdiv
             // :_  boundary-zerofier
@@ -542,14 +570,12 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
 }
 
 #[tracing::instrument(skip_all)]
-fn process_composition_constraints(
+fn process_composition_constraints<'a>(
+    mut all_comps: impl Iterator<Item = &'a [Melt]>,
+    comp_cnts: impl Iterator<Item = usize>,
     constraints: &ProcessedDeg,
-    trace: PolySlice<Melt>,
     weights: BPolySlice,
-    dyns: BPolySlice,
     fri_deg_bound: u64,
-    max_height: u64,
-    chal_map: &BTreeMap<u64, Belt>,
 ) -> core::result::Result<PolyVec<Melt>, JetErr>
 {
     // |=  $:  constraints=(list [(list @) mp-ultra])
@@ -566,25 +592,6 @@ fn process_composition_constraints(
     // ::
     let mut acc = PolyVec(vec![Melt::zero()]);
     let mut idx = 0;
-
-    let mut engine = SubstituteEngine::new(max_height);
-    let mut comp_cnts = vec![];
-
-    for (_, mp) in constraints.iter() {
-        // =/  comps=(list bpoly)
-        //   (mp-substitute-ultra mp trace max-height chal-map dyns)
-        comp_cnts.push(mp_substitute_ultra_impl(
-            &mut engine,
-            0,
-            *mp,
-            trace,
-            chal_map,
-            dyns,
-        )?);
-    }
-
-    let (all_comps, poly_len) = engine.reduce();
-    let mut all_comps = all_comps.iter().flat_map(|m| m.chunks(poly_len));
 
     for ((degs, _), comps) in constraints.iter().zip(comp_cnts) {
         let comps = (&mut all_comps).take(comps);
