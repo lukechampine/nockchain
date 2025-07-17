@@ -596,16 +596,7 @@ pub fn fpmul<'a>(stack: &mut NockStack, fp: FPolyVec, fq: FPolyVec) -> FPolyVec 
     // =/  p  ~(to-poly fop fp)
     // =/  q  ~(to-poly fop fq)
     // ?:  (lth (add (fdegree p) (fdegree q)) 8)
-    let degree = fdegree((&fp).into()) + fdegree((&fq).into());
-    let ret = if degree < 8 {
-        //   (fpmul-naive fp fq)
-        fpmul_naive(fp, fq)
-    } else {
-        // (fpmul-fast fp fq)
-        fpmul_fast(fp, fq)
-    };
-    jam_to(stack, &ret.0, "fpmul-r");
-    ret
+    fpmul_fast(fp, fq)
 }
 
 fn fcan<T: Element + Copy + PartialEq>(mut p: PolySlice<T>) -> PolySlice<T> {

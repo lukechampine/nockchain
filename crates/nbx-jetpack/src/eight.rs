@@ -41,6 +41,7 @@ pub fn weighted_linear_combo<'a>(
 
     let id = id_fpoly();
     let id_x = fpsub((&id).into(), x_poly);
+    let id_xd = fpdiv(stack, id.clone(), id_x.clone()).unwrap();
 
     // %+  roll  polys
     // |=  [poly=fpoly acc=_zero-fpoly num=_idx]
@@ -67,7 +68,7 @@ pub fn weighted_linear_combo<'a>(
         .entry((res, id_x.clone()))
         .or_insert_with_key(|(r, i)| fpdiv(stack, r.clone(), i.clone()))
         .clone()?;*/
-        let res = fpdiv(stack, res, id_x.clone())?;
+        let res = fpmul(stack, res, id_xd.clone());
         //println!(
         //    "res {} {:?}",
         //    vmug(stack, &res.0),
