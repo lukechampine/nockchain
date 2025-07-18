@@ -58,4 +58,5 @@ in
   nockchain-native = (nockchain-base "release-native");
   nockchain-wallet = wallet-base;
   nockchain-metrics-exporter = metrics-exporter-base;
+  nockchain-jamfiles = jam-pkg;
 }
