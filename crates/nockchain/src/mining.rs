@@ -1,5 +1,6 @@
 use std::str::FromStr;
 use std::sync::Mutex as SyncMutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::{value_parser, Args};
 use gdt_cpus::CoreType;
@@ -8,11 +9,11 @@ use nockapp::kernel::form::SerfThread;
 use nockapp::nockapp::driver::{IODriverFn, NockAppHandle, PokeResult};
 use nockapp::nockapp::wire::Wire;
 use nockapp::nockapp::NockAppError;
-use nockapp::noun::slab::{slab_equality, NounSlab};
+use nockapp::noun::slab::{slab_equality, NockJammer, NounSlab};
 use nockapp::noun::{AtomExt, NounExt};
 use nockapp::save::SaveableCheckpoint;
 use nockapp::utils::NOCK_STACK_SIZE_TINY;
-use nockapp::CrownError;
+use nockapp::{Bytes, CrownError, Noun};
 use nockchain_libp2p_io::tip5_util::tip5_hash_to_base58;
 use nockvm::interpreter::NockCancelToken;
 use nockvm::jets::hot::HotEntry;
@@ -368,10 +369,19 @@ pub fn create_mining_driver(
             let mut miners = miners.join_all().await;
             miners.sort_by_key(|v| v.id);
 
+            let save_mine_attempts = SaveMineAttempts::Blocks;
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time went backwards");
+            let run_id = now.as_secs().to_string();
+            let mut run_cnt = 0;
+
             loop {
                 tokio::select! {
                         mining_result = mining_attempts.recv() => {
-                            let (id, slab_res) = mining_result.expect("Mining attempt result failed");
+                            let (id, slab_res, jam_inp) = mining_result.expect("Mining attempt result failed");
+                            let run_cnt_res = run_cnt;
+                            run_cnt += 1;
                             let miner = &miners[id];
                             let slab = slab_res.expect("Mining attempt result failed");
                             let result = unsafe { slab.root() };
@@ -389,6 +399,9 @@ pub fn create_mining_driver(
                                 let [head, res, tail] = effect.uncell().expect("Expected three elements in mining result");
                                 if head.eq_bytes("mine-result") {
                                     if unsafe { res.raw_equals(&D(0)) } {
+                                        if save_mine_attempts.should_save_lucky() {
+                                            save_mine_attempt(jam_inp, effect, &run_id, run_cnt_res).await;
+                                        }
                                         // success
                                         // poke main kernel with mined block. Do not start a new attempt,
                                         // because it will be invalid anyways.
@@ -398,6 +411,9 @@ pub fn create_mining_driver(
                                         poke_slab.copy_into(poke);
                                         handle.poke(MiningWire::Mined.to_wire(), poke_slab).await.expect("Could not poke nockchain with mined PoW");
                                     } else {
+                                        if save_mine_attempts.should_save_unlucky() {
+                                            save_mine_attempt(jam_inp, effect, &run_id, run_cnt_res).await;
+                                        }
                                         // failure
                                         //  launch new attempt, using hash as new nonce
                                         //  nonce is tail
@@ -613,7 +629,7 @@ async fn start_mining_attempt(
 struct Miner {
     serf: SerfThread<SaveableCheckpoint>,
     id: usize,
-    results: mpsc::Sender<(usize, Result<NounSlab, CrownError>)>,
+    results: mpsc::Sender<(usize, Result<NounSlab, CrownError>, Bytes)>,
     reqs: watch::Receiver<SyncMutex<Option<NounSlab>>>,
 }
 
@@ -628,16 +644,48 @@ impl Miner {
                 continue;
             };
 
+            let poke_jam = poke_slab.jam();
+
             let result = self
                 .serf
                 .poke(MiningWire::Candidate.to_wire(), poke_slab)
                 .await;
 
-            if self.results.send((self.id, result)).await.is_err() {
+            if self.results.send((self.id, result, poke_jam)).await.is_err() {
                 break;
             }
         }
     }
+}
+
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+enum SaveMineAttempts {
+    #[default]
+    None,
+    All,
+    Blocks,
+}
+
+impl SaveMineAttempts {
+    fn should_save_lucky(self) -> bool {
+        matches!(self, Self::All | Self::Blocks)
+    }
+
+    fn should_save_unlucky(self) -> bool {
+        matches!(self, Self::All)
+    }
+}
+
+async fn save_mine_attempt(in_jam: Bytes, out_res: Noun, run_id: &str, run_cnt: usize) {
+    let mut out_res_slab = <NounSlab<NockJammer>>::new();
+    out_res_slab.copy_into(out_res);
+    let out_jam = out_res_slab.jam();
+    let dir = std::path::Path::new("miner_jams")
+        .join(&run_id)
+        .join(run_cnt.to_string());
+    tokio::fs::create_dir_all(&dir).await.unwrap();
+    let _ = tokio::fs::write(dir.join("event.jam"), in_jam).await;
+    let _ = tokio::fs::write(dir.join("effect.jam"), out_jam).await;
 }
 
 struct MinerHandle {
@@ -653,7 +701,7 @@ impl MinerHandle {
         test_jets: Vec<NounSlab>,
         id: usize,
         thread_pin: Option<usize>,
-        results: mpsc::Sender<(usize, Result<NounSlab, CrownError>)>,
+        results: mpsc::Sender<(usize, Result<NounSlab, CrownError>, Bytes)>,
         #[cfg(feature = "gpu")]
         gpu_miner: Option<GpuConfig>,
     ) -> Self {
