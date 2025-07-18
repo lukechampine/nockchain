@@ -24,6 +24,68 @@ use zkvm_jetpack::hand::structs::{HoonList, HoonMap, HoonMapIter};
 use zkvm_jetpack::jets::utils::{det_err, jet_err};
 use zkvm_jetpack::noun::noun_ext::NounExt;
 
+struct WeightedDivConst {
+    d: Felt,
+    dg: usize,
+    pinned: FPolyVec,
+}
+
+impl WeightedDivConst {
+    fn new(stack: &mut NockStack, q: FPolyVec, pl: usize) -> Self {
+        let (d, g) = con_mon(q);
+        let dg = fdegree((&g).into());
+
+        let mut rg = g;
+        rg.0.reverse();
+
+        // fdegree(p)
+        let df = pl - 1;
+
+        let dq = df - dg;
+        let pinned = pinv_mod_x_to(stack, dq + 1, (&rg).into());
+
+        Self {
+            d,
+            dg,
+            pinned,
+        }
+    }
+}
+
+#[tracing::instrument(skip_all)]
+fn fpdiv_with_cache<'a>(
+    stack: &mut NockStack,
+    mut p: FPolyVec,
+    WeightedDivConst { d, dg, pinned }: &WeightedDivConst,
+) -> FPolyVec {
+    assert!(!p.0.is_empty());
+
+    if fp_is_zero((&p).into()) {
+        p.0.truncate(1);
+        jam_to(stack, &p.0, "fpdiv-r");
+        return p;
+    }
+
+    let (c, f) = con_mon(p.clone());
+    let lead = c / *d;
+    let df = fdegree((&f).into());
+    let mut rf = f;
+    rf.0.reverse();
+    if df < *dg {
+        let ret = zero_fpoly();
+        return ret;
+    }
+    // Since pinned relies on degree we estimated
+    let df = rf.0.len() - 1;
+    let dq = df - *dg;
+    let mulled = fpmul(stack, pinned.clone(), rf);
+    let mut scagged = PolyVec(scag_vec(dq + 1, mulled.0));
+    scagged.0.reverse();
+    pscal_inplace(lead, &mut scagged.0);
+    scagged
+}
+
+
 pub fn weighted_linear_combo<'a>(
     stack: &mut NockStack,
     //cache: &mut HashMap<(FPolyVec, FPolyVec), core::result::Result<FPolyVec, JetErr>>,
@@ -41,8 +103,7 @@ pub fn weighted_linear_combo<'a>(
 
     let id = id_fpoly();
     let id_x = fpsub((&id).into(), x_poly);
-    // FIXME: this is not equivalent
-    // let id_xd = fpdiv(stack, id.clone(), id_x.clone()).unwrap();
+    let id_x = WeightedDivConst::new(stack, id_x, polys[0].0.len());
 
     // %+  roll  polys
     // |=  [poly=fpoly acc=_zero-fpoly num=_idx]
@@ -63,13 +124,13 @@ pub fn weighted_linear_combo<'a>(
             vmug(stack, &fpc)
         );*/
         let fpc = PolySlice(&fpc);
-        let res = fpsub(poly, fpc);
+        let r1 = fpsub(poly, fpc);
         //println!("res {}", vmug(stack, &res.0));
         /*let res = cache
         .entry((res, id_x.clone()))
         .or_insert_with_key(|(r, i)| fpdiv(stack, r.clone(), i.clone()))
         .clone()?;*/
-        let res = fpdiv(stack, res, id_x.clone())?;
+        let res = fpdiv_with_cache(stack, r1, &id_x);
         //println!(
         //    "res {} {:?}",
         //    vmug(stack, &res.0),

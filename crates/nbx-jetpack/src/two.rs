@@ -187,7 +187,7 @@ pub fn fpscal<'a>(c: Felt, mut fp: FPolyVec) -> FPolyVec {
     fp
 }
 
-fn fp_is_zero(p: FPolySlice) -> bool {
+pub fn fp_is_zero(p: FPolySlice) -> bool {
     // ~/  %fp-is-zero
     // |=  p=fpoly
     // ^-  ?
@@ -615,7 +615,7 @@ fn fcan<T: Element + Copy + PartialEq>(mut p: PolySlice<T>) -> PolySlice<T> {
     p
 }
 
-fn fdegree<T: Element + Copy + PartialEq>(p: PolySlice<T>) -> usize {
+pub fn fdegree<T: Element + Copy + PartialEq>(p: PolySlice<T>) -> usize {
     // |=  p=poly
     // ^-  @
     // =/  cp=poly  (fcan p)
@@ -625,22 +625,20 @@ fn fdegree<T: Element + Copy + PartialEq>(p: PolySlice<T>) -> usize {
 }
 
 // ::  con-mon: split p(x)!=0 uniquely into c*f(x) where c is constant f monic
-fn con_mon(mut fp: FPolyVec) -> (Felt, FPolyVec) {
+pub fn con_mon(mut fp: FPolyVec) -> (Felt, FPolyVec) {
     // |=  fp=fpoly
     // ^-  [felt fpoly]
     // ~+
     // =.  fp  ~(flop fop (fpcan fp))
-    fp.0.reverse();
     // ~|  "Cannot accept the zero polynomial!"
     // ?<  =(zero-fpoly fp)
     assert_ne!(fp.0, &[Felt::zero()]);
     // :-  ~(head fop fp)
-    let head = fp.0[0];
+    let head = fp.0[fp.0.len() - 1];
     // %~  flop  fop
     // (fpscal (finv ~(head fop fp)) fp)
     let head_inv = finv_(&head);
-    let mut fp = fpscal(head_inv, fp);
-    fp.0.reverse();
+    let fp = fpscal(head_inv, fp);
     (head, fp)
 }
 
@@ -832,7 +830,7 @@ where
 }
 
 // ::  +pinv-mod-x-to: computes p^{-1} mod x^l
-fn pinv_mod_x_to<'a>(stack: &mut NockStack, l: usize, p: FPolySlice) -> FPolyVec {
+pub fn pinv_mod_x_to<'a>(stack: &mut NockStack, l: usize, p: FPolySlice) -> FPolyVec {
     jam_to(stack, p.0, "pmxt-p");
     jam_to2(stack, D(l as _), "pmxt-l");
     // |=  [l=@ p=fpoly]

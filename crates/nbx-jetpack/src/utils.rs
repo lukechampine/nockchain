@@ -31,6 +31,11 @@ pub fn scag_ref<T>(a: usize, b: &[T]) -> &[T] {
     b.split_at(core::cmp::min(a, b.len())).0
 }
 
+pub fn scag_vec<T>(a: usize, mut b: Vec<T>) -> Vec<T> {
+    b.truncate(core::cmp::min(a, b.len()));
+    b
+}
+
 pub fn slag_mut<T>(a: usize, b: &mut [T]) -> &mut [T] {
     b.split_at_mut(core::cmp::min(a, b.len())).1
 }
