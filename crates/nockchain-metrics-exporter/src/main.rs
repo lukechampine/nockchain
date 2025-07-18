@@ -109,6 +109,7 @@ impl NpcHandler {
             wire,
             mut poke,
             ack_channel,
+            timeout: _,
         } = io
         else {
             error!("Invalid action");
