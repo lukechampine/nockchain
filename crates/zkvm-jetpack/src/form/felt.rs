@@ -1,4 +1,6 @@
 use core::ops::{Add, Div, Mul, Neg, Sub};
+use std::ops::AddAssign;
+use std::ops::MulAssign;
 
 use nockvm::noun::Noun;
 use num_traits::{MulAdd, Pow};
@@ -157,6 +159,13 @@ impl Add for Felt {
     }
 }
 
+impl AddAssign for Felt {
+    #[inline(always)]
+    fn add_assign(&mut self, rhs: Self) {
+        *self = *self + rhs;
+    }
+}
+
 impl Sub for Felt {
     type Output = Self;
 
@@ -176,6 +185,13 @@ impl Mul for Felt {
         let mut res: Felt = Felt::zero();
         fmul(&self, &rhs, &mut res);
         res
+    }
+}
+
+impl MulAssign for Felt {
+    #[inline(always)]
+    fn mul_assign(&mut self, rhs: Self) {
+        *self = *self * rhs;
     }
 }
 

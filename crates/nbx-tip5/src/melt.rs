@@ -1,4 +1,4 @@
-use std::ops::{Add, Div, Mul, Neg, Sub};
+use std::ops::{Add, AddAssign, Div, Mul, MulAssign, Neg, Sub};
 
 use nockvm::noun::Noun;
 use num_traits::Pow;
@@ -57,6 +57,13 @@ impl Add for Melt {
     }
 }
 
+impl AddAssign for Melt {
+    #[inline(always)]
+    fn add_assign(&mut self, rhs: Self) {
+        *self = *self + rhs;
+    }
+}
+
 impl Sub for Melt {
     type Output = Self;
 
@@ -83,6 +90,13 @@ impl Mul for Melt {
         let a = self.0;
         let b = rhs.0;
         Melt(montiply(a, b))
+    }
+}
+
+impl MulAssign for Melt {
+    #[inline(always)]
+    fn mul_assign(&mut self, rhs: Self) {
+        *self = *self * rhs;
     }
 }
 

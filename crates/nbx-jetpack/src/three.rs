@@ -7,6 +7,7 @@ use nockvm::jets::util::{slot, BAIL_EXIT};
 use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::noun::{Atom, Noun, D, T};
+use tracing::info_span;
 
 use super::one::*;
 use super::utils::*;
@@ -393,11 +394,15 @@ pub struct MerkHeap {
     pub m: Mary,
 }
 
+pub fn mary_to_noun(stack: &mut NockStack, m: Mary) -> Noun {
+    let (ret, handle) = new_handle_mut_mary(stack, m.step as _, m.len as _);
+    handle.dat.copy_from_slice(&m.dat);
+    finalize_mary(stack, m.step as _, m.len as _, ret)
+}
+
 impl MerkHeap {
     pub fn to_noun(self, stack: &mut NockStack) -> Noun {
-        let (ret, handle) = new_handle_mut_mary(stack, self.m.step as _, self.m.len as _);
-        handle.dat.copy_from_slice(&self.m.dat);
-        let ma = finalize_mary(stack, self.m.step as _, self.m.len as _, ret);
+        let ma = mary_to_noun(stack, self.m);
         let h = self
             .h
             .map(Belt::from)
@@ -408,6 +413,7 @@ impl MerkHeap {
     }
 }
 
+#[tracing::instrument(skip_all)]
 pub fn build_merk_heap_impl<T: ElementEx>(
     m: MarySlice,
 ) -> core::result::Result<(usize, MerkHeap), JetErr> {
@@ -480,22 +486,26 @@ pub fn build_merk_heap_impl<T: ElementEx>(
     // ... then build a mary out of the result
     let mut engine = HashEngine::default();
 
-    engine.ensure_stages(height - 1);
-    engine.push_pair(0, 0, DIGEST_LENGTH);
-    for l in 1..(height - 1) {
-        for i in (0..(1 << l)).step_by(2) {
-            engine.reserve_pair(l);
-            for i in i..=(i + 1) {
-                engine.push_pair(l, i * 2 * DIGEST_LENGTH, (i * 2 + 1) * DIGEST_LENGTH);
+    info_span!("build_merk_heap_pairs").in_scope(|| {
+        engine.ensure_stages(height - 1);
+        engine.push_pair(0, 0, DIGEST_LENGTH);
+        for l in 1..(height - 1) {
+            for i in (0..(1 << l)).step_by(2) {
+                engine.reserve_pair(l);
+                for i in i..=(i + 1) {
+                    engine.push_pair(l, i * 2 * DIGEST_LENGTH, (i * 2 + 1) * DIGEST_LENGTH);
+                }
             }
         }
-    }
+    });
 
-    for i in 0..m.len {
-        let t = snag_as_poly_mary::<T>(m, i as usize);
-        let hbp = hashable_poly(t);
-        engine.push_mary(height - 1, hbp);
-    }
+    info_span!("build_merk_heap_marys").in_scope(|| {
+        for i in 0..m.len {
+            let t = snag_as_poly_mary::<T>(m, i as usize);
+            let hbp = hashable_poly(t);
+            engine.push_mary(height - 1, hbp);
+        }
+    });
 
     engine.set_out_stages(height);
     let mut res = engine

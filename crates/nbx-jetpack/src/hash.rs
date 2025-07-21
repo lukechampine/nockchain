@@ -10,7 +10,7 @@ use super::gpu::{self, Submittable};
 use super::three::{hash_10, hash_varlen_padded};
 use zkvm_jetpack::form::mary::MarySlice;
 use zkvm_jetpack::form::math::tip5::DIGEST_LENGTH;
-use zkvm_jetpack::form::{Belt, Element, Melt};
+use zkvm_jetpack::form::{Belt, Element, Felt, Melt};
 use zkvm_jetpack::hand::structs::HoonList;
 use zkvm_jetpack::jets::utils::jet_err;
 use zkvm_jetpack::noun::noun_ext::NounExt;

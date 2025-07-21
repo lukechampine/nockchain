@@ -118,8 +118,18 @@ pub fn p_ntt<T: ElementEx>(p: Vec<T>, root: &T) -> Vec<T> {
     p_ntt_twiddled(p, &twiddles)
 }
 
+#[inline(always)]
+pub fn p_ntt_inplace<T: ElementEx>(p: &mut [T], root: &T) {
+    if p.len() == 1 {
+        return;
+    }
+
+    let twiddles = p_ntt_twiddles(p.len(), root);
+    p_ntt_twiddled_inplace(p, &twiddles)
+}
+
 #[inline(never)]
-pub fn p_ntt_twiddled<T: ElementEx>(mut x: Vec<T>, twiddles: &[impl AsRef<[T]>]) -> Vec<T> {
+pub fn p_ntt_twiddled_inplace<T: ElementEx>(x: &mut [T], twiddles: &[impl AsRef<[T]>]) {
     let log_2_of_n = x.len().ilog2();
 
     for k in 0..x.len() {
@@ -143,7 +153,11 @@ pub fn p_ntt_twiddled<T: ElementEx>(mut x: Vec<T>, twiddles: &[impl AsRef<[T]>])
             }
         }
     }
+}
 
+#[inline(never)]
+pub fn p_ntt_twiddled<T: ElementEx>(mut x: Vec<T>, twiddles: &[impl AsRef<[T]>]) -> Vec<T> {
+    p_ntt_twiddled_inplace(&mut x, twiddles);
     x
 }
 
@@ -373,9 +387,24 @@ pub fn p_shift<T: ElementEx>(poly_a: &[T], pelem_b: &T, poly_res: &mut [T]) {
         poly_res[i] = poly_a[i] * pelem_power;
         pelem_power = pelem_power * *pelem_b;
     }
+
+    for i in poly_a.len()..poly_res.len() {
+        poly_res[i] = T::zero();
+    }
 }
 
 #[inline(always)]
+pub fn p_shift_inplace<T: ElementEx>(poly_a: &mut [T], pelem_b: &T) {
+    let mut pelem_power: T = T::one();
+
+    for p in poly_a {
+        *p *= pelem_power;
+        pelem_power = pelem_power * *pelem_b;
+    }
+}
+
+#[inline(always)]
+#[tracing::instrument(skip_all)]
 pub fn p_coseword<T: ElementEx>(bp: &[T], offset: &T, order: u32, root: &T) -> Vec<T> {
     // shift
     let len_res: u32 = order;
@@ -383,6 +412,17 @@ pub fn p_coseword<T: ElementEx>(bp: &[T], offset: &T, order: u32, root: &T) -> V
     p_shift(bp, offset, &mut res);
 
     p_ntt(res, root)
+}
+
+#[inline(always)]
+#[tracing::instrument(skip_all)]
+pub fn p_coseword_inplace<T: ElementEx>(bp: &[T], offset: &T, order: u32, root: &T, res: &mut [T]) {
+    // shift
+    let len_res: u32 = order;
+    assert_eq!(len_res as usize, res.len());
+    p_shift(bp, offset, res);
+
+    p_ntt_inplace(res, root);
 }
 
 #[inline(always)]

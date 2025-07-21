@@ -16,6 +16,7 @@ mod prover_compute;
 mod six;
 mod three;
 mod two;
+mod seven;
 mod utils;
 mod zoon;
 mod hash;
@@ -34,6 +35,7 @@ use six::*;
 use three::*;
 use two::*;
 use zoon::*;
+use seven::*;
 
 pub use two::mp_substitute_ultra_impl;
 
@@ -210,6 +212,9 @@ sam_jet! {
     lift_to_fpoly_jet => lift_to_fpoly,
     binv_jet => binv_sam,
     compute_lde_jet => compute_lde_sam,
+    compute_codeword_commitments_jet => compute_codeword_commitments_sam,
+    interpolate_table_jet => interpolate_table_sam,
+    bp_intercosate_jet => bp_intercosate_sam,
 }
 
 pub const NBX_ONE_JETS: &[HotEntry] = &[
@@ -450,6 +455,36 @@ pub const NBX_TWO_JETS: &[HotEntry] = &[
         ],
         1,
         lift_to_fpoly_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"interpolate-table"),
+        ],
+        1,
+        interpolate_table_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"bp-intercosate"),
+        ],
+        1,
+        bp_intercosate_jet,
     ),
 ];
 
@@ -795,6 +830,27 @@ pub const NBX_EIGHT_JETS: &[HotEntry] = &[
         ],
         1,
         compute_lde_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"misc-lib"),
+            Left(b"proof-lib"),
+            Left(b"utils"),
+            Left(b"fri"),
+            Left(b"table-lib"),
+            Left(b"stark-core"),
+            Left(b"compute-codeword-commitments"),
+        ],
+        1,
+        compute_codeword_commitments_jet,
     ),
 ];
 

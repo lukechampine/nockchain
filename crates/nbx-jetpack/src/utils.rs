@@ -48,7 +48,7 @@ pub fn slag_vec<T>(a: usize, mut b: Vec<T>) -> Vec<T> {
     b.split_off(core::cmp::min(a, b.len()))
 }
 
-pub fn xeb(v: usize) -> usize {
+pub const fn xeb(v: usize) -> usize {
     (usize::BITS - v.leading_zeros()) as usize
 }
 

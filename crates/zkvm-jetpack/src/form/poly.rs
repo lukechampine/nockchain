@@ -26,6 +26,8 @@ pub trait ElementEx:
     + Copy
     + Mul<Output = Self>
     + Add<Output = Self>
+    + AddAssign
+    + MulAssign
     + Sub<Output = Self>
     + Neg<Output = Self>
     + Div<Output = Self>

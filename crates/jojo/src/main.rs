@@ -158,8 +158,9 @@ impl Jettest {
             dump_dir,
         } = self;
 
+        let nbx_jets = nbx_jetpack::nbx_jets().collect::<Vec<_>>();
         let hot_state = produce_prover_hot_state();
-        let hot_state = [URBIT_HOT_STATE, &hot_state].concat();
+        let hot_state = [URBIT_HOT_STATE, &nbx_jets, &hot_state].concat();
 
         let mut stack = NockStack::new(NOCK_STACK_SIZE, 0);
 
@@ -324,7 +325,8 @@ async fn run_kernel(
     pokes: impl Stream<Item = SendSlab> + Send + 'static,
     cli: Cli,
 ) -> Receiver<SendSlab> {
-    let hot_state = zkvm_jetpack::hot::produce_prover_hot_state();
+    let mut hot_state = nbx_jetpack::nbx_jets().collect::<Vec<_>>();
+    hot_state.extend(produce_prover_hot_state());
 
     let kernel = Kernel::<SaveableCheckpoint>::load_with_hot_state(
         KERNEL,

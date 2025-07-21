@@ -6,13 +6,17 @@ use nockvm::mem::NockStack;
 use nockvm::noun::*;
 use nockvm_macros::tas;
 use tracing::log::*;
+use zkvm_jetpack::form::math::mary::mary_transpose;
+
+use crate::one::snag_as_poly_mary;
+use crate::three::mary_to_noun;
 
 use super::one::{p_decompose_impl, peval_impl};
 use super::substitute::{SubstituteEngine, SubstituteMulStage, SubstituteOp};
 use super::utils::*;
 use zkvm_jetpack::form::bpoly::{bp_coseword, bpscal_inplace};
 use zkvm_jetpack::form::fext::{fadd_, fdiv_, finv_, fmul_, fneg_};
-use zkvm_jetpack::form::mary::{MarySlice, MarySliceMut};
+use zkvm_jetpack::form::mary::{Mary, MarySlice, MarySliceMut};
 use zkvm_jetpack::form::math::poly::{p_ntt, *};
 use zkvm_jetpack::form::mega::{brek, MegaTyp};
 use zkvm_jetpack::form::poly::Poly;
@@ -38,6 +42,77 @@ pub fn zero_fpoly<'a>() -> FPolyVec {
 pub fn id_fpoly<'a>() -> FPolyVec {
     // (init-fpoly ~[(lift 0) (lift 1)])
     new_fpoly(&[Felt::zero(), Felt::one()])
+}
+
+pub fn bp_intercosate_sam(stack: &mut NockStack, sam: Noun) -> Result {
+    let [offset, order, values] = sam.uncell()?;
+    let offset = Belt(offset.as_atom()?.as_u64()?);
+    let order = order.as_atom()?.as_u64()? as u32;
+    let values = BPolySlice::try_from(values)?;
+    let r = bp_intercosate(offset, order, PolyVec(values.0.to_vec()));
+    let (h, p) = new_handle_mut_slice(stack, Some(r.len()));
+    p.copy_from_slice(&r.0);
+    Ok(finalize_poly(stack, Some(r.len()), h))
+}
+
+pub fn bp_intercosate(offset: Belt, order: u32, values: BPolyVec) -> BPolyVec {
+    // |=  [offset=belt order=@ values=bpoly]
+    // ^-  bpoly
+    // ~+
+    // ::  order = |H| is a power of 2
+    // ?>  =((dis order (dec order)) 0)
+    // ::  number of values should match the number of points in the coset
+    // ?>  =(len.values order)
+    assert_eq!(values.len(), order as usize);
+    // =/  ifft  (bp-ifft values)
+    let mut ifft = p_ifft(values.0).unwrap();
+    // (bp-shift (bp-ifft values) (binv offset))
+    p_shift_inplace(&mut ifft, &Belt(binv(offset.0)));
+    PolyVec(ifft)
+}
+
+pub fn interpolate_table_sam(stack: &mut NockStack, sam: Noun) -> Result {
+    let [table, domain_len] = sam.uncell()?;
+    let Ok(table) = MarySlice::try_from(table) else { return jet_err() };
+    let domain_len = domain_len.as_atom()?.as_u64()? as u32;
+    let ma = interpolate_table(table, domain_len);
+    Ok(mary_to_noun(stack, ma))
+}
+
+pub fn interpolate_table(table: MarySlice, domain_len: u32) -> Mary {
+    // |=  [table=mary domain-len=@]
+    // ^-  mary
+    // =/  trace=mary  (transpose-bpolys table)
+    let mut trace = Mary {
+        dat: vec![0; table.dat.len()],
+        len: table.step,
+        step: table.len,
+    };
+    mary_transpose(table, 1, &mut trace.as_mut_slice());
+
+    let mut out_trace = Mary {
+        dat: Vec::with_capacity(table.dat.len()),
+        len: trace.len,
+        step: domain_len,
+    };
+    // %-  zing-bpolys
+    // %+  turn  (range len.array.trace)
+    // |=  col=@
+    for col in 0..trace.len {
+        // ^-  bpoly
+        // =/  values-old=bpoly  (~(snag-as-bpoly ave trace) col)
+        let values_old = snag_as_poly_mary::<Belt>(trace.as_slice(), col as usize);
+        // =/  values  (~(zero-extend bop values-old) (sub domain-len len.values-old))
+        let mut values = values_old.0.to_vec();
+        values.resize(domain_len as usize, Belt(0));
+        // ?>  =(len.values domain-len)
+        // ?>  =((dis domain-len (dec domain-len)) 0)
+        // (bp-intercosate 1 domain-len values)
+        let res = bp_intercosate(Belt(1), domain_len, PolyVec(values));
+        out_trace.dat.extend(res.0.into_iter().map(|v| v.0));
+    }
+
+    out_trace
 }
 
 pub fn bpoly_to_fpoly<'a>(bp: BPolySlice<'a>) -> FPolyVec {
@@ -1029,15 +1104,16 @@ pub fn turn_coseword(stack: &mut NockStack, sam: Noun) -> Result {
     Ok(finalize_mary(stack, order as _, polys.len as _, ret_ma))
 }
 
-pub fn turn_coseword_impl(
+pub fn turn_coseword_impl<T: ElementEx>(
     polys: MarySlice,
-    offset: Belt,
+    offset: T,
     order: u32,
-    root: Belt,
+    root: T,
     out: MarySliceMut,
 ) {
     assert_eq!(out.step, order);
     assert_eq!(out.len, polys.len);
+    assert_eq!(core::mem::size_of::<T>(), core::mem::size_of::<u64>());
     out.dat
         .chunks_mut(order as _)
         .zip(polys.dat.chunks_exact(polys.step as _))
@@ -1048,14 +1124,14 @@ pub fn turn_coseword_impl(
             // SAFETY: Belt and u64 are equivalent
             unsafe {
                 (
-                    core::mem::transmute::<&mut [u64], &mut [Belt]>(a),
-                    core::mem::transmute::<&[u64], &[Belt]>(bp),
+                    core::mem::transmute::<&mut [u64], &mut [T]>(a),
+                    core::mem::transmute::<&[u64], &[T]>(bp),
                 )
             }
         })
         .for_each(|(a, bp)| {
             // (bp-coseword bp offset order)
-            a.copy_from_slice(&bp_coseword(bp, &offset, order, &root));
+            a.copy_from_slice(&p_coseword(bp, &offset, order, &root));
         });
 }
 

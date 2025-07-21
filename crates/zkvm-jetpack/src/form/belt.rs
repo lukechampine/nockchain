@@ -1,4 +1,4 @@
-use std::ops::{Add, Div, Mul, Neg, Sub};
+use std::ops::{Add, AddAssign, Div, Mul, MulAssign, Neg, Sub};
 
 use nockvm::noun::Noun;
 use num_traits::Pow;
@@ -74,6 +74,13 @@ impl Add for Belt {
     }
 }
 
+impl AddAssign for Belt {
+    #[inline(always)]
+    fn add_assign(&mut self, rhs: Self) {
+        *self = *self + rhs;
+    }
+}
+
 impl Sub for Belt {
     type Output = Self;
 
@@ -103,6 +110,13 @@ impl Mul for Belt {
         let a = self.0;
         let b = rhs.0;
         Belt(bmul(a, b))
+    }
+}
+
+impl MulAssign for Belt {
+    #[inline(always)]
+    fn mul_assign(&mut self, rhs: Self) {
+        *self = *self * rhs;
     }
 }
 

@@ -2,15 +2,19 @@ use std::collections::BTreeMap;
 
 use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
-use nockvm::noun::{IndirectAtom, Noun, D};
+use nockvm::noun::{Atom, IndirectAtom, Noun, D, T};
 use tracing::log::*;
+use zkvm_jetpack::form::math::mary::mary_transpose;
+
+use crate::seven::height_mary;
+use crate::three::{build_merk_heap_impl, mary_to_noun};
 
 use super::one::*;
 use super::substitute::SubstituteEngine;
 use super::two::*;
 use super::utils::*;
 use zkvm_jetpack::form::fext::{fmul_, fpow_};
-use zkvm_jetpack::form::mary::{MarySlice, MarySliceMut};
+use zkvm_jetpack::form::mary::{Mary, MarySlice, MarySliceMut};
 use zkvm_jetpack::form::math::poly::*;
 use zkvm_jetpack::form::poly::Poly;
 use zkvm_jetpack::form::{
@@ -870,6 +874,76 @@ pub fn precompute_ntts(stack: &mut NockStack, inp: Noun) -> Result {
     Ok(finalize_poly(stack, Some(acc.len()), res_atom))
 }
 
+#[tracing::instrument(skip_all)]
+fn compute_table_polys(tables: &[MarySlice]) -> Vec<Mary> {
+    // |=  tables=(list mary)
+    // ^-  (list mary)
+    // %+  turn  tables
+    // |=  p=mary
+    // =/  height  (height-mary:tlib p)
+    // ?:  =(height 0)
+    //   ~|("compute-table-polys: height 0 table detected" !!)
+    // (interpolate-table p height)
+    tables.iter().map(|p| interpolate_table(*p, height_mary(*p))).collect()
+}
+
+pub fn compute_codeword_commitments_sam(stack: &mut NockStack, sam: Noun) -> Result {
+    // |=  $:  table-marys=(list mary)
+    //         fri-domain-len=@
+    //         total-cols=@
+    //     ==
+    let [table_marys, fri_domain_len, total_cols] = sam.uncell()?;
+    let mut table_marys_vec = vec![];
+    for m in HoonList::try_from(table_marys).ok().into_iter().flatten() {
+        let Ok(ma) = MarySlice::try_from(m) else {
+            return jet_err();
+        };
+        table_marys_vec.push(ma);
+    }
+    let fri_domain_len = fri_domain_len.as_atom()?.as_u64()? as u32;
+    let total_cols = total_cols.as_atom()?.as_u64()?;
+    // ^-  codeword-commitments
+    // ::
+    // ::  convert the ext columns to marys
+    // ::
+    // ::  think of each mary as a list of the table's columns, interpolated to polynomials
+    // =/  table-polys=(list mary)
+    //   (compute-table-polys table-marys)
+    let table_polys_vec = compute_table_polys(&table_marys_vec);
+    let table_polys = table_polys_vec.iter().map(MarySlice::from).collect::<Vec<_>>();
+    // ::
+    // ::  this mary is a list of all tables' columns, extended to codewords
+    // =/  codewords=mary
+    //   (compute-lde table-polys fri-domain-len total-cols)
+    let mut codewords = Mary {
+        step: fri_domain_len,
+        len: total_cols as u32,
+        dat: vec![0; fri_domain_len as usize * total_cols as usize],
+    };
+    compute_lde::<Belt>(&table_polys, fri_domain_len, total_cols, codewords.as_mut_slice());
+    // ::
+    // ::  this mary is a list of rows, each row the values of above codewords at a fixed domain elt
+    // =/  codeword-array=mary
+    //   (transpose-bpolys codewords)
+    let mut codeword_array = Mary {
+        dat: vec![0; codewords.dat.len()],
+        step: codewords.len,
+        len: codewords.step,
+    };
+    mary_transpose(codewords.as_slice(), 1, &mut codeword_array.as_mut_slice());
+    // =/  merk-heap=(pair @ merk-heap:merkle)
+    //   (bp-build-merk-heap:merkle codeword-array)
+    let (height, mh) = build_merk_heap_impl::<Belt>(codeword_array.as_slice())?;
+    // [table-polys codeword-array merk-heap]
+    let table_polys = table_polys_vec.into_iter().map(|v| mary_to_noun(stack, v)).chain([D(0)]).collect::<Vec<_>>();
+    let table_polys = T(stack, &table_polys);
+    let codeword_array = mary_to_noun(stack, codeword_array);
+    let height = Atom::new(stack, height as _).as_noun();
+    let mh = mh.to_noun(stack);
+    let merk_heap = T(stack, &[height, mh]);
+    Ok(T(stack, &[table_polys, codeword_array, merk_heap]))
+}
+
 pub fn compute_lde_sam(stack: &mut NockStack, sam: Noun) -> Result {
     // ~/  %compute-lde
     // |=  $:  table-polys=(list mary)
@@ -887,7 +961,7 @@ pub fn compute_lde_sam(stack: &mut NockStack, sam: Noun) -> Result {
     let fri_domain_len = fri_domain_len.as_atom()?.as_u64()?;
     let num_cols = num_cols.as_atom()?.as_u64()?;
     let (h, mut ma) = new_handle_mut_mary(stack, fri_domain_len as _, num_cols as _);
-    compute_lde(
+    compute_lde::<Belt>(
         &table_polys_vec,
         fri_domain_len as _,
         num_cols,
@@ -897,12 +971,13 @@ pub fn compute_lde_sam(stack: &mut NockStack, sam: Noun) -> Result {
     Ok(finalize_mary(stack, ma.step as _, ma.len as _, h))
 }
 
-pub fn compute_lde(
+#[tracing::instrument(skip_all)]
+pub fn compute_lde<T: ElementEx>(
     table_polys: &[MarySlice],
     fri_domain_len: u32,
     num_cols: u64,
     out: MarySliceMut,
-) {
+) where Belt: Into<T> {
     assert_eq!(out.step, fri_domain_len as u32);
     assert_eq!(out.len, num_cols as u32);
     // =/  fps=(list mary)
@@ -922,7 +997,7 @@ pub fn compute_lde(
     // =/  chunk  (mul step.curr len.array.curr)
     // :-  (add idx chunk)
     // res(dat.array (sew 6 [idx chunk dat.array.curr] dat.array.res))
-    let fri_domain_root = Belt(fri_domain_len as _).ordered_root().unwrap();
+    let fri_domain_root: T = Belt(fri_domain_len as _).ordered_root().unwrap().into();
     let mut out = out.dat;
     for ma in table_polys {
         let (cout, nout) = out.split_at_mut(fri_domain_len as usize * ma.len as usize);
@@ -932,6 +1007,6 @@ pub fn compute_lde(
             dat: cout,
         };
         out = nout;
-        turn_coseword_impl(*ma, G, fri_domain_len, fri_domain_root, ma_out);
+        turn_coseword_impl(*ma, G.into(), fri_domain_len, fri_domain_root, ma_out);
     }
 }
