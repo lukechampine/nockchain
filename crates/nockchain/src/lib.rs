@@ -443,8 +443,13 @@ pub async fn init_with_kernel<J: Jammer + Send + 'static>(
 
     let prune_inbound = cli.as_ref().and_then(|c| c.prune_inbound);
 
-    let mining_driver = crate::mining::create_mining_driver(mining_config, Some(mining_init_tx));
+    let server = nbx_miner::server::bind(&mining_config.server).await?;
+    let server_ip = server.local_addr()?;
+    let mut client = mining_config.client.clone();
+    client.miner_connect.push(server_ip);
+    let mining_driver = crate::mining::create_mining_driver(mining_config, Some(mining_init_tx), server);
     nockapp.add_io_driver(mining_driver).await;
+    tokio::spawn(nbx_miner::client::run_client(client));
 
     let libp2p_driver = nockchain_libp2p_io::nc::make_libp2p_driver(
         keypair,

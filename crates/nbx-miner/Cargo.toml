@@ -1,0 +1,37 @@
+[package]
+name = "nbx-miner"
+publish = false
+version.workspace = true
+#edition.workspace = true
+edition = "2021"
+
+[features]
+default = ["jemalloc"]
+jemalloc = ["tikv-jemallocator"]
+gpu = ["nbx-jetpack/gpu-prod"]
+
+[dependencies]
+kernels = { workspace = true, features = ["miner"] }
+nockapp.workspace = true
+nockvm.workspace = true
+nockvm_macros.workspace = true
+bitvec.workspace = true
+either.workspace = true
+
+clap.workspace = true
+futures.workspace = true
+tokio = { workspace = true, features = ["full"] }
+tracing.workspace = true
+tracing-test.workspace = true
+anyhow.workspace = true
+flume.workspace = true
+rand = { workspace = true }
+tikv-jemallocator = { workspace = true, optional = true }
+gdt-cpus.workspace = true
+nockchain-libp2p-io.workspace = true
+serde.workspace = true
+bincode.workspace = true
+strum.workspace = true
+
+zkvm-jetpack.workspace = true
+nbx-jetpack.workspace = true

@@ -209,6 +209,7 @@ impl<J> NounAllocator for NounSlab<J> {
 
 /// # Safety: no noun in this slab references a noun outside the slab, except in the PMA
 unsafe impl Send for NounSlab {}
+unsafe impl Sync for NounSlab {}
 
 impl<J> Default for NounSlab<J> {
     fn default() -> Self {

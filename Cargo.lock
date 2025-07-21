@@ -4174,6 +4174,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "nbx-miner"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "bitvec",
+ "clap",
+ "either",
+ "flume",
+ "futures",
+ "gdt-cpus",
+ "kernels",
+ "nbx-jetpack",
+ "nockapp",
+ "nockchain-libp2p-io",
+ "nockvm",
+ "nockvm_macros",
+ "rand 0.8.5",
+ "serde",
+ "strum",
+ "tikv-jemallocator",
+ "tokio",
+ "tracing",
+ "tracing-test",
+ "zkvm-jetpack",
+]
+
+[[package]]
 name = "nbx-shaders"
 version = "0.1.0"
 dependencies = [
@@ -4397,6 +4425,7 @@ dependencies = [
  "kernels",
  "libp2p",
  "nbx-jetpack",
+ "nbx-miner",
  "nockapp",
  "nockchain-libp2p-io",
  "nockvm",

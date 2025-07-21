@@ -19,6 +19,7 @@ members = [
     "crates/nockchain-wallet",
     "crates/zkvm-jetpack",
     "crates/nbx-jetpack",
+    "crates/nbx-miner",
     "crates/nbx-shaders",
     "crates/nbx-shaders-src",
     "crates/nbx-shaders-build",
@@ -63,6 +64,9 @@ path = "crates/nockvm/rust/nockvm_macros"
 
 [workspace.dependencies.zkvm-jetpack]
 path = "crates/zkvm-jetpack"
+
+[workspace.dependencies.nbx-miner]
+path = "crates/nbx-miner"
 
 [workspace.dependencies.nbx-jetpack]
 path = "crates/nbx-jetpack"

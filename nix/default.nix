@@ -45,9 +45,28 @@ let
     nativeBuildInputs = [ ];
   });
 
+  nbx-miner-base = profile: extraArgs: craneLib.buildPackage (
+  individualCrateArgs // {
+    pname = "nbx-miner";
+    CARGO_PROFILE = profile;
+    cargoExtraArgs = "-p nbx-miner --features nbx-miner/jemalloc ${extraArgs}";
+    buildInputs = [ hoonc.hoonc ];
+    preBuild = "mkdir -p assets && cp ${jam-pkg.miner-jam.out} './assets/miner.jam'";
+  });
+
+  profile-v = v: if lib.strings.hasInfix "x86_64-" pkgs.system then "release-v${v}" else throw "release-v${v} is only supported on x86_64 targets!";
+  profile-v4 = profile-v "4";
+  profile-v3 = profile-v "3";
+
   nockchain = extraArgs: (nockchain-base "release" extraArgs);
-  nockchain-v4 = extraArgs: if lib.strings.hasInfix "x86_64-" pkgs.system then (nockchain-base "release-v4" extraArgs) else throw "release-v4 is only supported on x86_64 targets!";
-  makeGpu = call: call "--features nockchain/gpu --features nbx-jetpack/gpu-prod";
+  nockchain-v4 = extraArgs: (nockchain-base profile-v4 extraArgs);
+  nockchain-v3 = extraArgs: (nockchain-base profile-v3 extraArgs);
+
+  nbx-miner = extraArgs: (nbx-miner-base "release" extraArgs);
+  nbx-miner-v4 = extraArgs: (nbx-miner-base profile-v4 extraArgs);
+  nbx-miner-v3 = extraArgs: (nbx-miner-base profile-v3 extraArgs);
+
+  makeGpu = call: call "--features nbx-miner/gpu --features nbx-jetpack/gpu-prod";
 in
 {
   hoonc = hoonc.hoonc;
@@ -55,8 +74,17 @@ in
   nockchain-gpu = makeGpu nockchain;
   nockchain-v4 = nockchain-v4 "";
   nockchain-v4-gpu = makeGpu nockchain-v4;
+  nockchain-v3 = nockchain-v3 "";
+  nockchain-v3-gpu = makeGpu nockchain-v3;
   nockchain-native = (nockchain-base "release-native");
   nockchain-wallet = wallet-base;
   nockchain-metrics-exporter = metrics-exporter-base;
   nockchain-jamfiles = jam-pkg;
+  nbx-miner = nbx-miner "";
+  nbx-miner-gpu = makeGpu nbx-miner;
+  nbx-miner-v4 = nbx-miner-v4 "";
+  nbx-miner-v4-gpu = makeGpu nbx-miner-v4;
+  nbx-miner-v3 = nbx-miner-v3 "";
+  nbx-miner-v3-gpu = makeGpu nbx-miner-v3;
+  nbx-miner-native = (nbx-miner-base "release-native");
 }
