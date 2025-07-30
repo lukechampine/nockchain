@@ -271,8 +271,8 @@ pub async fn mining_driver(
                 };
 
                 if effect_cell.head().eq_bytes("mine") {
-                    let (version_slab, header_slab, target_slab, pow_len) = {
-                        let [version, commit, target, pow_len_noun] = effect_cell.tail().uncell().expect(
+                    let (version_slab, header_slab, target_slab, pow_len, block_height) = {
+                        let [version, commit, target, pow_len_noun, height_noun] = effect_cell.tail().uncell().expect(
                             "Expected three elements in %mine effect",
                         );
                         let mut version_slab = NounSlab::new();
@@ -287,7 +287,13 @@ pub async fn mining_driver(
                                 .expect("Expected pow-len to be an atom")
                                 .as_u64()
                                 .expect("Expected pow-len to be a u64");
-                        (version_slab, header_slab, target_slab, pow_len)
+                        let block_height =
+                            height_noun
+                                .as_atom()
+                                .expect("Expected block-height to be an atom")
+                                .as_u64()
+                                .expect("Expected block-height to be a u64");
+                        (version_slab, header_slab, target_slab, pow_len, block_height)
                     };
                     debug!("received new candidate block header: {:?}",
                         tip5_hash_to_base58(*unsafe { header_slab.root() })
@@ -298,7 +304,8 @@ pub async fn mining_driver(
                         block_header: header_slab,
                         version: version_slab,
                         target: target_slab,
-                        pow_len: pow_len
+                        pow_len,
+                        block_height,
                     });
 
                     let mut guard = cur_mining_data.lock().await;

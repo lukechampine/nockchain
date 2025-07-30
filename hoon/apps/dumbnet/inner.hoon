@@ -366,9 +366,9 @@
     =/  target  (~(got z-by targets.c.k) parent.candidate-block.m.k)
     =/  commit  (block-commitment:page:t candidate-block.m.k)
     ?-  version
-      %0  [%mine %0 commit target pow-len:t]
-      %1  [%mine %1 commit target pow-len:t]
-      %2  [%mine %2 commit target pow-len:t]
+      %0  [%mine %0 commit target pow-len:t height.candidate-block.m.k]
+      %1  [%mine %1 commit target pow-len:t height.candidate-block.m.k]
+      %2  [%mine %2 commit target pow-len:t height.candidate-block.m.k]
     ==
     ::
     ::  +heard-genesis-block: check if block is a genesis block and decide whether to keep it
@@ -1214,9 +1214,9 @@
         =/  proof-version  (height-to-proof-version:con height.candidate-block.m.k)
         =/  mine-start
           ?-  proof-version
-            %0  [%0 commit target pow-len:t]
-            %1  [%1 commit target pow-len:t]
-            %2  [%2 commit target pow-len:t]
+            %0  [%0 commit target pow-len:t height.candidate-block.m.k]
+            %1  [%1 commit target pow-len:t height.candidate-block.m.k]
+            %2  [%2 commit target pow-len:t height.candidate-block.m.k]
           ==
         :_  k
         [%mine mine-start]~

@@ -35,6 +35,7 @@ pub struct MiningData {
     pub version: Vec<u8>,
     pub target: Vec<u8>,
     pub pow_len: u64,
+    pub block_height: u64,
 }
 
 #[derive(Encode, Decode, Clone, Debug)]
@@ -145,6 +146,7 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
                 version: cue(data.version),
                 target: cue(data.target),
                 pow_len: data.pow_len,
+                block_height: data.block_height,
             };
             if mining_data
                 .send(MiningDataOut {
@@ -249,6 +251,7 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
                 version: data.version.jam().into(),
                 target: data.target.jam().into(),
                 pow_len: data.pow_len,
+                block_height: data.block_height,
             };
             core::mem::drop(data);
             let mut guard = data_id.lock().await;

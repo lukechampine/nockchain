@@ -24,6 +24,7 @@ pub struct MiningData {
     pub version: NounSlab,
     pub target: NounSlab,
     pub pow_len: u64,
+    pub block_height: u64,
 }
 
 impl PartialEq for MiningData {

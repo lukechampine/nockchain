@@ -435,8 +435,11 @@ async fn start_mining_attempt(
     //nonce: Option<NounSlab>,
     //cancel_previous: bool,
 ) {
+    let max_height = requests.values().map(|v| v.0.block_height).max().unwrap_or(0);
+
     let Some((target_sid, (mining_data, data_id, _, session_id))) = requests
         .iter()
+        .filter(|(_, v)| v.0.block_height == max_height)
         .filter(|(sid, _)| server_extras[**sid].live.load(Ordering::SeqCst))
         .min_by_key(|(_, v)| v.2)
     else {
@@ -458,10 +461,11 @@ async fn start_mining_attempt(
     let nonce = nonce_slab;
 
     debug!(
-        "starting mining attempt on thread {:?} on header {:?}with nonce: {:?}",
+        "starting mining attempt on thread {:?} on header {:?} on block {} with nonce: {:?}",
         miner.id,
         tip5_hash_to_base58(*unsafe { mining_data.block_header.root() })
             .expect("Failed to convert block header to Base58"),
+        mining_data.block_height,
         tip5_hash_to_base58(*unsafe { nonce.root() }).expect("Failed to convert nonce to Base58"),
     );
     let poke_slab = create_poke(mining_data, &nonce);
