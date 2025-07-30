@@ -20,6 +20,7 @@ pub struct Cli {
 async fn main() {
     let cli = Cli::parse();
     nockvm::check_endian();
+    #[cfg(not(feature = "stealthy"))]
     boot::init_default_tracing(&cli.nockapp_cli);
     nbx_miner::client::run_client(cli.client).await;
 }

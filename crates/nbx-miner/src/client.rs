@@ -38,9 +38,19 @@ struct ServerExtras {
 }
 
 pub async fn run_client(cfg: ClientConfig) {
-    if cfg.miner_connect_tls {
+    #[cfg(not(feature = "force-tls"))]
+    let tls = if cfg.miner_connect_tls {
         let _ = default_provider().install_default();
-    }
+        Some(Default::default())
+    } else {
+        None
+    };
+
+    #[cfg(feature = "force-tls")]
+    let tls = {
+        let _ = default_provider().install_default();
+        Some(Default::default())
+    };
 
     let num_threads = cfg.num_threads();
     info!("Starting mining driver with {} threads", num_threads);
@@ -101,7 +111,7 @@ pub async fn run_client(cfg: ClientConfig) {
         let live = Arc::new(AtomicBool::new(false));
         client_tasks.spawn(client_loop(
             a,
-            if cfg.miner_connect_tls { Some(Default::default()) } else { None },
+            tls,
             i,
             live.clone(),
             rx,
@@ -253,6 +263,7 @@ pub struct ClientConfig {
         value_delimiter = ','
     )]
     pub miner_connect: Vec<SocketAddr>,
+    #[cfg(not(feature = "force-tls"))]
     #[arg(long, help = "Use TLS for the miner")]
     miner_connect_tls: bool,
     #[arg(long, help = "Number of threads to mine with defaults to one less than the number of cpus available.", default_value = None)]

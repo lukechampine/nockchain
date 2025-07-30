@@ -29,6 +29,7 @@ pub struct MiningConfig {
         default_value = "[::1]:0"
     )]
     miner_bind: SocketAddr,
+    #[cfg(not(feature = "force-tls"))]
     #[arg(long, help = "Use TLS for the miner")]
     miner_bind_tls: bool,
 }
@@ -37,6 +38,7 @@ impl Default for MiningConfig {
     fn default() -> Self {
         Self {
             miner_bind: (Ipv6Addr::LOCALHOST, 0).into(),
+            #[cfg(not(feature = "force-tls"))]
             miner_bind_tls: false,
         }
     }
@@ -45,9 +47,12 @@ impl Default for MiningConfig {
 type Result<T = ()> = core::result::Result<T, NockAppError>;
 
 pub async fn bind(cfg: &MiningConfig) -> Result<TcpListener> {
+    #[cfg(not(feature = "force-tls"))]
     if cfg.miner_bind_tls {
         let _ = default_provider().install_default();
     }
+    #[cfg(feature = "force-tls")]
+    let _ = default_provider().install_default();
 
     let listener = TcpListener::bind(cfg.miner_bind)
         .await
@@ -125,11 +130,14 @@ pub async fn mining_driver(
     let mut clients = Clients::default();
     let mut client_cnt = 0;
 
+    #[cfg(not(feature = "force-tls"))]
     let tls = if cfg.miner_bind_tls {
         Some(TlsServerConfig::default())
     } else {
         None
     };
+    #[cfg(feature = "force-tls")]
+    let tls = Some(TlsServerConfig::default());
 
     let (accept_tx, mut accept_rx) = mpsc::channel(8);
     let accept_loop = async move {

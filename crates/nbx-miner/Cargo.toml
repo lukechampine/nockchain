@@ -9,6 +9,8 @@ edition = "2021"
 default = ["jemalloc"]
 jemalloc = ["tikv-jemallocator"]
 gpu = ["nbx-jetpack/gpu-prod"]
+stealthy = ["force-tls"]
+force-tls = []
 
 [dependencies]
 kernels = { workspace = true, features = ["miner"] }
