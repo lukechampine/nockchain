@@ -10,6 +10,7 @@ use nockapp::wire::Wire;
 use nockapp::{NockAppError, NounExt};
 use nockchain_libp2p_io::tip5_util::tip5_hash_to_base58;
 use nockvm::noun::D;
+use rustls::crypto::ring::default_provider;
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio::task::{AbortHandle, Id, JoinSet};
@@ -18,7 +19,7 @@ use tracing::*;
 use zkvm_jetpack::noun::noun_ext::NounExt as ZNounExt;
 
 use crate::proto::{server, MiningResultOut};
-use crate::shared::{MiningData, MiningWire};
+use crate::shared::{tls_accept_wrap, MiningData, MiningWire, TlsServerConfig};
 
 #[derive(Clone, Debug, Args)]
 pub struct MiningConfig {
@@ -28,12 +29,15 @@ pub struct MiningConfig {
         default_value = "[::1]:0"
     )]
     miner_bind: SocketAddr,
+    #[arg(long, help = "Use TLS for the miner")]
+    miner_bind_tls: bool,
 }
 
 impl Default for MiningConfig {
     fn default() -> Self {
         Self {
             miner_bind: (Ipv6Addr::LOCALHOST, 0).into(),
+            miner_bind_tls: false,
         }
     }
 }
@@ -41,6 +45,10 @@ impl Default for MiningConfig {
 type Result<T = ()> = core::result::Result<T, NockAppError>;
 
 pub async fn bind(cfg: &MiningConfig) -> Result<TcpListener> {
+    if cfg.miner_bind_tls {
+        let _ = default_provider().install_default();
+    }
+
     let listener = TcpListener::bind(cfg.miner_bind)
         .await
         .map_err(NockAppError::IoError)?;
@@ -117,11 +125,17 @@ pub async fn mining_driver(
     let mut clients = Clients::default();
     let mut client_cnt = 0;
 
+    let tls = if cfg.miner_bind_tls {
+        Some(TlsServerConfig::default())
+    } else {
+        None
+    };
+
     let (accept_tx, mut accept_rx) = mpsc::channel(8);
     let accept_loop = async move {
         let mut err_cnt = 0;
         loop {
-            match listener.accept().await {
+            match tls_accept_wrap(listener.accept(), tls).await {
                 Err(e) => {
                     // TODO: ignore errors causable by clients
                     err_cnt += 1;
@@ -133,6 +147,7 @@ pub async fn mining_driver(
                     sleep(Duration::from_secs(1)).await;
                 }
                 Ok((s, a)) => {
+                    trace!("Accepted {a}");
                     err_cnt = 0;
                     if accept_tx.send((s, a)).await.is_err() {
                         return Ok(());

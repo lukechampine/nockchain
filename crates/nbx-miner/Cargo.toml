@@ -32,6 +32,9 @@ nockchain-libp2p-io.workspace = true
 serde.workspace = true
 bincode.workspace = true
 strum.workspace = true
+rustls.workspace = true
+rustls-pemfile.workspace = true
+tokio-rustls.workspace = true
 
 zkvm-jetpack.workspace = true
 nbx-jetpack.workspace = true

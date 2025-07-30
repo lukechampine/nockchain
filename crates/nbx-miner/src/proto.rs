@@ -110,6 +110,7 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
     mining_data: mpsc::Sender<MiningDataOut>,
     ack: mpsc::Sender<MiningAckOut>,
     metadata: Vec<BTreeMap<String, String>>,
+    handshaked: &mut bool,
 ) -> io::Result<()> {
     let stream = pin!(stream);
 
@@ -132,6 +133,8 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
     if resp.nonce != nonce + 1 {
         return Err(io::ErrorKind::BrokenPipe.into());
     }
+
+    *handshaked = true;
 
     let receiver = async {
         loop {

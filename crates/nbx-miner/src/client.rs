@@ -20,16 +20,17 @@ use nockvm::interpreter::NockCancelToken;
 use nockvm::jets::hot::HotEntry;
 use nockvm::noun::{Atom, D, T};
 use rand::Rng;
+use rustls::crypto::ring::default_provider;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, watch};
 use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::sleep;
-use tracing::{debug, info, *};
+use tracing::*;
 use zkvm_jetpack::form::PRIME;
 use zkvm_jetpack::noun::noun_ext::NounExt as OtherNounExt;
 
 use crate::proto::{self, MiningAckOut, MiningDataOut, MiningResultIn};
-use crate::shared::{MiningData, MiningResult, MiningWire};
+use crate::shared::{tls_connect_wrap, MiningData, MiningResult, MiningWire, TlsClientConfig};
 
 struct ServerExtras {
     mining_res: mpsc::Sender<MiningResultIn>,
@@ -37,6 +38,10 @@ struct ServerExtras {
 }
 
 pub async fn run_client(cfg: ClientConfig) {
+    if cfg.miner_connect_tls {
+        let _ = default_provider().install_default();
+    }
+
     let num_threads = cfg.num_threads();
     info!("Starting mining driver with {} threads", num_threads);
 
@@ -96,6 +101,7 @@ pub async fn run_client(cfg: ClientConfig) {
         let live = Arc::new(AtomicBool::new(false));
         client_tasks.spawn(client_loop(
             a,
+            if cfg.miner_connect_tls { Some(Default::default()) } else { None },
             i,
             live.clone(),
             rx,
@@ -188,6 +194,7 @@ struct MinerAttemptRes {
 
 async fn client_loop(
     addr: SocketAddr,
+    tls: Option<TlsClientConfig>,
     server_id: usize,
     live: Arc<AtomicBool>,
     mut results: mpsc::Receiver<MiningResultIn>,
@@ -197,7 +204,7 @@ async fn client_loop(
 ) {
     let mut err_cnt = 0;
     loop {
-        let stream = match TcpStream::connect(addr).await {
+        let stream = match tls_connect_wrap(TcpStream::connect(addr), tls).await {
             Ok(stream) => stream,
             Err(e) => {
                 let sleep_secs = 1 << err_cnt;
@@ -208,7 +215,7 @@ async fn client_loop(
             }
         };
 
-        err_cnt = 0;
+        let mut handshaked = false;
 
         live.fetch_or(true, Ordering::SeqCst);
         let res = proto::client(
@@ -218,13 +225,20 @@ async fn client_loop(
             data.clone(),
             ack.clone(),
             miner_metadata.clone(),
+            &mut handshaked,
         )
         .await;
         live.fetch_and(false, Ordering::SeqCst);
 
+        if handshaked {
+            err_cnt = 0;
+        }
+
         if let Err(e) = res {
-            error!("Protocol error: {e:?}. Reconnecting in 1 second");
-            sleep(Duration::from_secs(1)).await;
+            let sleep_secs = 1 << err_cnt;
+            error!("Protocol error: {e:?}. Reconnecting in {sleep_secs} seconds");
+            err_cnt = core::cmp::min(err_cnt + 1, 5);
+            sleep(Duration::from_secs(sleep_secs)).await;
         } else {
             break;
         }
@@ -239,6 +253,8 @@ pub struct ClientConfig {
         value_delimiter = ','
     )]
     pub miner_connect: Vec<SocketAddr>,
+    #[arg(long, help = "Use TLS for the miner")]
+    miner_connect_tls: bool,
     #[arg(long, help = "Number of threads to mine with defaults to one less than the number of cpus available.", default_value = None)]
     pub num_threads: Option<u64>,
     #[arg(

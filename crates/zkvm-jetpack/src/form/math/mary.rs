@@ -13,6 +13,7 @@ pub fn mary_weld(a: MarySlice, b: MarySlice, res: MarySliceMut) {
 }
 
 #[inline(always)]
+#[tracing::instrument(skip_all)]
 pub fn mary_transpose(fpolys: MarySlice, offset: usize, res: &mut MarySliceMut) {
     let step = fpolys.step as usize;
     let len = fpolys.len as usize;
