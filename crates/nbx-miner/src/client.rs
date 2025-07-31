@@ -88,9 +88,9 @@ pub async fn run_client(cfg: ClientConfig) {
 
         #[cfg(feature = "gpu")]
         if let Some(g) = &gpu {
-            mdata.insert("gpu-index".to_string(), g.gpu_index.to_string());
+            mdata.insert("gpu-index".to_string(), g.gpu_index.to_string().into());
             if let Some(filter) = &g.name_filter {
-                mdata.insert("gpu-name".to_string(), filter.clone());
+                mdata.insert("gpu-name".to_string(), (&**filter).into());
             }
         }
 
@@ -215,7 +215,7 @@ async fn client_loop(
     mut results: mpsc::Receiver<MiningResultIn>,
     data: mpsc::Sender<MiningDataOut>,
     ack: mpsc::Sender<MiningAckOut>,
-    miner_metadata: Vec<BTreeMap<String, String>>,
+    miner_metadata: Vec<BTreeMap<String, Arc<str>>>,
 ) {
     let mut err_cnt = 0;
     loop {

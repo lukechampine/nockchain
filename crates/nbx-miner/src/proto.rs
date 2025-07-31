@@ -27,7 +27,7 @@ pub struct Hello {
 
 #[derive(Encode, Decode, Clone, Debug)]
 pub struct SetMinerMetadata {
-    miners: Vec<BTreeMap<String, String>>,
+    miners: Vec<BTreeMap<String, Arc<str>>>,
 }
 
 #[derive(Encode, Decode, Clone, Debug)]
@@ -57,7 +57,7 @@ pub struct MiningResultIn {
 }
 
 pub struct MiningResultOut {
-    pub miner_metadata: Arc<BTreeMap<String, String>>,
+    pub miner_metadata: Arc<BTreeMap<String, Arc<str>>>,
     pub client_id: usize,
     pub data: shared::MiningResult,
 }
@@ -119,7 +119,7 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
     mining_out: &mut mpsc::Receiver<MiningResultIn>,
     mining_data: mpsc::Sender<MiningDataOut>,
     ack: mpsc::Sender<MiningAckOut>,
-    metadata: Vec<BTreeMap<String, String>>,
+    metadata: Vec<BTreeMap<String, Arc<str>>>,
     handshaked: &mut bool,
 ) -> io::Result<()> {
     let stream = pin!(stream);
@@ -320,6 +320,10 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
                         return Err(io::ErrorKind::InvalidData.into());
                     };
 
+                    // TODO: optionally include these labels
+                    let gpu_index = miner.get("gpu-index").cloned().unwrap_or_default();
+                    let gpu_name = miner.get("gpu-name").cloned().unwrap_or_default();
+
                     let guard = data_id.lock().await;
                     if *guard > res.data_id {
                         counter!(
@@ -327,6 +331,8 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
                             "client_id" => client_id_str.clone(),
                             "client_name" => client_name.clone(),
                             "miner_id" => res.miner_id.to_string(),
+                            "gpu_index" => gpu_index.clone(),
+                            "gpu_name" => gpu_name.clone(),
                         ).increment(1);
                         continue;
                     } else if *guard < res.data_id {
@@ -335,6 +341,8 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
                             "client_id" => client_id_str.clone(),
                             "client_name" => client_name.clone(),
                             "miner_id" => res.miner_id.to_string(),
+                            "gpu_index" => gpu_index.clone(),
+                            "gpu_name" => gpu_name.clone(),
                         ).increment(1);
                         error!(
                             "Received data_id higher than last sent ({} > {}). Exiting",
@@ -349,6 +357,8 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
                         "client_id" => client_id_str.clone(),
                         "client_name" => client_name.clone(),
                         "miner_id" => res.miner_id.to_string(),
+                        "gpu_index" => gpu_index.clone(),
+                        "gpu_name" => gpu_name.clone(),
                     ).increment(1);
 
                     histogram!(
@@ -356,6 +366,8 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
                         "client_id" => client_id_str.clone(),
                         "client_name" => client_name.clone(),
                         "miner_id" => res.miner_id.to_string(),
+                        "gpu_index" => gpu_index.clone(),
+                        "gpu_name" => gpu_name.clone(),
                     ).record(res.attempt_seconds);
 
                     let poke = res.poke.map(cue);
