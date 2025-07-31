@@ -187,6 +187,13 @@ pub async fn init_with_kernel<J: Jammer + Send + 'static>(
         cli.validate()?;
     }
 
+    if let Some(bind) = cli.as_ref().map(|v| &v.prometheus_bind) {
+        metrics_exporter_prometheus::PrometheusBuilder::new()
+            .with_http_listener(bind.parse::<std::net::SocketAddr>()?)
+            .idle_timeout(metrics_util::MetricKindMask::ALL, Some(std::time::Duration::from_secs(300)))
+            .install()?;
+    }
+
     let mut nockapp = boot::setup::<J>(
         kernel_jam,
         cli.as_ref().map(|c| c.nockapp_cli.clone()),
@@ -446,10 +453,15 @@ pub async fn init_with_kernel<J: Jammer + Send + 'static>(
     let server = nbx_miner::server::bind(&mining_config.server).await?;
     let server_ip = server.local_addr()?;
     let mut client = mining_config.client.clone();
+    if client.client_name.is_none() {
+        client.client_name = Some("_local".to_string());
+    }
     client.miner_connect.push(server_ip);
     let mining_driver = crate::mining::create_mining_driver(mining_config, Some(mining_init_tx), server);
     nockapp.add_io_driver(mining_driver).await;
-    tokio::spawn(nbx_miner::client::run_client(client));
+    if client.num_threads() > 0 {
+        tokio::spawn(nbx_miner::client::run_client(client));
+    }
 
     let libp2p_driver = nockchain_libp2p_io::nc::make_libp2p_driver(
         keypair,

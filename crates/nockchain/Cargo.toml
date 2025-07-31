@@ -48,6 +48,8 @@ gdt-cpus.workspace = true
 zkvm-jetpack.workspace = true
 nbx-jetpack.workspace = true
 nbx-miner.workspace = true
+metrics-exporter-prometheus.workspace = true
+metrics-util.workspace = true
 
 [build-dependencies]
 vergen = { workspace = true, features = [

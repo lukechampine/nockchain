@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use clap::Args;
 use gdt_cpus::CoreType;
 use kernels::miner::KERNEL;
+use metrics::{counter, gauge, histogram, Gauge};
 use nockapp::kernel::form::SerfThread;
 use nockapp::nockapp::wire::Wire;
 use nockapp::noun::slab::{NockJammer, NounSlab};
@@ -58,6 +59,8 @@ pub async fn run_client(cfg: ClientConfig) {
     let pin_threads = cfg
         .pin_threads
         .map(|v| v.logical_core_ids(num_threads as _));
+
+    let client_name = cfg.client_name.unwrap_or_default();
 
     let mut client_tasks = JoinSet::new();
 
@@ -113,6 +116,7 @@ pub async fn run_client(cfg: ClientConfig) {
             a,
             tls,
             i,
+            client_name.clone(),
             live.clone(),
             rx,
             mining_tx.clone(),
@@ -206,6 +210,7 @@ async fn client_loop(
     addr: SocketAddr,
     tls: Option<TlsClientConfig>,
     server_id: usize,
+    client_name: String,
     live: Arc<AtomicBool>,
     mut results: mpsc::Receiver<MiningResultIn>,
     data: mpsc::Sender<MiningDataOut>,
@@ -231,6 +236,7 @@ async fn client_loop(
         let res = proto::client(
             stream,
             server_id,
+            client_name.clone(),
             &mut results,
             data.clone(),
             ack.clone(),
@@ -273,6 +279,11 @@ pub struct ClientConfig {
         help = "Pin miner threads to given CPU cores. Format: sequence=starting_core, exact=core1,core2,core3, or performance"
     )]
     pub pin_threads: Option<PinThreads>,
+    #[arg(
+        long,
+        help = "What's the client name to send in the porotocol"
+    )]
+    pub client_name: Option<String>,
     #[cfg(feature = "gpu")]
     #[arg(
         long,
@@ -436,13 +447,23 @@ async fn start_mining_attempt(
     //cancel_previous: bool,
 ) {
     let max_height = requests.values().map(|v| v.0.block_height).max().unwrap_or(0);
+    gauge!(
+        "nbx_miner_client_block_height",
+    ).set(max_height as f64);
 
-    let Some((target_sid, (mining_data, data_id, _, session_id))) = requests
+    let mut live_cnt = 0;
+
+    let filtered = requests
         .iter()
+        .filter(|(sid, _)| if server_extras[**sid].live.load(Ordering::SeqCst) { live_cnt += 1; true } else { false })
         .filter(|(_, v)| v.0.block_height == max_height)
-        .filter(|(sid, _)| server_extras[**sid].live.load(Ordering::SeqCst))
-        .min_by_key(|(_, v)| v.2)
-    else {
+        .min_by_key(|(_, v)| v.2);
+
+    gauge!(
+        "nbx_miner_client_live_servers",
+    ).set(live_cnt as f64);
+
+    let Some((target_sid, (mining_data, data_id, _, session_id))) = filtered else {
         return;
     };
 
@@ -481,6 +502,16 @@ struct Miner {
 
 impl Miner {
     pub async fn run(mut self) {
+
+        let attempt_hist = histogram!(
+            "nbx_miner_client_attempt_seconds",
+            "miner_id" => self.id.to_string(),
+        );
+        let attempts_counter = counter!(
+            "nbx_miner_client_attempts_count",
+            "miner_id" => self.id.to_string(),
+        );
+
         while self.reqs.changed().await.is_ok() {
             let Some((poke_slab, server_id, data_id, session_id)) = ({
                 let mtx = self.reqs.borrow_and_update();
@@ -489,6 +520,8 @@ impl Miner {
             }) else {
                 continue;
             };
+
+            attempts_counter.increment(1);
 
             let start = Instant::now();
             let result = self
@@ -505,6 +538,8 @@ impl Miner {
                 slab_inp: poke_slab,
                 session_id,
             };
+
+            attempt_hist.record(results.duration.as_secs_f64());
 
             if self.results.send(results).await.is_err() {
                 break;

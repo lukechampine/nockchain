@@ -101,6 +101,8 @@ pub struct NockchainCli {
     pub fakenet_log_difficulty: Option<u64>,
     #[arg(long, help = "Path to fake genesis block jam file")]
     pub fakenet_genesis_jam_path: Option<PathBuf>,
+    #[arg(long, default_value = "127.0.0.1:9005")]
+    pub prometheus_bind: String,
 }
 
 impl NockchainCli {

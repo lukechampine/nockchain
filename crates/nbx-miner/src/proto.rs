@@ -6,12 +6,14 @@ use std::sync::Arc;
 use bincode::{Decode, Encode};
 use nockapp::noun::slab::NounSlab;
 use rand::random;
+use rustls::client::ClientSessionStore;
 use strum::FromRepr;
 use tokio::io::{split, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::broadcast::{self};
 use tokio::sync::{mpsc, Mutex};
 use tracing::*;
+use metrics::{counter, gauge, histogram, Counter, Gauge, Histogram};
 
 use crate::shared;
 
@@ -97,6 +99,12 @@ async fn binsend(mut stream: impl AsyncWrite + Unpin, d: impl Encode) -> io::Res
 
 async fn binrecv<T: Decode<()>>(mut stream: impl AsyncRead + Unpin) -> io::Result<T> {
     let len = stream.read_u32_le().await?;
+
+    // 16MB sanity limit
+    if len > 0x1000000 {
+        return Err(io::ErrorKind::OutOfMemory.into());
+    }
+
     let mut buf = vec![0; len as usize];
     stream.read_exact(&mut buf).await?;
     let (res, _) = bincode::decode_from_slice(&buf, bincode::config::standard())
@@ -107,6 +115,7 @@ async fn binrecv<T: Decode<()>>(mut stream: impl AsyncRead + Unpin) -> io::Resul
 pub async fn client<S: AsyncRead + AsyncWrite>(
     stream: S,
     server_id: usize,
+    client_name: String,
     mining_out: &mut mpsc::Receiver<MiningResultIn>,
     mining_data: mpsc::Sender<MiningDataOut>,
     ack: mpsc::Sender<MiningAckOut>,
@@ -134,6 +143,8 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
     if resp.nonce != nonce + 1 {
         return Err(io::ErrorKind::BrokenPipe.into());
     }
+
+    binsend(&mut write, client_name).await?;
 
     *handshaked = true;
 
@@ -223,6 +234,12 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
     req.nonce += 1;
     binsend(&mut write, req).await?;
 
+    let client_name: String = binrecv(&mut read).await?;
+    let client_name: Arc<str> = Arc::from(&*client_name);
+    let client_id_str: Arc<str> = Arc::from(&*client_id.to_string());
+
+    debug!("Client ID {client_id} joined with name '{client_name}'");
+
     let data_id = Mutex::new(0);
 
     let sender = async {
@@ -253,12 +270,22 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
                 pow_len: data.pow_len,
                 block_height: data.block_height,
             };
+            gauge!(
+                "nbx_miner_proto_server_block_height",
+                "client_id" => client_id_str.clone(),
+                "client_name" => client_name.clone(),
+            ).set(data.block_height as f64);
             core::mem::drop(data);
             let mut guard = data_id.lock().await;
             *guard += 1;
             set_data.data_id = *guard;
             core::mem::drop(guard);
             binsend(&mut write, set_data).await?;
+            counter!(
+                "nbx_miner_proto_server_set_data_count",
+                "client_id" => client_id_str.clone(),
+                "client_name" => client_name.clone(),
+            ).increment(1);
         }
 
         io::Result::Ok(())
@@ -280,10 +307,35 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
                 MinerResponse::RESULT => {
                     let res: MiningResult = binrecv(&mut read).await?;
 
+                    let Some(miner) = miners.get(res.miner_id as usize) else {
+                        counter!(
+                            "nbx_miner_proto_server_invalid_miner_id_count",
+                            "client_id" => client_id_str.clone(),
+                            "client_name" => client_name.clone(),
+                        ).increment(1);
+                        error!(
+                            "Invalid miner id {} (higher than maximum expected)",
+                            res.miner_id
+                        );
+                        return Err(io::ErrorKind::InvalidData.into());
+                    };
+
                     let guard = data_id.lock().await;
                     if *guard > res.data_id {
+                        counter!(
+                            "nbx_miner_proto_server_data_id_outdated_count",
+                            "client_id" => client_id_str.clone(),
+                            "client_name" => client_name.clone(),
+                            "miner_id" => res.miner_id.to_string(),
+                        ).increment(1);
                         continue;
                     } else if *guard < res.data_id {
+                        counter!(
+                            "nbx_miner_proto_server_data_id_invalid_count",
+                            "client_id" => client_id_str.clone(),
+                            "client_name" => client_name.clone(),
+                            "miner_id" => res.miner_id.to_string(),
+                        ).increment(1);
                         error!(
                             "Received data_id higher than last sent ({} > {}). Exiting",
                             res.data_id, *guard
@@ -292,13 +344,19 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
                     }
                     core::mem::drop(guard);
 
-                    let Some(miner) = miners.get(res.miner_id as usize) else {
-                        error!(
-                            "Invalid miner id {} (higher than maximum expected)",
-                            res.miner_id
-                        );
-                        return Err(io::ErrorKind::InvalidData.into());
-                    };
+                    counter!(
+                        "nbx_miner_proto_server_data_id_valid_count",
+                        "client_id" => client_id_str.clone(),
+                        "client_name" => client_name.clone(),
+                        "miner_id" => res.miner_id.to_string(),
+                    ).increment(1);
+
+                    histogram!(
+                        "nbx_miner_proto_server_attempt_seconds",
+                        "client_id" => client_id_str.clone(),
+                        "client_name" => client_name.clone(),
+                        "miner_id" => res.miner_id.to_string(),
+                    ).record(res.attempt_seconds);
 
                     let poke = res.poke.map(cue);
                     let effect = res.effect.map(cue);

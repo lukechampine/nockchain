@@ -11,6 +11,7 @@ jemalloc = ["tikv-jemallocator"]
 gpu = ["nbx-jetpack/gpu-prod"]
 stealthy = ["force-tls"]
 force-tls = []
+prom-exporter = ["metrics-exporter-prometheus", "metrics-util"]
 
 [dependencies]
 kernels = { workspace = true, features = ["miner"] }
@@ -37,6 +38,9 @@ strum.workspace = true
 rustls.workspace = true
 rustls-pemfile.workspace = true
 tokio-rustls.workspace = true
+metrics.workspace = true
+metrics-exporter-prometheus = { workspace = true, optional = true }
+metrics-util = { workspace = true, optional = true }
 
 zkvm-jetpack.workspace = true
 nbx-jetpack.workspace = true
