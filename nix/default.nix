@@ -66,7 +66,8 @@ let
   nbx-miner-v4 = extraArgs: (nbx-miner-base profile-v4 extraArgs);
   nbx-miner-v3 = extraArgs: (nbx-miner-base profile-v3 extraArgs);
 
-  makeGpu = call: call "--features nbx-miner/gpu --features nbx-jetpack/gpu-prod";
+  makeGpu = call: call "--features nbx-miner/gpu --features nbx-jetpack/gpu-prod --features nbx-miner/prom-exporter";
+  makeStealthGpu = call: call "--features nbx-miner/gpu --features nbx-jetpack/gpu-prod --features nbx-miner/stealthy";
 in
 {
   hoonc = hoonc.hoonc;
@@ -80,11 +81,17 @@ in
   nockchain-wallet = wallet-base;
   nockchain-metrics-exporter = metrics-exporter-base;
   nockchain-jamfiles = jam-pkg;
-  nbx-miner = nbx-miner "";
+
+  nbx-miner = nbx-miner "--features nbx-miner/prom-exporter";
   nbx-miner-gpu = makeGpu nbx-miner;
-  nbx-miner-v4 = nbx-miner-v4 "";
+  nbx-miner-v4 = nbx-miner-v4 "--features nbx-miner/prom-exporter";
   nbx-miner-v4-gpu = makeGpu nbx-miner-v4;
-  nbx-miner-v3 = nbx-miner-v3 "";
+  nbx-miner-v3 = nbx-miner-v3 "--features nbx-miner/prom-exporter";
   nbx-miner-v3-gpu = makeGpu nbx-miner-v3;
+
+  nbx-miner-stealth-gpu = makeStealthGpu nbx-miner;
+  nbx-miner-stealth-v4-gpu = makeStealthGpu nbx-miner-v4;
+  nbx-miner-stealth-v3-gpu = makeStealthGpu nbx-miner-v3;
+
   nbx-miner-native = (nbx-miner-base "release-native");
 }
