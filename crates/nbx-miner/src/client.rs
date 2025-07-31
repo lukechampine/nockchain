@@ -149,7 +149,7 @@ pub async fn run_client(cfg: ClientConfig) {
                 }
             }
             r = mining_attempts.recv() => {
-                let MinerAttemptRes { id, duration, server_id, data_id, slab_res, slab_inp, session_id } = r.expect("Mining attempt result failed");
+                let MinerAttemptRes { id, duration_millis, server_id, data_id, slab_res, slab_inp, session_id } = r.expect("Mining attempt result failed");
                 let miner = &miners[id];
                 let slab = slab_res.expect("Mining attempt result failed");
                 let result = unsafe { slab.root() };
@@ -175,7 +175,7 @@ pub async fn run_client(cfg: ClientConfig) {
                             session_id,
                             data: MiningResult {
                                 miner_id: id,
-                                attempt_seconds: duration.as_secs_f32(),
+                                attempt_millis: duration_millis,
                                 is_block,
                                 poke,
                                 effect,
@@ -198,7 +198,7 @@ pub async fn run_client(cfg: ClientConfig) {
 
 struct MinerAttemptRes {
     id: usize,
-    duration: Duration,
+    duration_millis: u32,
     server_id: usize,
     data_id: usize,
     slab_res: Result<NounSlab, CrownError>,
@@ -530,7 +530,7 @@ impl Miner {
                 .await;
 
             let results = MinerAttemptRes {
-                duration: start.elapsed(),
+                duration_millis: start.elapsed().as_millis() as u32,
                 id: self.id,
                 server_id,
                 data_id,
@@ -539,7 +539,7 @@ impl Miner {
                 session_id,
             };
 
-            attempt_hist.record(results.duration.as_secs_f64());
+            attempt_hist.record((results.duration_millis as f64) / 1000.0);
 
             if self.results.send(results).await.is_err() {
                 break;

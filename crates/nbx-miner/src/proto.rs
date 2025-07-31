@@ -17,7 +17,7 @@ use metrics::{counter, gauge, histogram, Counter, Gauge, Histogram};
 
 use crate::shared;
 
-pub const PROTOCOL: u32 = 1;
+pub const PROTOCOL: u32 = 2;
 
 #[derive(Encode, Decode, Clone, Debug)]
 pub struct Hello {
@@ -44,7 +44,7 @@ pub struct MiningData {
 pub struct MiningResult {
     pub data_id: u32,
     pub miner_id: u32,
-    pub attempt_seconds: f32,
+    pub attempt_millis: u32,
     pub is_block: bool,
     pub poke: Option<Vec<u8>>,
     pub effect: Option<Vec<u8>>,
@@ -191,7 +191,7 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
             let rdata = MiningResult {
                 data_id: data_id as u32,
                 miner_id: data.miner_id as u32,
-                attempt_seconds: data.attempt_seconds,
+                attempt_millis: data.attempt_millis,
                 is_block: data.is_block,
                 poke: data.poke.as_ref().map(NounSlab::jam).map(Vec::from),
                 effect: data.effect.as_ref().map(NounSlab::jam).map(Vec::from),
@@ -368,7 +368,7 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
                         "miner_id" => res.miner_id.to_string(),
                         "gpu_index" => gpu_index.clone(),
                         "gpu_name" => gpu_name.clone(),
-                    ).record(res.attempt_seconds);
+                    ).record((res.attempt_millis as f64) / 1000.0);
 
                     let poke = res.poke.map(cue);
                     let effect = res.effect.map(cue);
@@ -379,7 +379,7 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
                             client_id,
                             data: shared::MiningResult {
                                 miner_id: res.miner_id as usize,
-                                attempt_seconds: res.attempt_seconds,
+                                attempt_millis: res.attempt_millis,
                                 is_block: res.is_block,
                                 poke,
                                 effect,

@@ -48,7 +48,7 @@ impl PartialEq for MiningData {
 #[derive(Clone, Debug)]
 pub struct MiningResult {
     pub miner_id: usize,
-    pub attempt_seconds: f32,
+    pub attempt_millis: u32,
     pub is_block: bool,
     pub poke: Option<NounSlab>,
     pub effect: Option<NounSlab>,
