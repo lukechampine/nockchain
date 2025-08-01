@@ -23,11 +23,11 @@
         };
         lib = pkgs.lib;
 
-        craneLib = (crane.mkLib pkgs).overrideToolchain (
-          p: p.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml
-        );
+        rustToolchainFor = p: p.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
 
-        code = pkgs.callPackage ./nix/. { inherit pkgs system lib craneLib; };
+        craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchainFor;
+
+        code = pkgs.callPackage ./nix/. { inherit pkgs system lib craneLib rustToolchainFor; };
       in rec {
         packages = code // {
           all = pkgs.symlinkJoin {

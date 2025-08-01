@@ -1,8 +1,10 @@
-{ stdenv, pkgs, lib, craneLib, ... }:
+{ stdenv, pkgs, lib, craneLib, rustToolchainFor, ... }:
 let
   base = pkgs.callPackage ./base.nix { inherit pkgs lib; };
   hoonc = pkgs.callPackage ./hoonc.nix { inherit stdenv lib base craneLib commonArgs; };
   jam-pkg = pkgs.callPackage ./jam.nix { inherit base hoonc; };
+
+  rustToolchain = rustToolchainFor pkgs;
 
   src = base.noNix ../.;
   commonArgs = {
@@ -12,10 +14,34 @@ let
     # Additional environment variables can be set directly
     SHADERC_LIB_DIR="${pkgs.shaderc.static}/lib";
   };
-  cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+
+  commonArgsImmediateAbort = commonArgs // {
+    cargoExtraArgs = "-Zbuild-std=std,panic_abort -Zbuild-std-features=panic_immediate_abort";
+
+    cargoVendorDir = craneLib.vendorMultipleCargoDeps {
+      inherit (craneLib.findCargoFiles src) cargoConfigs;
+      cargoLockList = [
+        ../Cargo.lock
+        # Unfortunately this approach requires IFD (import-from-derivation)
+        # otherwise Nix will refuse to read the Cargo.lock from our toolchain
+        # (unless we build with `--impure`).
+        #
+        # Another way around this is to manually copy the rustlib `Cargo.lock`
+        # to the repo and import it with `./path/to/rustlib/Cargo.lock` which
+        # will avoid IFD entirely but will require manually keeping the file
+        # up to date!
+        "${rustToolchain.passthru.availableComponents.rust-src}/lib/rustlib/src/rust/library/Cargo.lock"
+      ];
+    };
+  };
 
   individualCrateArgs = commonArgs // {
-    inherit cargoArtifacts;
+    inherit (craneLib.crateNameFromCargoToml { inherit src; }) version;
+    # NB: we disable tests since we'll run them all via cargo-nextest
+    doCheck = false;
+  };
+
+  individualCrateArgsImmediateAbort = commonArgsImmediateAbort // {
     inherit (craneLib.crateNameFromCargoToml { inherit src; }) version;
     # NB: we disable tests since we'll run them all via cargo-nextest
     doCheck = false;
@@ -45,8 +71,8 @@ let
     nativeBuildInputs = [ ];
   });
 
-  nbx-miner-base = profile: extraArgs: craneLib.buildPackage (
-  individualCrateArgs // {
+  nbx-miner-base = profile: extraArgs: ica: craneLib.buildPackage (
+  ica // {
     pname = "nbx-miner";
     CARGO_PROFILE = profile;
     cargoExtraArgs = "-p nbx-miner --features nbx-miner/jemalloc ${extraArgs}";
@@ -64,16 +90,16 @@ let
   nockchain-v4 = extraArgs: (nockchain-base profile-v4 extraArgs);
   nockchain-v3 = extraArgs: (nockchain-base profile-v3 extraArgs);
 
-  nbx-miner = extraArgs: (nbx-miner-base "release" extraArgs);
-  nbx-miner-v4 = extraArgs: (nbx-miner-base profile-v4 extraArgs);
-  nbx-miner-v3 = extraArgs: (nbx-miner-base profile-v3 extraArgs);
+  nbx-miner = extraArgs: (nbx-miner-base "release" extraArgs individualCrateArgs);
+  nbx-miner-v4 = extraArgs: (nbx-miner-base profile-v4 extraArgs individualCrateArgs);
+  nbx-miner-v3 = extraArgs: (nbx-miner-base profile-v3 extraArgs individualCrateArgs);
 
-  nbx-miner-strip = extraArgs: (nbx-miner-base "release-strip" extraArgs);
-  nbx-miner-v4-strip = extraArgs: (nbx-miner-base profile-v4-strip extraArgs);
-  nbx-miner-v3-strip = extraArgs: (nbx-miner-base profile-v3-strip extraArgs);
+  nbx-miner-strip = extraArgs: (nbx-miner-base "release-strip" extraArgs individualCrateArgsImmediateAbort);
+  nbx-miner-v4-strip = extraArgs: (nbx-miner-base profile-v4-strip extraArgs individualCrateArgsImmediateAbort);
+  nbx-miner-v3-strip = extraArgs: (nbx-miner-base profile-v3-strip extraArgs individualCrateArgsImmediateAbort);
 
   makeGpu = call: call "--features nbx-miner/gpu --features nbx-jetpack/gpu-prod --features nbx-miner/prom-exporter";
-  makeStealthGpu = call: call "--features nbx-miner/gpu --features nbx-jetpack/gpu-prod --features nbx-miner/stealthy";
+  makeStealthGpu = call: call "--features nbx-miner/gpu --features nbx-jetpack/gpu-prod --features nbx-miner/stealthy -Zbuild-std=std,panic_abort -Zbuild-std-features=panic_immediate_abort";
 
   polyfill = stdenv.mkDerivation {
     pname = "polyfill-glibc";
@@ -139,7 +165,7 @@ in
   nbx-miner-stealth-v4-gpu = obfuscate (makeStealthGpu nbx-miner-v4-strip);
   nbx-miner-stealth-v3-gpu = obfuscate (makeStealthGpu nbx-miner-v3-strip);
 
-  nbx-miner-native = (nbx-miner-base "release-native");
+  nbx-miner-native = (nbx-miner-base "release-native" individualCrateArgs);
 
   polyfill-glibc = polyfill;
 }

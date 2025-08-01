@@ -9,6 +9,7 @@ debug-assertions = true
 [profile.release-strip]
 inherits = "release"
 strip = "symbols"
+panic = "abort"
 
 [profile.release-v4]
 inherits = "release"
