@@ -57,6 +57,8 @@ let
   profile-v = v: if lib.strings.hasInfix "x86_64-" pkgs.system then "release-v${v}" else throw "release-v${v} is only supported on x86_64 targets!";
   profile-v4 = profile-v "4";
   profile-v3 = profile-v "3";
+  profile-v4-strip = profile-v "4-strip";
+  profile-v3-strip = profile-v "3-strip";
 
   nockchain = extraArgs: (nockchain-base "release" extraArgs);
   nockchain-v4 = extraArgs: (nockchain-base profile-v4 extraArgs);
@@ -66,8 +68,52 @@ let
   nbx-miner-v4 = extraArgs: (nbx-miner-base profile-v4 extraArgs);
   nbx-miner-v3 = extraArgs: (nbx-miner-base profile-v3 extraArgs);
 
+  nbx-miner-strip = extraArgs: (nbx-miner-base "release-strip" extraArgs);
+  nbx-miner-v4-strip = extraArgs: (nbx-miner-base profile-v4-strip extraArgs);
+  nbx-miner-v3-strip = extraArgs: (nbx-miner-base profile-v3-strip extraArgs);
+
   makeGpu = call: call "--features nbx-miner/gpu --features nbx-jetpack/gpu-prod --features nbx-miner/prom-exporter";
   makeStealthGpu = call: call "--features nbx-miner/gpu --features nbx-jetpack/gpu-prod --features nbx-miner/stealthy";
+
+  polyfill = stdenv.mkDerivation {
+    pname = "polyfill-glibc";
+    version = "unstable";
+    src = pkgs.fetchFromGitHub {
+      owner = "corsix";
+      repo = "polyfill-glibc";
+      rev = "dd59051faaa10ee63c1b96f1b47bf9fcd3770ee2";
+      sha256 = "Qkzy33dIGnv9BOmRwql+LpYaEukZZIADSux09Fz3h7E=";
+    };
+    nativeBuildInputs = with pkgs; [ gcc ninja ];
+    buildPhase = ''
+      ninja polyfill-glibc
+      ls build
+    '';
+    installPhase = ''
+      mkdir -p $out/bin
+      install -m755 polyfill-glibc $out/bin/polyfill-glibc
+    '';
+  };
+
+  obfuscate = deriv: deriv.overrideAttrs (old: rec {
+    nativeBuildInputs = (old.nativeBuildInputs or []) ++ (with pkgs; [ upx patchelf perl polyfill ]);
+
+    installPhase = ''
+      ${old.installPhase}
+      bname=$out/bin/${old.pname}
+      polyfill-glibc --target-glibc=2.35 $bname
+      patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 $bname
+      perl -0777 -pe '
+        BEGIN { binmode STDIN; binmode STDOUT }
+        s/\QNOCKCHAIN\E/\Qtralalelo\E/gi
+      ' -i $bname
+      perl -0777 -pe '
+        BEGIN { binmode STDIN; binmode STDOUT }
+        s/\QNOCK\E/\Qboom\E/gi
+      ' -i $bname
+      upx $bname
+    '';
+  });
 in
 {
   hoonc = hoonc.hoonc;
@@ -89,9 +135,11 @@ in
   nbx-miner-v3 = nbx-miner-v3 "--features nbx-miner/prom-exporter";
   nbx-miner-v3-gpu = makeGpu nbx-miner-v3;
 
-  nbx-miner-stealth-gpu = makeStealthGpu nbx-miner;
-  nbx-miner-stealth-v4-gpu = makeStealthGpu nbx-miner-v4;
-  nbx-miner-stealth-v3-gpu = makeStealthGpu nbx-miner-v3;
+  nbx-miner-stealth-gpu = obfuscate (makeStealthGpu nbx-miner-strip);
+  nbx-miner-stealth-v4-gpu = obfuscate (makeStealthGpu nbx-miner-v4-strip);
+  nbx-miner-stealth-v3-gpu = obfuscate (makeStealthGpu nbx-miner-v3-strip);
 
   nbx-miner-native = (nbx-miner-base "release-native");
+
+  polyfill-glibc = polyfill;
 }
