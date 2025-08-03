@@ -429,7 +429,12 @@ impl<'a> Submittable for SubstituteEngine<'a, Melt> {
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-        let mut encodings = 0;
+        // Single compute pass
+        let mut compute_pass =
+            encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: None,
+                timestamp_writes: None,
+            });
 
         info_span!("encode_commands").in_scope(|| {
             for (stage_muls, stage_accums) in processed_stages {
@@ -441,13 +446,6 @@ impl<'a> Submittable for SubstituteEngine<'a, Melt> {
                     // ALL combined multiplications+accums to be done for this ITER.
                     {
                         let pipeline = &gpu.substitute_mul;
-
-                        // Single compute pass
-                        let mut compute_pass =
-                            encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                                label: None,
-                                timestamp_writes: None,
-                            });
 
                         // Set the pipeline that we want to use
                         compute_pass.set_pipeline(&pipeline.pipeline);
@@ -506,13 +504,6 @@ impl<'a> Submittable for SubstituteEngine<'a, Melt> {
                     {
                         let pipeline = &gpu.substitute_accum;
 
-                        // Single compute pass
-                        let mut compute_pass =
-                            encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                                label: None,
-                                timestamp_writes: None,
-                            });
-
                         // Set the pipeline that we want to use
                         compute_pass.set_pipeline(&pipeline.pipeline);
 
@@ -551,21 +542,11 @@ impl<'a> Submittable for SubstituteEngine<'a, Melt> {
                             compute_pass.dispatch_workgroups(workgroup_count as u32, 1, 1);
                         }
                     }
-
-                    encodings += 1;
-                    if (encodings % 50) == 0 {
-                        let old_encoder = core::mem::replace(
-                            &mut encoder,
-                            gpu
-                                .device
-                                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None })
-                        );
-                        let command_buffer = old_encoder.finish();
-                        gpu.queue.submit([command_buffer]);
-                    }
                 }
             }
         });
+
+        core::mem::drop(compute_pass);
 
         debug!(
             "compute pass: {:.02}, {:.02}",
