@@ -21,8 +21,8 @@ pub fn mary_transpose(fpolys: MarySlice, offset: usize, res: &mut MarySliceMut) 
     let num_cols = step / offset;
     let num_rows = len;
 
-    for i in 0..num_cols {
-        for j in 0..num_rows {
+    for j in 0..num_rows {
+        for i in 0..num_cols {
             for k in 0..offset {
                 res.dat[offset * (i * num_rows + j) + k] =
                     fpolys.dat[offset * (j * num_cols + i) + k];
