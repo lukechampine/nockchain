@@ -429,6 +429,8 @@ impl<'a> Submittable for SubstituteEngine<'a, Melt> {
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
+        let mut encodings = 0;
+
         info_span!("encode_commands").in_scope(|| {
             for (stage_muls, stage_accums) in processed_stages {
                 for (chunk_muls, chunk_accums) in stage_muls
@@ -548,6 +550,18 @@ impl<'a> Submittable for SubstituteEngine<'a, Melt> {
                             trace!("DISPATCH ACCUM {workgroup_count}");
                             compute_pass.dispatch_workgroups(workgroup_count as u32, 1, 1);
                         }
+                    }
+
+                    encodings += 1;
+                    if (encodings % 50) == 0 {
+                        let old_encoder = core::mem::replace(
+                            &mut encoder,
+                            gpu
+                                .device
+                                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None })
+                        );
+                        let command_buffer = old_encoder.finish();
+                        gpu.queue.submit([command_buffer]);
                     }
                 }
             }
