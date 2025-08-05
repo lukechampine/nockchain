@@ -628,6 +628,37 @@ impl HashEngine {
         ret
     }
 
+    pub fn push_mary_prehashed<T: Into<Melt> + Copy>(&mut self, stage: usize, ma: MarySlice, step_hash: NounDigest<T>, len_hash: NounDigest<T>) -> usize {
+        if self.stages.len() <= stage {
+            assert_eq!(self.stages.len(), stage);
+            self.stages.push(ReduceStage::default());
+        }
+
+        //   %-  hash-hashable
+
+        //   :-  leaf+step.p.h
+        self.reserve_pair(stage + 1);
+        let step = self.push_hash(stage + 1, step_hash);
+
+        //   :-  leaf+len.array.p.h
+        self.reserve_pair(stage + 2);
+        let len = self.push_hash(stage + 2, len_hash);
+
+        //   hash+(hash-belts-list (bpoly-to-list array:(~(change-step ave p.h) 1)))
+        let (hash_src, pushed_len) =
+            self.push_varlen(stage + 3, ma.dat.iter().copied().map(Melt::from_u64));
+        let stage2 = self.stages.get_mut(stage + 2).unwrap();
+        let hash = stage2.push_variable(hash_src, pushed_len);
+
+        let stage1 = self.stages.get_mut(stage + 1).unwrap();
+        let arr = stage1.push_fixed(len, hash);
+
+        let stage = self.stages.get_mut(stage).unwrap();
+        let ret = stage.push_fixed(step, arr);
+
+        ret
+    }
+
     pub fn push_hash<T: Into<Melt> + Copy>(&mut self, stage: usize, h: NounDigest<T>) -> usize {
         self.push_hashes(stage, &[h])
     }

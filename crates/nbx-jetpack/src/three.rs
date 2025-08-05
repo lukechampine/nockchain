@@ -499,11 +499,18 @@ pub fn build_merk_heap_impl<T: ElementEx>(
         }
     });
 
+    let mut engine2 = HashEngine::default();
+    engine2.push_noun(0, D(T::len() as u64))?;
+    engine2.push_noun(0, D(m.step as u64))?;
+    let hashes = engine2.reduce_cpu();
+    let step_hash = hashes[0];
+    let len_hash = hashes[1];
+
     info_span!("build_merk_heap_marys").in_scope(|| {
         for i in 0..m.len {
             let t = snag_as_poly_mary::<T>(m, i as usize);
             let hbp = hashable_poly(t);
-            engine.push_mary(height - 1, hbp);
+            engine.push_mary_prehashed(height - 1, hbp, step_hash, len_hash);
         }
     });
 
