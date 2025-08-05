@@ -11,7 +11,7 @@ use tracing::*;
 use wgpu::{Backends, Buffer, Device, DeviceType, SubmissionIndex};
 use zkvm_jetpack::form::Melt;
 
-use self::codewords::{BpNttUniform, BpShiftUniform, MaryTransposeUniform};
+use self::codewords::{BpNttUniform, BpShiftUniform, Hash10FixedPrependUniform, HashFixedMultipleUniform, HashVarlenMultipleUniform, MaryTransposeUniform, MontUniform};
 use self::substitute::{AccumUniform, MulUniform, SubstituteIterOps};
 use super::substitute::SubstituteEngine;
 use crate::hash::{HashEngine, NounDigest, ReduceOp, VariableReduceOp};
@@ -36,6 +36,11 @@ struct Gpu {
     bp_ntt_swap: Pipeline,
     bp_ntt: Pipeline,
     mary_transpose: Pipeline,
+    montify: Pipeline,
+    montyred: Pipeline,
+    hash_varlen_multiple: Pipeline,
+    hash_fixed_multiple: Pipeline,
+    hash_10_fixedprepend: Pipeline,
     debug_capture: Arc<Mutex<Option<bool>>>,
 }
 
@@ -93,7 +98,7 @@ impl Gpu {
 
         // Shader related
 
-        let [hash_fixed, hash_variable, substitute_mul, substitute_accum, bp_shift, bp_ntt_swap, bp_ntt, mary_transpose] = [
+        let [hash_fixed, hash_variable, substitute_mul, substitute_accum, bp_shift, bp_ntt_swap, bp_ntt, mary_transpose, montify, montyred, hash_varlen_multiple, hash_fixed_multiple, hash_10_fixedprepend] = [
             (
                 Some(size_of::<ReduceOp>()),
                 "hash_fixed",
@@ -141,6 +146,36 @@ impl Gpu {
                 "mary_transpose",
                 Either::Right(&[true]),
                 Some(size_of::<MaryTransposeUniform>()),
+            ),
+            (
+                None,
+                "montify",
+                Either::Right(&[true]),
+                Some(size_of::<MontUniform>()),
+            ),
+            (
+                None,
+                "montyred",
+                Either::Right(&[true]),
+                Some(size_of::<MontUniform>()),
+            ),
+            (
+                None,
+                "hash_varlen_multiple",
+                Either::Right(&[true]),
+                Some(size_of::<HashVarlenMultipleUniform>()),
+            ),
+            (
+                None,
+                "hash_fixed_multiple",
+                Either::Right(&[true]),
+                Some(size_of::<HashFixedMultipleUniform>()),
+            ),
+            (
+                None,
+                "hash_10_fixedprepend",
+                Either::Right(&[true]),
+                Some(size_of::<Hash10FixedPrependUniform>()),
             ),
         ]
         .map(|(ops_sz, source_label, inputs, uniform_sz)| {
@@ -260,6 +295,11 @@ impl Gpu {
             bp_ntt_swap,
             bp_ntt,
             mary_transpose,
+            montify,
+            montyred,
+            hash_varlen_multiple,
+            hash_fixed_multiple,
+            hash_10_fixedprepend,
             debug_capture: Mutex::new(Some(
                 std::env::var("GPU_DEBUGGER").as_deref().unwrap_or("0") != "0",
             ))

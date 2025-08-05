@@ -44,22 +44,20 @@ impl<'a> CodewordEngine<'a> {
     #[tracing::instrument(skip_all)]
     #[cfg(feature = "gpu")]
     pub fn reduce_gpu(self) -> (Mary, usize, MerkHeap) {
+        use nbx_tip5::melt::Melt;
+        use nbx_tip5::tip5::DIGEST_LENGTH;
+
         use super::gpu::Submittable;
 
-        //let height = xeb(self.fri_domain_len as usize);
+        let height = xeb(self.fri_domain_len as usize);
 
         let res = Submittable::gpu_process(self);
         let codeword_array = res.codeword_array;
 
-        /*let mut codeword_array = Mary {
-            dat: vec![0; codewords.dat.len()],
-            step: codewords.len,
-            len: codewords.step,
+        let mh = MerkHeap {
+            h: <[u64; DIGEST_LENGTH]>::try_from(&res.merk_heap.dat[..DIGEST_LENGTH]).unwrap().map(Melt::from_u64),
+            m: res.merk_heap,
         };
-        mary_transpose(codewords.as_slice(), 1, &mut codeword_array.as_mut_slice());*/
-        // =/  merk-heap=(pair @ merk-heap:merkle)
-        //   (bp-build-merk-heap:merkle codeword-array)
-        let (height, mh) = build_merk_heap_impl::<Belt>(codeword_array.as_slice()).unwrap();
 
         (codeword_array, height, mh)
     }
