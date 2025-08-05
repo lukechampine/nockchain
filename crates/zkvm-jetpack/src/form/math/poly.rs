@@ -394,6 +394,16 @@ pub fn p_shift<T: ElementEx>(poly_a: &[T], pelem_b: &T, poly_res: &mut [T]) {
 }
 
 #[inline(always)]
+pub fn p_shift_nzero<T: ElementEx>(poly_a: &[T], pelem_b: &T, poly_res: &mut [T]) {
+    let mut pelem_power: T = T::one();
+
+    for i in 0..poly_a.len() {
+        poly_res[i] = poly_a[i] * pelem_power;
+        pelem_power = pelem_power * *pelem_b;
+    }
+}
+
+#[inline(always)]
 pub fn p_shift_inplace<T: ElementEx>(poly_a: &mut [T], pelem_b: &T) {
     let mut pelem_power: T = T::one();
 
@@ -409,7 +419,7 @@ pub fn p_coseword<T: ElementEx>(bp: &[T], offset: &T, order: u32, root: &T) -> V
     // shift
     let len_res: u32 = order;
     let mut res = vec![T::zero(); len_res as usize];
-    p_shift(bp, offset, &mut res);
+    p_shift_nzero(bp, offset, &mut res);
 
     p_ntt(res, root)
 }

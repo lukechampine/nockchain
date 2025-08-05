@@ -71,6 +71,10 @@ pub enum GpuTest {
         #[arg(help = "path to mp_substitute_ultra subject.jam")]
         mpsub_sam: String,
     },
+    Codewords {
+        #[arg(help = "path to mp_substitute_ultra subject.jam")]
+        codeword_sam: String,
+    },
 }
 
 #[cfg(feature = "gpu")]
@@ -78,11 +82,14 @@ impl GpuTest {
     async fn run(self, _: Cli) -> Result<()> {
         use anyhow::anyhow;
         use nockvm::jets::util::slot;
-        use zkvm_jetpack::form::{BPolySlice, BPolyVec, Belt, MPolyVec, Melt, PolyVec};
-        use zkvm_jetpack::hand::structs::HoonMapIter;
-        use nbx_jetpack::{substitute::SubstituteEngine, mp_substitute_ultra_impl};
+        use zkvm_jetpack::form::{BPolySlice, BPolyVec, Belt, MPolyVec, Melt, PolyVec, mary::{Mary, MarySlice}};
+        use zkvm_jetpack::hand::structs::{HoonMapIter, HoonList};
+        use nbx_jetpack::{substitute::SubstituteEngine, codewords::CodewordEngine, compute_table_polys, mp_substitute_ultra_impl};
         use zkvm_jetpack::noun::noun_ext::NounExt as ZNounExt;
         use std::collections::BTreeMap;
+        use std::time::Instant;
+
+        nbx_jetpack::gpu::init_gpu(None, 0);
 
         match self {
             Self::Hash => Ok(nbx_jetpack::gpu::gpu_test().unwrap()),
@@ -120,6 +127,43 @@ impl GpuTest {
                     dyns,
                 ).unwrap();
                 nbx_jetpack::gpu::gpu_sub_test(engine).unwrap();
+
+                Ok(())
+            }
+            Self::Codewords { codeword_sam } => {
+                let subject = load_jam(codeword_sam)?;
+                let subject = *unsafe { subject.root() };
+
+                let sam = slot(subject, 6).unwrap();
+
+                let [table_marys, fri_domain_len, total_cols] = sam.uncell()?;
+                let mut table_marys_vec = vec![];
+                for m in HoonList::try_from(table_marys).ok().into_iter().flatten() {
+                    let ma = MarySlice::try_from(m).unwrap();
+                    table_marys_vec.push(ma);
+                }
+                let fri_domain_len = fri_domain_len.as_atom()?.as_u64()? as u32;
+                let total_cols = total_cols.as_atom()?.as_u64()?;
+                // ^-  codeword-commitments
+                // ::
+                // ::  convert the ext columns to marys
+                // ::
+                // ::  think of each mary as a list of the table's columns, interpolated to polynomials
+                // =/  table-polys=(list mary)
+                //   (compute-table-polys table-marys)
+                let table_polys_vec = compute_table_polys(&table_marys_vec);
+                let table_polys = table_polys_vec.iter().map(MarySlice::from).collect::<Vec<_>>();
+                let engine = CodewordEngine::new(table_polys, fri_domain_len, total_cols);
+                let t = Instant::now();
+                let (codeword_array, height, mh) = engine.clone().reduce_gpu();
+                println!("{}", codeword_array.dat.len());
+                println!("{:?} {:?}", &codeword_array.dat[..10], mh.h);
+                std::fs::write("gpu.txt", format!("{:#?}", &codeword_array.dat));
+                println!("GPU: {:.02} {height} | {} {}", t.elapsed().as_secs_f32(), codeword_array.step, codeword_array.len);
+                let (codeword_array, height, mh) = engine.clone().reduce_cpu();
+                println!("{:?} {:?}", &codeword_array.dat[..10], mh.h);
+                println!("CPU: {:.02} {height} | {} {}", t.elapsed().as_secs_f32(), codeword_array.step, codeword_array.len);
+                std::fs::write("cpu.txt", format!("{:#?}", &codeword_array.dat));
 
                 Ok(())
             }

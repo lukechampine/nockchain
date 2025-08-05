@@ -75,6 +75,40 @@ U64 badd(U64 a, U64 b) {
     return x1 + (PRIME * U64(lessThan(a, c)));
 }
 
+U64 bneg(U64 a) {
+    return PRIME * U64(greaterThan(a, U64(0))) - a;
+}
+
+U64 bsub(U64 a, U64 b) {
+    U64 x1 = a - b;
+    return x1 - ((1 + ~PRIME) * U64(lessThan(a, b)));
+}
+
+U64 reduce159(U128 a) {
+    U64 low = a.lo;
+    U64 mid = a.hi << 32;
+    U64 high = a.hi >> 32;
+
+    U64 low2 = low - high;
+    low2 += PRIME * U64(greaterThan(low2, low));
+
+    U64 product = mid - (mid >> 32);
+
+    U64 result = product + low2;
+    result -= PRIME * (U64(lessThan(result, product)) | U64(greaterThan(result, U64(PRIME))));
+
+    return result;
+}
+
+U64 montify(U64 x) {
+    U64 r2 = (U64(0xfffffffe) << 32) | U64(1);
+    return montiply(x, r2);
+}
+
+U64 bmul(U64 x, U64 y) {
+    return reduce159(mul64(x, y));
+}
+
 /*I32 findMSB64(U64 x) {
     U32 lo = U32(x);
     U32 hi = U32(x >> 32);

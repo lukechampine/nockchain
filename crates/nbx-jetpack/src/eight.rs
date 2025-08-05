@@ -6,6 +6,7 @@ use nockvm::noun::{Atom, IndirectAtom, Noun, D, T};
 use tracing::log::*;
 use zkvm_jetpack::form::math::mary::mary_transpose;
 
+use crate::codewords::CodewordEngine;
 use crate::seven::height_mary;
 use crate::three::{build_merk_heap_impl, mary_to_noun};
 
@@ -875,7 +876,7 @@ pub fn precompute_ntts(stack: &mut NockStack, inp: Noun) -> Result {
 }
 
 #[tracing::instrument(skip_all)]
-fn compute_table_polys(tables: &[MarySlice]) -> Vec<Mary> {
+pub fn compute_table_polys(tables: &[MarySlice]) -> Vec<Mary> {
     // |=  tables=(list mary)
     // ^-  (list mary)
     // %+  turn  tables
@@ -911,29 +912,8 @@ pub fn compute_codeword_commitments_sam(stack: &mut NockStack, sam: Noun) -> Res
     //   (compute-table-polys table-marys)
     let table_polys_vec = compute_table_polys(&table_marys_vec);
     let table_polys = table_polys_vec.iter().map(MarySlice::from).collect::<Vec<_>>();
-    // ::
-    // ::  this mary is a list of all tables' columns, extended to codewords
-    // =/  codewords=mary
-    //   (compute-lde table-polys fri-domain-len total-cols)
-    let mut codewords = Mary {
-        step: fri_domain_len,
-        len: total_cols as u32,
-        dat: vec![0; fri_domain_len as usize * total_cols as usize],
-    };
-    compute_lde::<Belt>(&table_polys, fri_domain_len, total_cols, codewords.as_mut_slice());
-    // ::
-    // ::  this mary is a list of rows, each row the values of above codewords at a fixed domain elt
-    // =/  codeword-array=mary
-    //   (transpose-bpolys codewords)
-    let mut codeword_array = Mary {
-        dat: vec![0; codewords.dat.len()],
-        step: codewords.len,
-        len: codewords.step,
-    };
-    mary_transpose(codewords.as_slice(), 1, &mut codeword_array.as_mut_slice());
-    // =/  merk-heap=(pair @ merk-heap:merkle)
-    //   (bp-build-merk-heap:merkle codeword-array)
-    let (height, mh) = build_merk_heap_impl::<Belt>(codeword_array.as_slice())?;
+    let engine = CodewordEngine::new(table_polys, fri_domain_len, total_cols);
+    let (codeword_array, height, mh) = engine.reduce();
     // [table-polys codeword-array merk-heap]
     let table_polys = table_polys_vec.into_iter().map(|v| mary_to_noun(stack, v)).chain([D(0)]).collect::<Vec<_>>();
     let table_polys = T(stack, &table_polys);

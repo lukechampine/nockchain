@@ -19,11 +19,12 @@ mod two;
 mod seven;
 mod utils;
 mod zoon;
-mod hash;
 
 #[cfg(feature = "gpu")]
 pub mod gpu;
 pub mod substitute;
+mod hash;
+pub mod codewords;
 
 use eight::*;
 use five::*;
@@ -38,6 +39,7 @@ use zoon::*;
 use seven::*;
 
 pub use two::mp_substitute_ultra_impl;
+pub use eight::compute_table_polys;
 
 use zkvm_jetpack::jets::utils::jet_err;
 

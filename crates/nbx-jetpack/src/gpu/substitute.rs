@@ -43,7 +43,9 @@ pub(super) struct AccumUniform {
 }
 
 impl FromBuffer for Vec<Vec<Melt>> {
-    fn from_buffers<T: AsRef<[u8]>>(b: &[T]) -> Self {
+    type Metadata = ();
+
+    fn from_buffers<T: AsRef<[u8]>>(b: &[T], _: &()) -> Self {
         b.iter()
             .map(|v| bytemuck::cast_slice::<_, Melt>(v.as_ref()).to_vec())
             .collect()
@@ -616,6 +618,7 @@ impl<'a> Submittable for SubstituteEngine<'a, Melt> {
                 downloads,
                 debug,
                 _download_convert: Default::default(),
+                mdata: (),
             }
         })
     }

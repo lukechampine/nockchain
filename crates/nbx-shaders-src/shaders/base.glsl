@@ -24,6 +24,15 @@ bool lessThan(uint a, uint b) {
 bool lessThan(int a, int b) {
     return a < b;
 }
+bool greaterThan(uint64_t a, uint64_t b) {
+    return a > b;
+}
+bool greaterThan(uint a, uint b) {
+    return a > b;
+}
+bool greaterThan(int a, int b) {
+    return a > b;
+}
 bool notEqual(uint a, uint b) {
     return a != b;
 }

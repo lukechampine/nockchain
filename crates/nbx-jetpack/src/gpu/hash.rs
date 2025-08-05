@@ -9,7 +9,9 @@ use crate::gpu::Submission;
 use crate::hash::{HashEngine, NounDigest, ReduceChunk};
 
 impl FromBuffer for Vec<NounDigest> {
-    fn from_buffers<T: AsRef<[u8]>>(b: &[T]) -> Self {
+    type Metadata = ();
+
+    fn from_buffers<T: AsRef<[u8]>>(b: &[T], _: &()) -> Self {
         let result: Vec<NounDigest> = b
             .iter()
             .map(|v| {
@@ -380,6 +382,7 @@ impl Submittable for HashEngine {
             downloads: vec![download],
             debug,
             _download_convert: Default::default(),
+            mdata: (),
         }
     }
 }

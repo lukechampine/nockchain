@@ -11,12 +11,14 @@ use tracing::*;
 use wgpu::{Backends, Buffer, Device, DeviceType, SubmissionIndex};
 use zkvm_jetpack::form::Melt;
 
+use self::codewords::{BpNttUniform, BpShiftUniform, MaryTransposeUniform};
 use self::substitute::{AccumUniform, MulUniform, SubstituteIterOps};
 use super::substitute::SubstituteEngine;
 use crate::hash::{HashEngine, NounDigest, ReduceOp, VariableReduceOp};
 
 mod hash;
 mod substitute;
+mod codewords;
 
 struct Pipeline {
     pipeline: wgpu::ComputePipeline,
@@ -30,6 +32,10 @@ struct Gpu {
     hash_variable: Pipeline,
     substitute_mul: Pipeline,
     substitute_accum: Pipeline,
+    bp_shift: Pipeline,
+    bp_ntt_swap: Pipeline,
+    bp_ntt: Pipeline,
+    mary_transpose: Pipeline,
     debug_capture: Arc<Mutex<Option<bool>>>,
 }
 
@@ -87,7 +93,7 @@ impl Gpu {
 
         // Shader related
 
-        let [hash_fixed, hash_variable, substitute_mul, substitute_accum] = [
+        let [hash_fixed, hash_variable, substitute_mul, substitute_accum, bp_shift, bp_ntt_swap, bp_ntt, mary_transpose] = [
             (
                 Some(size_of::<ReduceOp>()),
                 "hash_fixed",
@@ -111,6 +117,30 @@ impl Gpu {
                 "substitute_accum",
                 Either::Right(&[false]),
                 Some(size_of::<AccumUniform>()),
+            ),
+            (
+                None,
+                "bp_shift",
+                Either::Right(&[false, false]),
+                Some(size_of::<BpShiftUniform>()),
+            ),
+            (
+                None,
+                "bp_ntt_swap",
+                Either::Right(&[false, false]),
+                Some(size_of::<BpNttUniform>()),
+            ),
+            (
+                None,
+                "bp_ntt",
+                Either::Right(&[false]),
+                Some(size_of::<BpNttUniform>()),
+            ),
+            (
+                None,
+                "mary_transpose",
+                Either::Right(&[true]),
+                Some(size_of::<MaryTransposeUniform>()),
             ),
         ]
         .map(|(ops_sz, source_label, inputs, uniform_sz)| {
@@ -226,6 +256,10 @@ impl Gpu {
             hash_variable,
             substitute_mul,
             substitute_accum,
+            bp_shift,
+            bp_ntt_swap,
+            bp_ntt,
+            mary_transpose,
             debug_capture: Mutex::new(Some(
                 std::env::var("GPU_DEBUGGER").as_deref().unwrap_or("0") != "0",
             ))
@@ -443,15 +477,16 @@ pub fn should_use_gpu() -> bool {
     GPU.with(|v| v.get().is_some())
 }
 
-pub struct Submission<T> {
+pub struct Submission<T: FromBuffer> {
     device: Device,
     si: SubmissionIndex,
     downloads: Vec<Buffer>,
     debug: Option<Arc<Mutex<Option<bool>>>>,
     _download_convert: PhantomData<T>,
+    mdata: T::Metadata,
 }
 
-impl<T> Drop for Submission<T> {
+impl<T: FromBuffer> Drop for Submission<T> {
     fn drop(&mut self) {
         if let Some(debug) = self.debug.take() {
             *debug.lock().unwrap() = Some(true);
@@ -468,6 +503,7 @@ impl<T: FromBuffer> Submission<T> {
             downloads,
             debug,
             _download_convert: _,
+            mdata,
         } = &self;
 
         let buffer_slices = downloads
@@ -502,12 +538,14 @@ impl<T: FromBuffer> Submission<T> {
             unsafe { device.stop_graphics_debugger_capture() };
         }
 
-        T::from_buffers(&buffer_slices[..])
+        T::from_buffers(&buffer_slices[..], mdata)
     }
 }
 
 pub trait FromBuffer {
-    fn from_buffers<T: AsRef<[u8]>>(b: &[T]) -> Self;
+    type Metadata;
+
+    fn from_buffers<T: AsRef<[u8]>>(b: &[T], mdata: &Self::Metadata) -> Self;
 }
 
 pub trait Submittable: Sized {
