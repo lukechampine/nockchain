@@ -5,7 +5,7 @@ use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::noun::*;
 use nockvm_macros::tas;
-use tracing::log::*;
+use crate::log::*;
 use zkvm_jetpack::form::math::mary::mary_transpose;
 
 use crate::one::snag_as_poly_mary;

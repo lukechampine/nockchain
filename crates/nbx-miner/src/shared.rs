@@ -16,7 +16,7 @@ use tokio::net::TcpStream;
 use tokio_rustls::client;
 use tokio_rustls::server;
 use tokio_rustls::{TlsAcceptor, TlsConnector};
-use tracing::*;
+use nbx_jetpack::log::*;
 
 #[derive(Debug)]
 pub struct MiningData {
@@ -49,6 +49,8 @@ impl PartialEq for MiningData {
 pub struct MiningResult {
     pub miner_id: usize,
     pub attempt_millis: u32,
+    pub gpu_submit_millis: u32,
+    pub gpu_process_millis: u32,
     pub is_block: bool,
     pub poke: Option<NounSlab>,
     pub effect: Option<NounSlab>,

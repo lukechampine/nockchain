@@ -15,7 +15,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio::task::{AbortHandle, Id, JoinSet};
 use tokio::time::sleep;
-use tracing::*;
+use nbx_jetpack::log::*;
 use zkvm_jetpack::noun::noun_ext::NounExt as ZNounExt;
 
 use crate::proto::{server, MiningResultOut};

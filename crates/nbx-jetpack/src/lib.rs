@@ -26,6 +26,8 @@ pub mod substitute;
 mod hash;
 pub mod codewords;
 
+pub mod instruments;
+
 use eight::*;
 use five::*;
 use four::*;
@@ -42,6 +44,36 @@ pub use two::mp_substitute_ultra_impl;
 pub use eight::compute_table_polys;
 
 use zkvm_jetpack::jets::utils::jet_err;
+
+#[cfg(not(feature = "stealthy"))]
+pub mod log {
+    pub use tracing::log::*;
+}
+
+#[cfg(feature = "stealthy")]
+pub mod log {
+    #[macro_export]
+    macro_rules! error {
+        ($($tt:tt)*) => ()
+    }
+    #[macro_export]
+    macro_rules! warn {
+        ($($tt:tt)*) => ()
+    }
+    #[macro_export]
+    macro_rules! debug {
+        ($($tt:tt)*) => ()
+    }
+    #[macro_export]
+    macro_rules! info {
+        ($($tt:tt)*) => ()
+    }
+    #[macro_export]
+    macro_rules! trace {
+        ($($tt:tt)*) => ()
+    }
+    pub use super::{error, warn, debug, info, trace};
+}
 
 macro_rules! jam_err {
     ($name:ident) => {{

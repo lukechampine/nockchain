@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::noun::{Atom, IndirectAtom, Noun, D, T};
-use tracing::log::*;
+use crate::log::*;
 use zkvm_jetpack::form::math::mary::mary_transpose;
 
 use crate::codewords::CodewordEngine;

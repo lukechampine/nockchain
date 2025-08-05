@@ -12,6 +12,7 @@ use super::{FromBuffer, Gpu, Pipeline, Submission, Submittable};
 use crate::codewords::CodewordEngine;
 use crate::gpu::get_gpu;
 use crate::hash::{HashEngine, NounDigest};
+use crate::instruments::local_instruments;
 use crate::one::G;
 use crate::utils::xeb;
 
@@ -89,6 +90,8 @@ impl<'a> Submittable for CodewordEngine<'a> {
         };
 
         let gpu = get_gpu();
+        let inst = local_instruments();
+        let _probe = inst.gpu_submit_probe();
 
         let mut encoder = gpu
             .device

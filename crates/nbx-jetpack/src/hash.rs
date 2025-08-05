@@ -3,7 +3,7 @@ use nbx_tip5::tip5::RATE;
 use nockvm::jets::JetErr;
 use nockvm::noun::{Atom, Noun, D};
 use nockvm_macros::tas;
-use tracing::log::*;
+use crate::log::*;
 
 #[cfg(feature = "gpu")]
 use super::gpu::{self, Submittable};

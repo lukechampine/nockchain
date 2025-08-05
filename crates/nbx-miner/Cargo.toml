@@ -9,7 +9,7 @@ edition = "2021"
 default = ["jemalloc"]
 jemalloc = ["tikv-jemallocator"]
 gpu = ["nbx-jetpack/gpu-prod"]
-stealthy = ["force-tls"]
+stealthy = ["force-tls", "nbx-jetpack/stealthy"]
 force-tls = []
 prom-exporter = ["metrics-exporter-prometheus", "metrics-util"]
 

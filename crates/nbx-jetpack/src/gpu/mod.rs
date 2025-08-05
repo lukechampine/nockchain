@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use either::Either;
 use nbx_shaders::get_shader_module;
-use tracing::*;
+use crate::log::*;
 use wgpu::{Backends, Buffer, Device, DeviceType, SubmissionIndex};
 use zkvm_jetpack::form::Melt;
 
@@ -15,6 +15,7 @@ use self::codewords::{BpNttUniform, BpShiftUniform, Hash10FixedPrependUniform, H
 use self::substitute::{AccumUniform, MulUniform, SubstituteIterOps};
 use super::substitute::SubstituteEngine;
 use crate::hash::{HashEngine, NounDigest, ReduceOp, VariableReduceOp};
+use crate::instruments::{local_instruments, Instruments};
 
 mod hash;
 mod substitute;
@@ -508,9 +509,9 @@ pub fn gpu_sub_test(engine: SubstituteEngine<Melt>) -> Result<(), Box<dyn std::e
 }
 
 pub fn init_gpu(gpu_name_filter: Option<&str>, gpu_idx: usize) {
-    GPU.with(|v| v.set(Gpu::new(gpu_name_filter, gpu_idx).unwrap().into()))
-        .ok()
-        .expect("GPU already initialized");
+    GPU.with(|v| {
+        v.set(Gpu::new(gpu_name_filter, gpu_idx).unwrap().into())
+    }).ok().expect("GPU already initialized");
 }
 
 pub fn should_use_gpu() -> bool {
@@ -546,6 +547,9 @@ impl<T: FromBuffer> Submission<T> {
             mdata,
         } = &self;
 
+        let inst = local_instruments();
+        let probe = inst.gpu_finish_probe();
+
         let buffer_slices = downloads
             .iter()
             .map(|download| {
@@ -577,6 +581,8 @@ impl<T: FromBuffer> Submission<T> {
         if debug.is_some() {
             unsafe { device.stop_graphics_debugger_capture() };
         }
+
+        core::mem::drop(probe);
 
         T::from_buffers(&buffer_slices[..], mdata)
     }

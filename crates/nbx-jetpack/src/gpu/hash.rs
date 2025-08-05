@@ -1,11 +1,12 @@
 use std::time::Instant;
 
-use tracing::*;
+use crate::log::*;
 use wgpu::util::DeviceExt;
 use wgpu::Buffer;
 
 use super::{get_gpu, FromBuffer, Submittable, WgOffsets};
 use crate::gpu::Submission;
+use crate::instruments::local_instruments;
 use crate::hash::{HashEngine, NounDigest, ReduceChunk};
 
 impl FromBuffer for Vec<NounDigest> {
@@ -49,6 +50,8 @@ impl Submittable for HashEngine {
         let t = Instant::now();
 
         let gpu = get_gpu();
+        let inst = local_instruments();
+        let _probe = inst.gpu_submit_probe();
 
         let (mut stages, out_stages) = self.destruct();
 

@@ -3,12 +3,14 @@ use std::time::Instant;
 
 use bytemuck::{Pod, Zeroable};
 use nbx_tip5::melt::Melt;
-use tracing::{info_span, *};
+use tracing::info_span;
+use crate::log::*;
 use wgpu::util::DeviceExt;
 use wgpu::Buffer;
 
 use super::{get_gpu, FromBuffer, Submittable};
 use crate::gpu::Submission;
+use crate::instruments::local_instruments;
 use crate::substitute::{SubstituteEngine, MAX_CHUNK_SIZE};
 
 #[derive(Clone, Copy, Pod, Zeroable, Debug)]
@@ -60,6 +62,8 @@ impl<'a> Submittable for SubstituteEngine<'a, Melt> {
         let t = Instant::now();
 
         let gpu = get_gpu();
+        let inst = local_instruments();
+        let _probe = inst.gpu_submit_probe();
 
         let (mut stages, poly_len) = self.destruct();
 

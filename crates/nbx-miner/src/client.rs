@@ -9,6 +9,7 @@ use clap::Args;
 use gdt_cpus::CoreType;
 use kernels::miner::KERNEL;
 use metrics::{counter, gauge, histogram, Gauge};
+use nbx_jetpack::instruments::{local_instruments, Instruments, ReadInstruments};
 use nockapp::kernel::form::SerfThread;
 use nockapp::nockapp::wire::Wire;
 use nockapp::noun::slab::{NockJammer, NounSlab};
@@ -26,7 +27,7 @@ use tokio::net::TcpStream;
 use tokio::sync::{mpsc, watch};
 use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::sleep;
-use tracing::*;
+use nbx_jetpack::log::*;
 use zkvm_jetpack::form::PRIME;
 use zkvm_jetpack::noun::noun_ext::NounExt as OtherNounExt;
 
@@ -149,7 +150,7 @@ pub async fn run_client(cfg: ClientConfig) {
                 }
             }
             r = mining_attempts.recv() => {
-                let MinerAttemptRes { id, duration_millis, server_id, data_id, slab_res, slab_inp, session_id } = r.expect("Mining attempt result failed");
+                let MinerAttemptRes { id, duration_millis, duration_gpu_submit_millis, duration_gpu_process_millis, server_id, data_id, slab_res, slab_inp, session_id } = r.expect("Mining attempt result failed");
                 let miner = &miners[id];
                 let slab = slab_res.expect("Mining attempt result failed");
                 let result = unsafe { slab.root() };
@@ -176,6 +177,8 @@ pub async fn run_client(cfg: ClientConfig) {
                             data: MiningResult {
                                 miner_id: id,
                                 attempt_millis: duration_millis,
+                                gpu_submit_millis: duration_gpu_submit_millis,
+                                gpu_process_millis: duration_gpu_process_millis,
                                 is_block,
                                 poke,
                                 effect,
@@ -199,6 +202,8 @@ pub async fn run_client(cfg: ClientConfig) {
 struct MinerAttemptRes {
     id: usize,
     duration_millis: u32,
+    duration_gpu_submit_millis: u32,
+    duration_gpu_process_millis: u32,
     server_id: usize,
     data_id: usize,
     slab_res: Result<NounSlab, CrownError>,
@@ -498,6 +503,7 @@ struct Miner {
     id: usize,
     results: mpsc::Sender<MinerAttemptRes>,
     reqs: watch::Receiver<SyncMutex<Option<(NounSlab, usize, usize, u32)>>>,
+    instruments: Arc<Instruments>,
 }
 
 impl Miner {
@@ -511,6 +517,8 @@ impl Miner {
             "nbx_miner_client_attempts_count",
             "miner_id" => self.id.to_string(),
         );
+
+        let mut prev_inst = ReadInstruments::default();
 
         while self.reqs.changed().await.is_ok() {
             let Some((poke_slab, server_id, data_id, session_id)) = ({
@@ -529,8 +537,14 @@ impl Miner {
                 .poke(MiningWire::Candidate.to_wire(), poke_slab.clone())
                 .await;
 
+            let cur_inst = self.instruments.read();
+            let inst_delta = cur_inst.since(prev_inst);
+            prev_inst = cur_inst;
+
             let results = MinerAttemptRes {
                 duration_millis: start.elapsed().as_millis() as u32,
+                duration_gpu_submit_millis: inst_delta.gpu_submit_ms as u32,
+                duration_gpu_process_millis: inst_delta.gpu_finish_ms as u32,
                 id: self.id,
                 server_id,
                 data_id,
@@ -596,6 +610,8 @@ impl MinerHandle {
             .expect("Could not invoke gpu initialization");
         }
 
+        let instruments = serf.call_fn(local_instruments).await.expect("Unable to get instruments");
+
         let (tx, rx) = watch::channel(SyncMutex::new(None));
 
         let miner = Miner {
@@ -603,6 +619,7 @@ impl MinerHandle {
             id,
             results,
             reqs: rx,
+            instruments,
         };
 
         let miner_loop = tokio::spawn(miner.run());
