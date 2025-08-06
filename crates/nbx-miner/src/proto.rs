@@ -17,7 +17,7 @@ use metrics::{counter, gauge, histogram, Counter, Gauge, Histogram};
 
 use crate::shared;
 
-pub const PROTOCOL: u32 = 3;
+pub const PROTOCOL: u32 = 4;
 
 #[derive(Encode, Decode, Clone, Debug)]
 pub struct Hello {
@@ -45,6 +45,7 @@ pub struct MiningResult {
     pub data_id: u32,
     pub miner_id: u32,
     pub attempt_millis: u32,
+    pub gpu_enqueue_millis: u32,
     pub gpu_submit_millis: u32,
     pub gpu_process_millis: u32,
     pub is_block: bool,
@@ -194,6 +195,7 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
                 data_id: data_id as u32,
                 miner_id: data.miner_id as u32,
                 attempt_millis: data.attempt_millis,
+                gpu_enqueue_millis: data.gpu_enqueue_millis,
                 gpu_submit_millis: data.gpu_submit_millis,
                 gpu_process_millis: data.gpu_process_millis,
                 is_block: data.is_block,
@@ -374,7 +376,7 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
                         "gpu_name" => gpu_name.clone(),
                     ).record((res.attempt_millis as f64) / 1000.0);
 
-                    if res.gpu_submit_millis > 0 || res.gpu_process_millis > 0 {
+                    if res.gpu_enqueue_millis > 0 || res.gpu_submit_millis > 0 || res.gpu_process_millis > 0 {
                         histogram!(
                             "nbx_miner_proto_server_gpu_submit_seconds",
                             "client_id" => client_id_str.clone(),
@@ -383,6 +385,15 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
                             "gpu_index" => gpu_index.clone(),
                             "gpu_name" => gpu_name.clone(),
                         ).record((res.gpu_submit_millis as f64) / 1000.0);
+
+                        histogram!(
+                            "nbx_miner_proto_server_gpu_enqueue_seconds",
+                            "client_id" => client_id_str.clone(),
+                            "client_name" => client_name.clone(),
+                            "miner_id" => res.miner_id.to_string(),
+                            "gpu_index" => gpu_index.clone(),
+                            "gpu_name" => gpu_name.clone(),
+                        ).record((res.gpu_enqueue_millis as f64) / 1000.0);
 
                         histogram!(
                             "nbx_miner_proto_server_gpu_process_seconds",
@@ -404,6 +415,7 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
                             data: shared::MiningResult {
                                 miner_id: res.miner_id as usize,
                                 attempt_millis: res.attempt_millis,
+                                gpu_enqueue_millis: res.gpu_enqueue_millis,
                                 gpu_submit_millis: res.gpu_submit_millis,
                                 gpu_process_millis: res.gpu_process_millis,
                                 is_block: res.is_block,

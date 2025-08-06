@@ -4,11 +4,12 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Instant;
+use std::collections::{BTreeMap, btree_map::Entry};
 
 use either::Either;
 use nbx_shaders::get_shader_module;
 use crate::log::*;
-use wgpu::{Backends, Buffer, Device, DeviceType, SubmissionIndex};
+use wgpu::{Backends, Buffer, Device, Queue, DeviceType, SubmissionIndex, CommandBuffer};
 use zkvm_jetpack::form::Melt;
 
 use self::codewords::{BpNttUniform, BpShiftUniform, Hash10FixedPrependUniform, HashFixedMultipleUniform, HashVarlenMultipleUniform, MaryTransposeUniform, MontUniform};
@@ -25,6 +26,8 @@ struct Pipeline {
     pipeline: wgpu::ComputePipeline,
     bind_group_layout: wgpu::BindGroupLayout,
 }
+
+static GPUS: Mutex<BTreeMap<(Option<String>, usize), (wgpu::Device, wgpu::Queue)>> = Mutex::new(BTreeMap::new());
 
 struct Gpu {
     device: wgpu::Device,
@@ -47,53 +50,62 @@ struct Gpu {
 
 impl Gpu {
     fn new(gpu_name_filter: Option<&str>, gpu_idx: usize) -> Result<Self, Box<dyn std::error::Error>> {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::from_env_or_default());
+        let mut cache = GPUS.lock()?;
+        let (device, queue) = match cache.entry((gpu_name_filter.map(String::from), gpu_idx)) {
+            Entry::Occupied(e) => e.get().clone(),
+            Entry::Vacant(e) => {
+                let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::from_env_or_default());
 
-        let mut adapters = instance.enumerate_adapters(Backends::from_env().unwrap_or_default());
+                let mut adapters = instance.enumerate_adapters(Backends::from_env().unwrap_or_default());
 
-        fn dt_to_weight(dt: DeviceType) -> usize {
-            match dt {
-                DeviceType::Other => 0,
-                DeviceType::Cpu => 1,
-                DeviceType::VirtualGpu => 2,
-                DeviceType::IntegratedGpu => 3,
-                DeviceType::DiscreteGpu => 4,
+                fn dt_to_weight(dt: DeviceType) -> usize {
+                    match dt {
+                        DeviceType::Other => 0,
+                        DeviceType::Cpu => 1,
+                        DeviceType::VirtualGpu => 2,
+                        DeviceType::IntegratedGpu => 3,
+                        DeviceType::DiscreteGpu => 4,
+                    }
+                }
+
+                adapters.sort_by_key(|v| !dt_to_weight(v.get_info().device_type));
+
+                for adapter in &adapters {
+                    trace!("Potential adapter {:?}", adapter.get_info());
+                }
+
+                let adapter = if let Some(target_gpu) = gpu_name_filter {
+                    adapters.into_iter().filter(|v| v.get_info().name.contains(target_gpu)).nth(gpu_idx)
+                } else {
+                    adapters.into_iter().nth(gpu_idx)
+                }.ok_or("Adapter not found")?;
+
+                debug!("Adapter found {:?}", adapter.get_info());
+
+                let downlevel_capabilities = adapter.get_downlevel_capabilities();
+                if !downlevel_capabilities
+                    .flags
+                        .contains(wgpu::DownlevelFlags::COMPUTE_SHADERS)
+                {
+                    return Err("No compute shader support".into());
+                }
+
+                let required_limits = wgpu::Limits::downlevel_defaults();
+
+                let (device, queue) =
+                    pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+                        label: None,
+                        required_features: wgpu::Features::SHADER_INT64
+                            | wgpu::Features::SPIRV_SHADER_PASSTHROUGH,
+                            required_limits,
+                            memory_hints: wgpu::MemoryHints::MemoryUsage,
+                            trace: wgpu::Trace::Off,
+                    }))?;
+
+                e.insert((device, queue)).clone()
             }
-        }
-
-        adapters.sort_by_key(|v| !dt_to_weight(v.get_info().device_type));
-
-        for adapter in &adapters {
-            trace!("Potential adapter {:?}", adapter.get_info());
-        }
-
-        let adapter = if let Some(target_gpu) = gpu_name_filter {
-            adapters.into_iter().filter(|v| v.get_info().name.contains(target_gpu)).nth(gpu_idx)
-        } else {
-            adapters.into_iter().nth(gpu_idx)
-        }.ok_or("Adapter not found")?;
-
-        debug!("Adapter found {:?}", adapter.get_info());
-
-        let downlevel_capabilities = adapter.get_downlevel_capabilities();
-        if !downlevel_capabilities
-            .flags
-            .contains(wgpu::DownlevelFlags::COMPUTE_SHADERS)
-        {
-            return Err("No compute shader support".into());
-        }
-
-        let required_limits = wgpu::Limits::downlevel_defaults();
-
-        let (device, queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-                label: None,
-                required_features: wgpu::Features::SHADER_INT64
-                    | wgpu::Features::SPIRV_SHADER_PASSTHROUGH,
-                required_limits,
-                memory_hints: wgpu::MemoryHints::MemoryUsage,
-                trace: wgpu::Trace::Off,
-            }))?;
+        };
+        core::mem::drop(cache);
 
         debug!("Aquired device and queue");
 
@@ -428,6 +440,7 @@ pub fn gpu_test() -> Result<(), Box<dyn std::error::Error>> {
         let gpu_submissions = hash_engines
             .into_par_iter()
             .map(Submittable::submit)
+            .map(Submission::enqueue)
             .collect::<Vec<_>>();
         println!(
             "Submitted all: {:.02}, {:.02}",
@@ -479,6 +492,7 @@ pub fn gpu_sub_test(engine: SubstituteEngine<Melt>) -> Result<(), Box<dyn std::e
     let gpu_submissions = engines
         .into_par_iter()
         .map(Submittable::submit)
+        .map(Submission::enqueue)
         .collect::<Vec<_>>();
     println!(
         "Submitted all: {:.02}, {:.02}",
@@ -518,16 +532,19 @@ pub fn should_use_gpu() -> bool {
     GPU.with(|v| v.get().is_some())
 }
 
-pub struct Submission<T: FromBuffer> {
-    device: Device,
-    si: SubmissionIndex,
-    downloads: Vec<Buffer>,
+struct DebugHandle {
     debug: Option<Arc<Mutex<Option<bool>>>>,
-    _download_convert: PhantomData<T>,
-    mdata: T::Metadata,
 }
 
-impl<T: FromBuffer> Drop for Submission<T> {
+impl From<Option<Arc<Mutex<Option<bool>>>>> for DebugHandle {
+    fn from(debug: Option<Arc<Mutex<Option<bool>>>>) -> Self {
+        Self {
+            debug
+        }
+    }
+}
+
+impl Drop for DebugHandle {
     fn drop(&mut self) {
         if let Some(debug) = self.debug.take() {
             *debug.lock().unwrap() = Some(true);
@@ -535,17 +552,58 @@ impl<T: FromBuffer> Drop for Submission<T> {
     }
 }
 
-impl<T: FromBuffer> Submission<T> {
+pub struct Submission<T: FromBuffer, O> {
+    device: Device,
+    queue: Queue,
+    obj: O,
+    downloads: Vec<Buffer>,
+    debug: DebugHandle,
+    _download_convert: PhantomData<T>,
+    mdata: T::Metadata,
+}
+
+impl<T: FromBuffer> Submission<T, CommandBuffer> {
+    #[tracing::instrument(skip_all)]
+    pub fn enqueue(self) -> Submission<T, SubmissionIndex> {
+        let Self {
+            device,
+            queue,
+            obj: command_buffer,
+            downloads,
+            debug,
+            _download_convert,
+            mdata,
+        } = self;
+
+        let inst = local_instruments();
+        let _probe = inst.gpu_enqueue_probe();
+
+        let si = queue.submit([command_buffer]);
+
+        Submission {
+            device,
+            queue,
+            obj: si,
+            downloads,
+            debug,
+            _download_convert,
+            mdata
+        }
+    }
+}
+
+impl<T: FromBuffer> Submission<T, SubmissionIndex> {
     #[tracing::instrument(skip_all)]
     pub fn finish(self) -> T {
         let Self {
             device,
-            si,
+            queue: _,
+            obj: si,
             downloads,
             debug,
             _download_convert: _,
             mdata,
-        } = &self;
+        } = self;
 
         let inst = local_instruments();
         let probe = inst.gpu_finish_probe();
@@ -578,13 +636,13 @@ impl<T: FromBuffer> Submission<T> {
             })
             .collect::<Vec<_>>();
 
-        if debug.is_some() {
+        if debug.debug.is_some() {
             unsafe { device.stop_graphics_debugger_capture() };
         }
 
         core::mem::drop(probe);
 
-        T::from_buffers(&buffer_slices[..], mdata)
+        T::from_buffers(&buffer_slices[..], &mdata)
     }
 }
 
@@ -597,9 +655,9 @@ pub trait FromBuffer {
 pub trait Submittable: Sized {
     type Output: FromBuffer;
 
-    fn submit(self) -> Submission<Self::Output>;
+    fn submit(self) -> Submission<Self::Output, CommandBuffer>;
 
     fn gpu_process(self) -> Self::Output {
-        self.submit().finish()
+        self.submit().enqueue().finish()
     }
 }

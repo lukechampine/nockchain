@@ -2,13 +2,14 @@ use bytemuck::{Pod, Zeroable};
 use nbx_tip5::melt::Melt;
 use nockvm::noun::D;
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
-use wgpu::{Buffer, BufferDescriptor, BufferUsages, ComputePass};
+use wgpu::{Buffer, BufferDescriptor, BufferUsages, ComputePass, CommandBuffer};
 use zkvm_jetpack::form::bpoly::bitreverse;
 use zkvm_jetpack::form::mary::{Mary, MarySlice};
 use zkvm_jetpack::form::math::poly::p_ntt_twiddles;
 use zkvm_jetpack::form::Belt;
+use tracing::info_span;
 
-use super::{FromBuffer, Gpu, Pipeline, Submission, Submittable};
+use super::{FromBuffer, Gpu, Pipeline, Submission, Submittable, DebugHandle};
 use crate::codewords::CodewordEngine;
 use crate::gpu::get_gpu;
 use crate::hash::{HashEngine, NounDigest};
@@ -76,7 +77,7 @@ impl<'a> Submittable for CodewordEngine<'a> {
     type Output = CodewordResult;
 
     #[tracing::instrument(skip_all)]
-    fn submit(self) -> Submission<Self::Output> {
+    fn submit(self) -> Submission<Self::Output, CommandBuffer> {
         let (table_polys, fri_domain_len, total_cols) = self.destruct();
 
         let mh_height = xeb(fri_domain_len as usize);
@@ -91,7 +92,7 @@ impl<'a> Submittable for CodewordEngine<'a> {
 
         let gpu = get_gpu();
         let inst = local_instruments();
-        let _probe = inst.gpu_submit_probe();
+        let submit_probe = inst.gpu_submit_probe();
 
         let mut encoder = gpu
             .device
@@ -154,14 +155,14 @@ impl<'a> Submittable for CodewordEngine<'a> {
         let debug_capture_guard = gpu.debug_capture.try_lock();
         let debug_capture = *debug_capture_guard.as_deref().unwrap_or(&None);
 
-        let debug = if debug_capture == Some(true) {
+        let debug: DebugHandle = if debug_capture == Some(true) {
             unsafe { gpu.device.start_graphics_debugger_capture() };
             debug_capture_guard.unwrap().take();
             Some(gpu.debug_capture.clone())
         } else {
             core::mem::drop(debug_capture_guard);
             None
-        };
+        }.into();
 
         encoder.copy_buffer_to_buffer(&codeword_array, 0, &download, 0, download.size());
 
@@ -174,11 +175,12 @@ impl<'a> Submittable for CodewordEngine<'a> {
 
         let command_buffer = encoder.finish();
 
-        let si = gpu.queue.submit([command_buffer]);
+        core::mem::drop(submit_probe);
 
         Submission {
             device: gpu.device.clone(),
-            si,
+            queue: gpu.queue.clone(),
+            obj: command_buffer,
             downloads: vec![download, mh_download],
             debug,
             _download_convert: Default::default(),

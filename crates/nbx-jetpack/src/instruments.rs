@@ -11,6 +11,7 @@ pub fn local_instruments() -> Arc<Instruments> {
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ReadInstruments {
+    pub gpu_enqueue_ms: u64,
     pub gpu_submit_ms: u64,
     pub gpu_finish_ms: u64,
 }
@@ -18,6 +19,7 @@ pub struct ReadInstruments {
 impl ReadInstruments {
     pub fn since(self, prev: Self) -> Self {
         Self {
+            gpu_enqueue_ms: self.gpu_enqueue_ms - prev.gpu_enqueue_ms,
             gpu_submit_ms: self.gpu_submit_ms - prev.gpu_submit_ms,
             gpu_finish_ms: self.gpu_finish_ms - prev.gpu_finish_ms,
         }
@@ -26,11 +28,17 @@ impl ReadInstruments {
 
 #[derive(Debug, Default)]
 pub struct Instruments {
+    gpu_enqueue_ms: AtomicU64,
     gpu_submit_ms: AtomicU64,
     gpu_finish_ms: AtomicU64,
 }
 
 impl Instruments {
+    #[must_use]
+    pub(crate) fn gpu_enqueue_probe(&self) -> InstrumentProbe {
+        InstrumentProbe::new(&self.gpu_enqueue_ms)
+    }
+
     #[must_use]
     pub(crate) fn gpu_submit_probe(&self) -> InstrumentProbe {
         InstrumentProbe::new(&self.gpu_submit_ms)
@@ -43,6 +51,7 @@ impl Instruments {
 
     pub fn read(&self) -> ReadInstruments {
         ReadInstruments {
+            gpu_enqueue_ms: self.gpu_enqueue_ms.load(Ordering::Relaxed),
             gpu_submit_ms: self.gpu_submit_ms.load(Ordering::Relaxed),
             gpu_finish_ms: self.gpu_finish_ms.load(Ordering::Relaxed),
         }

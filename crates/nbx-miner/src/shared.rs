@@ -49,6 +49,7 @@ impl PartialEq for MiningData {
 pub struct MiningResult {
     pub miner_id: usize,
     pub attempt_millis: u32,
+    pub gpu_enqueue_millis: u32,
     pub gpu_submit_millis: u32,
     pub gpu_process_millis: u32,
     pub is_block: bool,

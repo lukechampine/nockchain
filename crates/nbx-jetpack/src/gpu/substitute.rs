@@ -6,9 +6,9 @@ use nbx_tip5::melt::Melt;
 use tracing::info_span;
 use crate::log::*;
 use wgpu::util::DeviceExt;
-use wgpu::Buffer;
+use wgpu::{Buffer, CommandBuffer};
 
-use super::{get_gpu, FromBuffer, Submittable};
+use super::{get_gpu, FromBuffer, Submittable, DebugHandle};
 use crate::gpu::Submission;
 use crate::instruments::local_instruments;
 use crate::substitute::{SubstituteEngine, MAX_CHUNK_SIZE};
@@ -58,12 +58,12 @@ impl<'a> Submittable for SubstituteEngine<'a, Melt> {
     type Output = Vec<Vec<Melt>>;
 
     #[tracing::instrument(skip_all)]
-    fn submit(self) -> Submission<Self::Output> {
+    fn submit(self) -> Submission<Self::Output, CommandBuffer> {
         let t = Instant::now();
 
         let gpu = get_gpu();
         let inst = local_instruments();
-        let _probe = inst.gpu_submit_probe();
+        let submit_probe = inst.gpu_submit_probe();
 
         let (mut stages, poly_len) = self.destruct();
 
@@ -586,14 +586,14 @@ impl<'a> Submittable for SubstituteEngine<'a, Melt> {
             let debug_capture_guard = gpu.debug_capture.try_lock();
             let debug_capture = *debug_capture_guard.as_deref().unwrap_or(&None);
 
-            let debug = if debug_capture == Some(true) {
+            let debug: DebugHandle = if debug_capture == Some(true) {
                 unsafe { gpu.device.start_graphics_debugger_capture() };
                 debug_capture_guard.unwrap().take();
                 Some(gpu.debug_capture.clone())
             } else {
                 core::mem::drop(debug_capture_guard);
                 None
-            };
+            }.into();
 
             for (download, output) in downloads.iter().zip(prev_ob.iter().flatten()) {
                 encoder.copy_buffer_to_buffer(&output, 0, &download, 0, output.size());
@@ -608,7 +608,7 @@ impl<'a> Submittable for SubstituteEngine<'a, Melt> {
             );
             let t2 = Instant::now();
 
-            let si = gpu.queue.submit([command_buffer]);
+            core::mem::drop(submit_probe);
 
             debug!(
                 "submitted: {:.02}, {:.02}",
@@ -618,7 +618,8 @@ impl<'a> Submittable for SubstituteEngine<'a, Melt> {
 
             Submission {
                 device: gpu.device.clone(),
-                si,
+                queue: gpu.queue.clone(),
+                obj: command_buffer,
                 downloads,
                 debug,
                 _download_convert: Default::default(),

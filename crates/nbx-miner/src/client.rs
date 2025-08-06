@@ -150,7 +150,7 @@ pub async fn run_client(cfg: ClientConfig) {
                 }
             }
             r = mining_attempts.recv() => {
-                let MinerAttemptRes { id, duration_millis, duration_gpu_submit_millis, duration_gpu_process_millis, server_id, data_id, slab_res, slab_inp, session_id } = r.expect("Mining attempt result failed");
+                let MinerAttemptRes { id, duration_millis, duration_gpu_enqueue_millis, duration_gpu_submit_millis, duration_gpu_process_millis, server_id, data_id, slab_res, slab_inp, session_id } = r.expect("Mining attempt result failed");
                 let miner = &miners[id];
                 let slab = slab_res.expect("Mining attempt result failed");
                 let result = unsafe { slab.root() };
@@ -177,6 +177,7 @@ pub async fn run_client(cfg: ClientConfig) {
                             data: MiningResult {
                                 miner_id: id,
                                 attempt_millis: duration_millis,
+                                gpu_enqueue_millis: duration_gpu_enqueue_millis,
                                 gpu_submit_millis: duration_gpu_submit_millis,
                                 gpu_process_millis: duration_gpu_process_millis,
                                 is_block,
@@ -202,6 +203,7 @@ pub async fn run_client(cfg: ClientConfig) {
 struct MinerAttemptRes {
     id: usize,
     duration_millis: u32,
+    duration_gpu_enqueue_millis: u32,
     duration_gpu_submit_millis: u32,
     duration_gpu_process_millis: u32,
     server_id: usize,
@@ -541,8 +543,13 @@ impl Miner {
             let inst_delta = cur_inst.since(prev_inst);
             prev_inst = cur_inst;
 
+            let duration_millis = start.elapsed().as_millis() as u32;
+
+            trace!("duration_millis: {duration_millis}\ninstrumentation: {inst_delta:#?}", );
+
             let results = MinerAttemptRes {
-                duration_millis: start.elapsed().as_millis() as u32,
+                duration_millis,
+                duration_gpu_enqueue_millis: inst_delta.gpu_enqueue_ms as u32,
                 duration_gpu_submit_millis: inst_delta.gpu_submit_ms as u32,
                 duration_gpu_process_millis: inst_delta.gpu_finish_ms as u32,
                 id: self.id,

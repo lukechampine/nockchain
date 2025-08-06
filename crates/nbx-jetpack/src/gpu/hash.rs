@@ -2,9 +2,9 @@ use std::time::Instant;
 
 use crate::log::*;
 use wgpu::util::DeviceExt;
-use wgpu::Buffer;
+use wgpu::{Buffer, CommandBuffer};
 
-use super::{get_gpu, FromBuffer, Submittable, WgOffsets};
+use super::{get_gpu, FromBuffer, Submittable, WgOffsets, DebugHandle};
 use crate::gpu::Submission;
 use crate::instruments::local_instruments;
 use crate::hash::{HashEngine, NounDigest, ReduceChunk};
@@ -46,12 +46,12 @@ impl Submittable for HashEngine {
     type Output = Vec<NounDigest>;
 
     #[tracing::instrument(skip_all)]
-    fn submit(self) -> Submission<Self::Output> {
+    fn submit(self) -> Submission<Self::Output, CommandBuffer> {
         let t = Instant::now();
 
         let gpu = get_gpu();
         let inst = local_instruments();
-        let _probe = inst.gpu_submit_probe();
+        let submit_probe = inst.gpu_submit_probe();
 
         let (mut stages, out_stages) = self.destruct();
 
@@ -262,14 +262,14 @@ impl Submittable for HashEngine {
         let debug_capture_guard = gpu.debug_capture.try_lock();
         let debug_capture = *debug_capture_guard.as_deref().unwrap_or(&None);
 
-        let debug = if debug_capture == Some(true) {
+        let debug: DebugHandle = if debug_capture == Some(true) {
             unsafe { gpu.device.start_graphics_debugger_capture() };
             debug_capture_guard.unwrap().take();
             Some(gpu.debug_capture.clone())
         } else {
             core::mem::drop(debug_capture_guard);
             None
-        };
+        }.into();
 
         let mut encoder = gpu
             .device
@@ -371,7 +371,7 @@ impl Submittable for HashEngine {
         );
         let t2 = Instant::now();
 
-        let si = gpu.queue.submit([command_buffer]);
+        core::mem::drop(submit_probe);
 
         debug!(
             "submitted: {:.02}, {:.02}",
@@ -381,7 +381,8 @@ impl Submittable for HashEngine {
 
         Submission {
             device: gpu.device.clone(),
-            si,
+            queue: gpu.queue.clone(),
+            obj: command_buffer,
             downloads: vec![download],
             debug,
             _download_convert: Default::default(),
