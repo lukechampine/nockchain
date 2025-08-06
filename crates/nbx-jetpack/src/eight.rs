@@ -1,8 +1,10 @@
 use std::collections::BTreeMap;
+use std::rc::Rc;
 
 use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::noun::{Atom, IndirectAtom, Noun, D, T};
+use crate::deep::DeepEngine;
 use crate::log::*;
 use zkvm_jetpack::form::math::mary::mary_transpose;
 
@@ -28,128 +30,6 @@ use zkvm_jetpack::hand::handle::{
 use zkvm_jetpack::hand::structs::{HoonList, HoonMap, HoonMapIter};
 use zkvm_jetpack::jets::utils::{det_err, jet_err};
 use zkvm_jetpack::noun::noun_ext::NounExt;
-
-struct WeightedDivConst {
-    d: Felt,
-    dg: usize,
-    pinned: FPolyVec,
-}
-
-impl WeightedDivConst {
-    fn new(stack: &mut NockStack, q: FPolyVec, pl: usize) -> Self {
-        let (d, g) = con_mon(q);
-        let dg = fdegree((&g).into());
-
-        let mut rg = g;
-        rg.0.reverse();
-
-        // fdegree(p)
-        let df = pl - 1;
-
-        let dq = df - dg;
-        let pinned = pinv_mod_x_to(stack, dq + 1, (&rg).into());
-
-        Self {
-            d,
-            dg,
-            pinned,
-        }
-    }
-}
-
-#[tracing::instrument(skip_all)]
-fn fpdiv_with_cache<'a>(
-    stack: &mut NockStack,
-    mut p: FPolyVec,
-    WeightedDivConst { d, dg, pinned }: &WeightedDivConst,
-) -> FPolyVec {
-    assert!(!p.0.is_empty());
-
-    if fp_is_zero((&p).into()) {
-        p.0.truncate(1);
-        jam_to(stack, &p.0, "fpdiv-r");
-        return p;
-    }
-
-    let (c, f) = con_mon(p.clone());
-    let lead = c / *d;
-    let df = fdegree((&f).into());
-    let mut rf = f;
-    rf.0.reverse();
-    if df < *dg {
-        let ret = zero_fpoly();
-        return ret;
-    }
-    // Since pinned relies on degree we estimated
-    let df = rf.0.len() - 1;
-    let dq = df - *dg;
-    let mulled = fpmul(stack, pinned.clone(), rf);
-    let mut scagged = PolyVec(scag_vec(dq + 1, mulled.0));
-    scagged.0.reverse();
-    pscal_inplace(lead, &mut scagged.0);
-    scagged
-}
-
-
-pub fn weighted_linear_combo<'a>(
-    stack: &mut NockStack,
-    //cache: &mut HashMap<(FPolyVec, FPolyVec), core::result::Result<FPolyVec, JetErr>>,
-    polys: &[FPolyVec],
-    openings: FPolySlice<'a>,
-    idx: usize,
-    x_poly: FPolySlice<'a>,
-    weights: FPolySlice<'a>,
-) -> core::result::Result<(FPolyVec, usize), JetErr> {
-    // |=  [polys=(list fpoly) openings=fpoly idx=@ x-poly=fpoly weights=fpoly]
-    // ^-  [fpoly @]
-    // =-  [acc num]
-    let mut acc: FPolyVec = zero_fpoly();
-    let mut num = idx;
-
-    let id = id_fpoly();
-    let id_x = fpsub((&id).into(), x_poly);
-    let id_x = WeightedDivConst::new(stack, id_x, polys[0].0.len());
-
-    // %+  roll  polys
-    // |=  [poly=fpoly acc=_zero-fpoly num=_idx]
-    for poly in polys {
-        let poly: FPolySlice = poly.into();
-        // :_  +(num)
-        // %+  fpadd  acc
-        // %+  fpscal  (~(snag fop weights) num)
-        // %+  fpdiv
-        //   (fpsub poly (fp-c (~(snag fop openings) num)))
-        // (fpsub id-fpoly x-poly)
-        // NOTE: id_x = (fpsub id-fpoly x-poly)
-        let fpc = [openings.0[num]];
-        /*println!(
-            "id-x {} {} {}",
-            vmug(stack, &id_x.0),
-            vmug(stack, poly.0),
-            vmug(stack, &fpc)
-        );*/
-        let fpc = PolySlice(&fpc);
-        let r1 = fpsub(poly, fpc);
-        //println!("res {}", vmug(stack, &res.0));
-        /*let res = cache
-        .entry((res, id_x.clone()))
-        .or_insert_with_key(|(r, i)| fpdiv(stack, r.clone(), i.clone()))
-        .clone()?;*/
-        let res = fpdiv_with_cache(stack, r1, &id_x);
-        //println!(
-        //    "res {} {:?}",
-        //    vmug(stack, &res.0),
-        //    fat(stack, weights.0[num])
-        //);
-        let res = fpscal(weights.0[num], res);
-        //println!("res {} {}", vmug(stack, &res.0), vmug(stack, &acc.0));
-        acc = fpadd(acc, (&res).into());
-        //println!("acc {}", vmug(stack, &acc.0));
-        num += 1;
-    }
-
-    Ok((acc, num))
-}
 
 pub fn compute_deep(stack: &mut NockStack, inp: Noun) -> Result {
     // ~/  %compute-deep
@@ -215,7 +95,9 @@ pub fn compute_deep(stack: &mut NockStack, inp: Noun) -> Result {
         omicrons.0.len()
     );*/
 
-    let mut acc = zero_fpoly();
+    let mut engine = DeepEngine::default();
+
+    //let mut acc = zero_fpoly();
     let mut num = 0usize;
 
     //let mut cache = Default::default();
@@ -256,7 +138,7 @@ pub fn compute_deep(stack: &mut NockStack, inp: Noun) -> Result {
             //       (fp-c deep-challenge)
             //       weights
             //   ==
-            let (first_row, new_num) = weighted_linear_combo(
+            let new_num = engine.weighted_linear_combo(
                 stack,
                 &lis,
                 trace_openings,
@@ -275,7 +157,7 @@ pub fn compute_deep(stack: &mut NockStack, inp: Noun) -> Result {
             //       weights
             //   ==
             let point_omi_dc = new_fpoly(&[fmul_(&omicron, point)]);
-            let (second_row, new_num) = weighted_linear_combo(
+            let new_num = engine.weighted_linear_combo(
                 stack,
                 &lis,
                 trace_openings,
@@ -288,8 +170,8 @@ pub fn compute_deep(stack: &mut NockStack, inp: Noun) -> Result {
             // :_  num
             num = new_num;
             // :(fpadd acc first-row second-row)
-            acc = fpadd(acc, (&first_row).into());
-            acc = fpadd(acc, (&second_row).into());
+            //acc = fpadd(acc, (&first_row).into());
+            //acc = fpadd(acc, (&second_row).into());
         }
     }
 
@@ -334,7 +216,7 @@ pub fn compute_deep(stack: &mut NockStack, inp: Noun) -> Result {
     //   ==
     let x_poly = new_fpoly(&[fpow_(deep_challenge, composition_pieces.len() as u64)]);
 
-    let (pieces, _) = weighted_linear_combo(
+    engine.weighted_linear_combo(
         stack,
         &composition_pieces,
         composition_piece_openings,
@@ -350,7 +232,7 @@ pub fn compute_deep(stack: &mut NockStack, inp: Noun) -> Result {
     );*/
 
     // (fpadd acc pieces)
-    let acc = fpadd(acc, (&pieces).into());
+    let acc = engine.reduce();
 
     //println!("ADDED acc={}", vmug(stack, &acc.0));
 

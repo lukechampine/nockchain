@@ -229,7 +229,7 @@ fn alloc_slice<'a, T: Copy>(num: usize) -> PolyVec<T> {
     })
 }
 
-fn zeroextend_slice<'a, T: Copy>(mut a: PolyVec<T>, n: usize, zero: T) -> PolyVec<T> {
+pub fn zeroextend_slice<'a, T: Copy>(mut a: PolyVec<T>, n: usize, zero: T) -> PolyVec<T> {
     if a.0.len() < n {
         a.0.resize(n, zero);
     }
@@ -615,7 +615,7 @@ fn fp_ifft<'a>(p: FPolyVec) -> core::result::Result<FPolyVec, JetErr> {
 }
 
 // ::  +fpmul-fast: polynomial multiplication with fft
-fn fpmul_fast<'a>(fp: FPolyVec, fq: FPolyVec) -> FPolyVec {
+pub fn fpmul_fast<'a>(fp: FPolyVec, fq: FPolyVec) -> FPolyVec {
     // ~/  %fpmul-fast
     // |=  [fp=fpoly fq=fpoly]
     // ^-  fpoly
@@ -659,6 +659,7 @@ fn fpmul_fast<'a>(fp: FPolyVec, fq: FPolyVec) -> FPolyVec {
 }
 
 // ::  +fpmul: polynomial multiplication
+#[tracing::instrument(skip_all)]
 pub fn fpmul<'a>(stack: &mut NockStack, fp: FPolyVec, fq: FPolyVec) -> FPolyVec {
     jam_to(stack, &fp.0, "fpmul-fp");
     jam_to(stack, &fq.0, "fpmul-fq");

@@ -24,6 +24,7 @@ mod zoon;
 pub mod gpu;
 pub mod substitute;
 mod hash;
+pub mod deep;
 pub mod codewords;
 
 pub mod instruments;
