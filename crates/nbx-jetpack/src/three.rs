@@ -501,7 +501,7 @@ pub fn build_merk_heap_impl<T: ElementEx>(
 
     let mut engine2 = HashEngine::default();
     engine2.push_noun(0, D(T::len() as u64))?;
-    engine2.push_noun(0, D(m.step as u64))?;
+    engine2.push_noun(0, D((m.step as u64) / (T::len() as u64)))?;
     let hashes = engine2.reduce_cpu();
     let step_hash = hashes[0];
     let len_hash = hashes[1];

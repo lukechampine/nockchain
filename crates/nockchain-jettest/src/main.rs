@@ -364,7 +364,7 @@ async fn on_kernel(slab: NounSlab, hot_state: Vec<HotEntry>, cli: Cli, init_call
         };
 
         if effect_cell.head().eq_bytes("mine-result") {
-            return Ok(effect);
+            return Ok(effects_slab);
         }
     }
 
