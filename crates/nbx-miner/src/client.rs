@@ -269,7 +269,7 @@ async fn client_loop(
 ) {
     let mut err_cnt = 0;
     let server_name = addr.to_string();
-    loop {
+    for i in 1.. {
         let stream = match tls_connect_wrap(TcpStream::connect(addr), tls).await {
             Ok(stream) => stream,
             Err(e) => {
@@ -277,6 +277,7 @@ async fn client_loop(
                 error!("Unable to connect to {addr}: {e:?}. Sleeping for {sleep_secs} seconds");
                 sleep(Duration::from_secs(sleep_secs)).await;
                 err_cnt = core::cmp::min(err_cnt + 1, 5);
+                gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string()).set(err_cnt as f64);
                 continue;
             }
         };
@@ -294,8 +295,24 @@ async fn client_loop(
             ack.clone(),
             miner_metadata.clone(),
             &mut handshaked,
-        )
-        .await;
+        );
+
+        #[cfg(feature = "stealthy")]
+        let metrics_keepalive = std::future::pending::<()>();
+
+        #[cfg(not(feature = "stealthy"))]
+        let metrics_keepalive = async {
+            loop {
+                gauge!("nbx_miner_client_loop_connected_count", "server_id" => server_id.to_string()).set(i as f64);
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+        };
+
+        let res = tokio::select! {
+            v = res => v,
+            _ = metrics_keepalive => unreachable!(),
+        };
+
         live.fetch_and(false, Ordering::SeqCst);
 
         if handshaked {
@@ -306,6 +323,7 @@ async fn client_loop(
             let sleep_secs = 1 << err_cnt;
             error!("Protocol error: {e:?}. Reconnecting in {sleep_secs} seconds");
             err_cnt = core::cmp::min(err_cnt + 1, 5);
+            gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string()).set(err_cnt as f64);
             sleep(Duration::from_secs(sleep_secs)).await;
         } else {
             break;

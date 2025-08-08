@@ -108,8 +108,10 @@ async fn binsend(mut stream: impl AsyncWrite + Unpin, target_name: Arc<str>, msg
     Ok(())
 }
 
-async fn binrecv<T: Decode<()>>(mut stream: impl AsyncRead + Unpin) -> io::Result<T> {
+async fn binrecv<T: Decode<()>>(mut stream: impl AsyncRead + Unpin, target_name: Arc<str>, msg_type: &'static str) -> io::Result<T> {
     let len = stream.read_u32_le().await?;
+
+    let t = Instant::now();
 
     // 16MB sanity limit
     if len > 0x1000000 {
@@ -120,6 +122,13 @@ async fn binrecv<T: Decode<()>>(mut stream: impl AsyncRead + Unpin) -> io::Resul
     stream.read_exact(&mut buf).await?;
     let (res, _) = bincode::decode_from_slice(&buf, bincode::config::standard())
         .map_err(|_| io::ErrorKind::InvalidData)?;
+
+    histogram!(
+        "nbx_miner_binrecv_seconds",
+        "target_name" => target_name,
+        "msg_type" => msg_type,
+    ).record(t.elapsed().as_secs_f64());
+
     Ok(res)
 }
 
@@ -153,7 +162,7 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
         },
     )
     .await?;
-    let resp: Hello = binrecv(&mut read).await?;
+    let resp: Hello = binrecv(&mut read, server_name.clone(), "hello").await?;
     if resp.protocol != PROTOCOL {
         return Err(io::ErrorKind::Unsupported.into());
     }
@@ -194,7 +203,7 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
 
     let receiver = async {
         loop {
-            let data: MiningData = binrecv(&mut read).await?;
+            let data: MiningData = binrecv(&mut read, server_name.clone(), "mining_data").await?;
             let data_id = data.data_id as usize;
             let data = shared::MiningData {
                 block_header: cue(data.block_header),
@@ -303,7 +312,7 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
     let (mut read, mut write) = split(stream);
 
     // Initial handshake
-    let mut req: Hello = binrecv(&mut read).await?;
+    let mut req: Hello = binrecv(&mut read, "".into(), "hello").await?;
     if req.protocol != PROTOCOL {
         return Err(io::ErrorKind::Unsupported.into());
     }
@@ -316,7 +325,7 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
         req
     ).await?;
 
-    let client_name: String = binrecv(&mut read).await?;
+    let client_name: String = binrecv(&mut read, "".into(), "client_name").await?;
     let client_name: Arc<str> = Arc::from(&*client_name);
     let client_id_str: Arc<str> = Arc::from(&*client_id.to_string());
 
@@ -404,11 +413,11 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
             };
             match cmd {
                 MinerResponse::METADATA => {
-                    let mdata: SetMinerMetadata = binrecv(&mut read).await?;
+                    let mdata: SetMinerMetadata = binrecv(&mut read, client_name.clone(), "miner_metadata").await?;
                     miners = mdata.miners.into_iter().map(Arc::new).collect();
                 }
                 MinerResponse::RESULT => {
-                    let res: MiningResult = binrecv(&mut read).await?;
+                    let res: MiningResult = binrecv(&mut read, client_name.clone(), "mining_result").await?;
 
                     let Some(miner) = miners.get(res.miner_id as usize) else {
                         counter!(
