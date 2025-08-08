@@ -8,6 +8,8 @@ use std::time::{Duration, Instant};
 use clap::Args;
 use gdt_cpus::CoreType;
 use kernels::miner::KERNEL;
+use rand::distributions::WeightedIndex;
+use rand::prelude::Distribution;
 use crate::metrics::{counter, gauge, histogram};
 use nbx_jetpack::instruments::{local_instruments, Instruments, ReadInstruments};
 use nockapp::kernel::form::SerfThread;
@@ -21,7 +23,7 @@ use nockchain_libp2p_io::tip5_util::tip5_hash_to_base58;
 use nockvm::interpreter::NockCancelToken;
 use nockvm::jets::hot::HotEntry;
 use nockvm::noun::{Atom, D, T};
-use rand::Rng;
+use rand::{thread_rng, Rng};
 use rustls::crypto::ring::default_provider;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, watch};
@@ -141,7 +143,7 @@ pub async fn run_client(cfg: ClientConfig) {
             v = mining_rx.recv() => {
                 counter!("nbx_miner_client_main_loop_mining_rx_total").increment(1);
                 let MiningDataOut { server_id, data_id, session_id, data } = v.expect("Client loop died");
-                requests.insert(server_id, (data, data_id, Instant::now(), session_id));
+                requests.insert(server_id, (data, data_id, Instant::now(), 0, session_id));
                 for m in &miners {
                     start_mining_attempt(m, &server_extras, &mut requests);
                 }
@@ -511,7 +513,7 @@ fn create_poke(mining_data: &MiningData, nonce: &NounSlab) -> NounSlab {
 fn start_mining_attempt(
     miner: &MinerHandle,
     server_extras: &[ServerExtras],
-    requests: &mut BTreeMap<usize, (MiningData, usize, Instant, u32)>,
+    requests: &mut BTreeMap<usize, (MiningData, usize, Instant, usize, u32)>,
     //mining_data: tokio::sync::MutexGuard<'_, Option<MiningData>>,
     //nonce: Option<NounSlab>,
     //cancel_previous: bool,
@@ -523,21 +525,32 @@ fn start_mining_attempt(
 
     let mut live_cnt = 0;
 
-    let filtered = requests
-        .iter()
+    let mut filtered = requests
+        .iter_mut()
         .filter(|(sid, _)| if server_extras[**sid].live.load(Ordering::SeqCst) { live_cnt += 1; true } else { false })
         .filter(|(_, v)| v.0.block_height == max_height)
-        .min_by_key(|(_, v)| v.2);
+        .collect::<Vec<_>>();
 
     gauge!(
         "nbx_miner_client_live_servers",
     ).set(live_cnt as f64);
 
-    let Some((target_sid, (mining_data, data_id, _, session_id))) = filtered else {
+    if filtered.is_empty() {
         return;
-    };
+    }
+
+    let lowest_cnt = filtered.iter().map(|v| v.1.3).min().unwrap();
+    let weights = filtered.iter().map(|v| 0.5f64.powi((v.1.3 - lowest_cnt + 1) as i32)).collect::<Vec<_>>();
+
+    let index = WeightedIndex::new(weights.iter().copied()).unwrap();
 
     let mut rng = rand::thread_rng();
+    let i = index.sample(&mut rng);
+
+    let (target_sid, (mining_data, data_id, _, hit_cnt, session_id)) = filtered.swap_remove(i);
+
+    *hit_cnt += 1;
+
     let mut nonce_slab = NounSlab::<NockJammer>::new();
     let mut nonce_cell = Atom::from_value(&mut nonce_slab, rng.gen::<u64>() % PRIME)
         .expect("Failed to create nonce atom")
