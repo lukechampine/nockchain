@@ -437,6 +437,7 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
                             "gpu_index" => gpu_index.clone(),
                             "gpu_name" => gpu_name.clone(),
                         ).increment(1);
+                        counter!("nbx_miner_proto_global_server_data_id_outdated_count").increment(1);
                         continue;
                     } else if *guard < res.data_id {
                         counter!(
@@ -447,6 +448,7 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
                             "gpu_index" => gpu_index.clone(),
                             "gpu_name" => gpu_name.clone(),
                         ).increment(1);
+                        counter!("nbx_miner_proto_global_server_data_id_invalid_count").increment(1);
                         error!(
                             "Received data_id higher than last sent ({} > {}). Exiting",
                             res.data_id, *guard
@@ -463,6 +465,7 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
                         "gpu_index" => gpu_index.clone(),
                         "gpu_name" => gpu_name.clone(),
                     ).increment(1);
+                    counter!("nbx_miner_proto_global_server_data_id_valid_count").increment(1);
 
                     histogram!(
                         "nbx_miner_proto_server_attempt_seconds",

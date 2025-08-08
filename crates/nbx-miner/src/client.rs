@@ -111,7 +111,7 @@ pub async fn run_client(cfg: ClientConfig) {
     miners.sort_by_key(|v| v.id);
 
     for (i, a) in cfg.miner_connect.into_iter().enumerate() {
-        let (tx, rx) = mpsc::channel(16);
+        let (tx, rx) = mpsc::channel(64);
         let live = Arc::new(AtomicBool::new(false));
         client_tasks.spawn(client_loop(
             a,
@@ -135,15 +135,19 @@ pub async fn run_client(cfg: ClientConfig) {
     let mut interval = tokio::time::interval(Duration::from_secs(5));
 
     loop {
+        counter!("nbx_miner_client_main_loop_ticks_total").increment(1);
+
         tokio::select! {
             v = mining_rx.recv() => {
+                counter!("nbx_miner_client_main_loop_mining_rx_total").increment(1);
                 let MiningDataOut { server_id, data_id, session_id, data } = v.expect("Client loop died");
                 requests.insert(server_id, (data, data_id, Instant::now(), session_id));
                 for m in &miners {
-                    start_mining_attempt(m, &server_extras, &mut requests).await;
+                    start_mining_attempt(m, &server_extras, &mut requests);
                 }
             }
             v = ack_rx.recv() => {
+                counter!("nbx_miner_client_main_loop_ack_rx_total").increment(1);
                 let MiningAckOut { server_id, miner_id: _, data_id } = v.expect("Client loop died");
                 if let Some(r) = requests.get_mut(&server_id) {
                     if r.1 == data_id {
@@ -156,6 +160,7 @@ pub async fn run_client(cfg: ClientConfig) {
                 }
             }
             _ = interval.tick() => {
+                counter!("nbx_miner_client_main_loop_interval_total").increment(1);
                 let max_height = requests.values().map(|v| v.0.block_height).max().unwrap_or(0);
                 gauge!(
                     "nbx_miner_client_block_height",
@@ -178,6 +183,7 @@ pub async fn run_client(cfg: ClientConfig) {
                 ).set(tip_cnt as f64);
             }
             r = mining_attempts.recv() => {
+                counter!("nbx_miner_client_main_loop_mining_attempts_total").increment(1);
                 let MinerAttemptRes { id, duration_millis, duration_gpu_enqueue_millis, duration_gpu_submit_millis, duration_gpu_process_millis, server_id, data_id, slab_res, slab_inp, session_id } = r.expect("Mining attempt result failed");
                 let miner = &miners[id];
                 let slab = slab_res.expect("Mining attempt result failed");
@@ -199,7 +205,12 @@ pub async fn run_client(cfg: ClientConfig) {
 
                         let extra = &server_extras[server_id];
 
-                        if let Err(e) = extra.mining_res.send(MiningResultIn {
+                        gauge!(
+                            "nbx_miner_client_channel_mining_res_capacity",
+                            "server_id" => server_id.to_string(),
+                        ).set(extra.mining_res.capacity() as f64);
+
+                        if let Err(e) = extra.mining_res.try_send(MiningResultIn {
                             data_id,
                             session_id,
                             data: MiningResult {
@@ -212,7 +223,11 @@ pub async fn run_client(cfg: ClientConfig) {
                                 poke,
                                 effect,
                             }
-                        }).await {
+                        }) {
+                            counter!(
+                                "nbx_miner_client_send_mining_res_fail_total",
+                                "server_id" => server_id.to_string(),
+                            ).increment(1);
                             error!("Unable to send mining result to {server_id}: {e:?}");
                         }
 
@@ -222,7 +237,7 @@ pub async fn run_client(cfg: ClientConfig) {
                     }
                 }
 
-                start_mining_attempt(miner, &server_extras, &mut requests).await;
+                start_mining_attempt(miner, &server_extras, &mut requests);
             }
         }
     }
@@ -475,7 +490,7 @@ fn create_poke(mining_data: &MiningData, nonce: &NounSlab) -> NounSlab {
     slab
 }
 
-async fn start_mining_attempt(
+fn start_mining_attempt(
     miner: &MinerHandle,
     server_extras: &[ServerExtras],
     requests: &mut BTreeMap<usize, (MiningData, usize, Instant, u32)>,
