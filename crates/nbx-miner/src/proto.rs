@@ -2,6 +2,7 @@ use core::pin::pin;
 use std::collections::BTreeMap;
 use std::io;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use bincode::{Decode, Encode};
 use nockapp::noun::slab::NounSlab;
@@ -13,7 +14,7 @@ use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::broadcast::{self};
 use tokio::sync::{mpsc, Mutex};
 use nbx_jetpack::log::*;
-use metrics::{counter, gauge, histogram, Counter, Gauge, Histogram};
+use crate::metrics::{counter, gauge, histogram};
 
 use crate::shared;
 
@@ -92,11 +93,18 @@ fn cue(d: Vec<u8>) -> NounSlab {
     slab
 }
 
-async fn binsend(mut stream: impl AsyncWrite + Unpin, d: impl Encode) -> io::Result<()> {
+async fn binsend(mut stream: impl AsyncWrite + Unpin, target_name: Arc<str>, msg_type: &'static str, d: impl Encode) -> io::Result<()> {
+    let t = Instant::now();
     let d = bincode::encode_to_vec(d, bincode::config::standard())
         .map_err(|_| io::ErrorKind::InvalidData)?;
     stream.write_u32_le(d.len() as _).await?;
     stream.write_all(&d).await?;
+    stream.flush().await?;
+    histogram!(
+        "nbx_miner_binsend_seconds",
+        "target_name" => target_name,
+        "msg_type" => msg_type,
+    ).record(t.elapsed().as_secs_f64());
     Ok(())
 }
 
@@ -118,6 +126,7 @@ async fn binrecv<T: Decode<()>>(mut stream: impl AsyncRead + Unpin) -> io::Resul
 pub async fn client<S: AsyncRead + AsyncWrite>(
     stream: S,
     server_id: usize,
+    server_name: &str,
     client_name: String,
     mining_out: &mut mpsc::Receiver<MiningResultIn>,
     mining_data: mpsc::Sender<MiningDataOut>,
@@ -129,10 +138,15 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
 
     let (mut read, mut write) = split(stream);
 
+    let server_name: Arc<str> = server_name.into();
+    let server_id_str: Arc<str> = Arc::from(&*server_id.to_string());
+
     // Initial handshake
     let nonce = random::<u32>();
     binsend(
         &mut write,
+        server_name.clone(),
+        "hello",
         Hello {
             protocol: PROTOCOL,
             nonce,
@@ -147,9 +161,36 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
         return Err(io::ErrorKind::BrokenPipe.into());
     }
 
-    binsend(&mut write, client_name).await?;
+    binsend(
+        &mut write,
+        server_name.clone(),
+        "client_name",
+        client_name
+    ).await?;
 
     *handshaked = true;
+
+    #[cfg(feature = "stealthy")]
+    let channel_mon = std::future::pending::<()>();
+
+    #[cfg(not(feature = "stealthy"))]
+    let channel_mon = async {
+        loop {
+            gauge!(
+                "nbx_miner_proto_client_channel_capacity",
+                "channel_name" => "mining_data",
+                "server_name" => server_name.clone(),
+                "server_id" => server_id_str.clone(),
+            ).set(mining_data.capacity() as f64);
+            gauge!(
+                "nbx_miner_proto_client_channel_capacity",
+                "channel_name" => "ack",
+                "server_name" => server_name.clone(),
+                "server_id" => server_id_str.clone(),
+            ).set(ack.capacity() as f64);
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    };
 
     let receiver = async {
         loop {
@@ -162,6 +203,11 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
                 pow_len: data.pow_len,
                 block_height: data.block_height,
             };
+            gauge!(
+                "nbx_miner_proto_client_block_height",
+                "server_name" => server_name.clone(),
+                "server_id" => server_id_str.clone(),
+            ).set(data.block_height as f64);
             if mining_data
                 .send(MiningDataOut {
                     server_id,
@@ -179,7 +225,12 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
 
     let sender = async {
         write.write_u8(MinerResponse::METADATA as _).await?;
-        binsend(&mut write, SetMinerMetadata { miners: metadata }).await?;
+        binsend(
+            &mut write,
+            server_name.clone(),
+            "miner_metadata",
+            SetMinerMetadata { miners: metadata }
+        ).await?;
 
         while let Some(MiningResultIn {
             data_id,
@@ -187,8 +238,15 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
             data,
         }) = mining_out.recv().await
         {
+            let miner_id: Arc<str> = Arc::from(&*data.miner_id.to_string());
             // Broadcast may contain previous session's datapoints. Skip them.
             if session_id != nonce {
+                counter!(
+                    "nbx_miner_proto_client_session_id_mismatch_count",
+                    "server_name" => server_name.clone(),
+                    "server_id" => server_id_str.clone(),
+                    "miner_id" => miner_id.clone(),
+                ).increment(1);
                 continue;
             }
             let rdata = MiningResult {
@@ -202,8 +260,19 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
                 poke: data.poke.as_ref().map(NounSlab::jam).map(Vec::from),
                 effect: data.effect.as_ref().map(NounSlab::jam).map(Vec::from),
             };
+            gauge!(
+                "nbx_miner_proto_client_data_id",
+                "server_name" => server_name.clone(),
+                "server_id" => server_id_str.clone(),
+                "miner_id" => miner_id.clone(),
+            ).set(rdata.data_id as f64);
             write.write_u8(MinerResponse::RESULT as _).await?;
-            binsend(&mut write, rdata).await?;
+            binsend(
+                &mut write,
+                server_name.clone(),
+                "mining_result",
+                rdata
+            ).await?;
             let _ = ack
                 .send(MiningAckOut {
                     server_id,
@@ -216,6 +285,7 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
     };
 
     tokio::select! {
+        _ = channel_mon => unreachable!(),
         v = sender => v,
         v = receiver => v,
     }
@@ -238,7 +308,13 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
         return Err(io::ErrorKind::Unsupported.into());
     }
     req.nonce += 1;
-    binsend(&mut write, req).await?;
+
+    binsend(
+        &mut write,
+        "".into(),
+        "hello",
+        req
+    ).await?;
 
     let client_name: String = binrecv(&mut read).await?;
     let client_name: Arc<str> = Arc::from(&*client_name);
@@ -247,6 +323,22 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
     debug!("Client ID {client_id} joined with name '{client_name}'");
 
     let data_id = Mutex::new(0);
+
+    #[cfg(feature = "stealthy")]
+    let channel_mon = std::future::pending::<()>();
+
+    #[cfg(not(feature = "stealthy"))]
+    let channel_mon = async {
+        loop {
+            gauge!(
+                "nbx_miner_proto_server_channel_capacity",
+                "channel_name" => "results_out",
+                "client_name" => client_name.clone(),
+                "client_id" => client_id_str.clone(),
+            ).set(results_out.capacity() as f64);
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+    };
 
     let sender = async {
         loop {
@@ -286,7 +378,12 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
             *guard += 1;
             set_data.data_id = *guard;
             core::mem::drop(guard);
-            binsend(&mut write, set_data).await?;
+            binsend(
+                &mut write,
+                client_name.clone(),
+                "mining_data",
+                set_data
+            ).await?;
             counter!(
                 "nbx_miner_proto_server_set_data_count",
                 "client_id" => client_id_str.clone(),
@@ -433,6 +530,7 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
     };
 
     tokio::select! {
+        _ = channel_mon => unreachable!(),
         v = sender => v,
         v = receiver => v,
     }

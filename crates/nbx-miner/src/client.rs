@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use clap::Args;
 use gdt_cpus::CoreType;
 use kernels::miner::KERNEL;
-use metrics::{counter, gauge, histogram, Gauge};
+use crate::metrics::{counter, gauge, histogram};
 use nbx_jetpack::instruments::{local_instruments, Instruments, ReadInstruments};
 use nockapp::kernel::form::SerfThread;
 use nockapp::nockapp::wire::Wire;
@@ -132,6 +132,8 @@ pub async fn run_client(cfg: ClientConfig) {
 
     let mut requests = BTreeMap::new();
 
+    let mut interval = tokio::time::interval(Duration::from_secs(5));
+
     loop {
         tokio::select! {
             v = mining_rx.recv() => {
@@ -145,9 +147,35 @@ pub async fn run_client(cfg: ClientConfig) {
                 let MiningAckOut { server_id, miner_id: _, data_id } = v.expect("Client loop died");
                 if let Some(r) = requests.get_mut(&server_id) {
                     if r.1 == data_id {
+                        histogram!(
+                            "nbx_miner_client_ack2ack_seconds",
+                            "server_id" => server_id.to_string(),
+                        ).record(r.2.elapsed().as_secs_f64());
                         r.2 = Instant::now();
                     }
                 }
+            }
+            _ = interval.tick() => {
+                let max_height = requests.values().map(|v| v.0.block_height).max().unwrap_or(0);
+                gauge!(
+                    "nbx_miner_client_block_height",
+                ).set(max_height as f64);
+
+                let mut live_cnt = 0;
+
+                let tip_cnt = requests
+                    .iter()
+                    .filter(|(sid, _)| if server_extras[**sid].live.load(Ordering::SeqCst) { live_cnt += 1; true } else { false })
+                    .filter(|(_, v)| v.0.block_height == max_height)
+                    .count();
+
+                gauge!(
+                    "nbx_miner_client_live_servers",
+                ).set(live_cnt as f64);
+
+                gauge!(
+                    "nbx_miner_client_servers_at_tip",
+                ).set(tip_cnt as f64);
             }
             r = mining_attempts.recv() => {
                 let MinerAttemptRes { id, duration_millis, duration_gpu_enqueue_millis, duration_gpu_submit_millis, duration_gpu_process_millis, server_id, data_id, slab_res, slab_inp, session_id } = r.expect("Mining attempt result failed");
@@ -225,6 +253,7 @@ async fn client_loop(
     miner_metadata: Vec<BTreeMap<String, Arc<str>>>,
 ) {
     let mut err_cnt = 0;
+    let server_name = addr.to_string();
     loop {
         let stream = match tls_connect_wrap(TcpStream::connect(addr), tls).await {
             Ok(stream) => stream,
@@ -243,6 +272,7 @@ async fn client_loop(
         let res = proto::client(
             stream,
             server_id,
+            &server_name,
             client_name.clone(),
             &mut results,
             data.clone(),
