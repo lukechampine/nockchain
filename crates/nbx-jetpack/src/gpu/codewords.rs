@@ -9,6 +9,7 @@ use zkvm_jetpack::form::math::poly::p_ntt_twiddles;
 use zkvm_jetpack::form::Belt;
 use tracing::info_span;
 
+use super::util::p_ntt;
 use super::{FromBuffer, Gpu, Pipeline, Submission, Submittable, DebugHandle};
 use crate::codewords::CodewordEngine;
 use crate::gpu::get_gpu;
@@ -199,15 +200,6 @@ pub struct BpShiftUniform {
     out_step: u32,
 }
 
-#[derive(Pod, Zeroable, Clone, Copy, Debug)]
-#[repr(C)]
-pub struct BpNttUniform {
-    off: u32,
-    i: u32,
-    poly_len: u32,
-    num_elems: u32,
-}
-
 fn turn_coseword(
     gpu: &Gpu,
     compute_pass: &mut ComputePass,
@@ -301,147 +293,26 @@ fn turn_coseword(
         compute_pass.dispatch_workgroups(workgroup_count as u32, 1, 1);
     }
 
-    // Then, p_ntt everything
-    // Precompute swapping bitmask
-    let mut swapmask = Vec::with_capacity(order as usize);
-    let mut swapidx = Vec::with_capacity(order as usize);
-    let log_2_of_n = order.ilog2();
-    for k in 0..(order as usize) {
-        let rk = bitreverse(k as u32, log_2_of_n) as usize;
-        swapidx.push(rk as u32);
-        if k < rk {
-            swapmask.push(!0u64);
-        } else {
-            swapmask.push(0);
-        }
-    }
-
-    let swapmask = gpu.device.create_buffer_init(&BufferInitDescriptor {
-        label: Some(&format!("coseword-swapmask {order}")),
-        contents: bytemuck::cast_slice(&swapmask),
-        usage: BufferUsages::STORAGE,
-    });
-
-    let swapidx = gpu.device.create_buffer_init(&BufferInitDescriptor {
-        label: Some(&format!("coseword-swapidx {order}")),
-        contents: bytemuck::cast_slice(&swapidx),
-        usage: BufferUsages::STORAGE,
-    });
-
-    // Swap all
-    let chunk_size = (max_workgroup_insts * workgroup_size) as usize;
-
-    let pipeline = &gpu.bp_ntt_swap;
-    compute_pass.set_pipeline(&pipeline.pipeline);
-
-    for i in (0..(out_len as usize)).step_by(chunk_size) {
-        let num_elems = core::cmp::min((out_len as usize) - i, chunk_size) as u32;
-
-        let uniform = BpNttUniform {
-            off: out_off as u32,
-            i: i as u32,
-            num_elems,
-            poly_len: order,
-        };
-
-        let uniform = gpu.device.create_buffer_init(&BufferInitDescriptor {
-            label: Some(&format!("bp-ntt uniform {i}")),
-            contents: bytemuck::cast_slice(&[uniform]),
-            usage: BufferUsages::UNIFORM,
-        });
-
-        let workgroup_count = num_elems.div_ceil(workgroup_size as _);
-
-        let bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &pipeline.bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: uniform.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: out.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: swapmask.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: swapidx.as_entire_binding(),
-                },
-            ],
-        });
-
-        compute_pass.set_bind_group(0, &bind_group, &[]);
-        compute_pass.dispatch_workgroups(workgroup_count as u32, 1, 1);
-    }
-
-    // Twiddle all
     let twiddles = p_ntt_twiddles(order as usize, &root);
-
-    let pipeline = &gpu.bp_ntt;
-    compute_pass.set_pipeline(&pipeline.pipeline);
-
-    let mut uniforms = vec![];
-
-    for i in (0..((out_len / 2) as usize)).step_by(chunk_size) {
-        let num_elems = core::cmp::min(((out_len / 2) as usize) - i, chunk_size) as u32;
-
-        let uniform = BpNttUniform {
-            off: (out_off as u32),
-            i: i as u32,
-            num_elems,
-            poly_len: order,
-        };
-
-        let uniform = gpu.device.create_buffer_init(&BufferInitDescriptor {
-            label: Some(&format!("bp-ntt uniform {i}")),
-            contents: bytemuck::cast_slice(&[uniform]),
-            usage: BufferUsages::UNIFORM,
-        });
-
-        let workgroup_count = num_elems.div_ceil(workgroup_size as _);
-
-        uniforms.push((uniform, workgroup_count));
-    }
-
-    let pipeline = &gpu.bp_ntt;
-    compute_pass.set_pipeline(&pipeline.pipeline);
-
-    for stage in 0..log_2_of_n {
-        let twiddles = gpu.device.create_buffer_init(&BufferInitDescriptor {
-            label: Some(&format!("coseword-twiddles {} {stage}", polys.step)),
-            contents: bytemuck::cast_slice(&twiddles[stage as usize]),
+    let twiddles = twiddles.iter().enumerate().map(|(i, t)| {
+        gpu.device.create_buffer_init(&BufferInitDescriptor {
+            label: Some(&format!("coseword-twiddles {order} {i}")),
+            contents: bytemuck::cast_slice(&t),
             usage: BufferUsages::STORAGE,
-        });
+        })
+    }).collect::<Vec<_>>();
 
-        for (uniform, workgroup_count) in &uniforms {
-            let bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
-                layout: &pipeline.bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: uniform.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: out.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: twiddles.as_entire_binding(),
-                    },
-                ],
-            });
-
-            compute_pass.set_bind_group(0, &bind_group, &[]);
-            compute_pass.dispatch_workgroups(*workgroup_count as u32, 1, 1);
-        }
-    }
+    p_ntt(
+        gpu,
+        compute_pass,
+        order,
+        out,
+        out_off,
+        out_len,
+        &twiddles,
+        1,
+        &gpu.bp_ntt,
+    );
 }
 
 fn compute_lde(

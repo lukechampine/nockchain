@@ -40,20 +40,24 @@ macro_rules! include_shader {
     }};
 }
 
-static SHADERS: [(&str, LazyLock<Cow<'static, [u32]>>); 13] = [
+static SHADERS: [(&str, LazyLock<Cow<'static, [u32]>>); 17] = [
     include_shader!("hash_fixed"),
     include_shader!("hash_variable"),
     include_shader!("substitute_mul"),
     include_shader!("substitute_accum"),
     include_shader!("bp_shift"),
     include_shader!("bp_ntt"),
-    include_shader!("bp_ntt_swap"),
+    include_shader!("fp_ntt"),
+    include_shader!("p_ntt_swap"),
     include_shader!("mary_transpose"),
     include_shader!("montify"),
     include_shader!("montyred"),
     include_shader!("hash_varlen_multiple"),
     include_shader!("hash_fixed_multiple"),
     include_shader!("hash_10_fixedprepend"),
+    include_shader!("weighted_combo_finish"),
+    include_shader!("fp_hadamard_samepoly"),
+    include_shader!("fp_accum"),
 ];
 
 pub fn all_shader_names() -> impl Iterator<Item = &'static str> {

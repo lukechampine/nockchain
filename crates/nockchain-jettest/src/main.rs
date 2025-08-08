@@ -1,6 +1,10 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use nbx_jetpack::deep::DeepEngine;
 use nockapp::save::SaveableCheckpoint;
+use tracing::debug;
+use zkvm_jetpack::form::fext::fmul_;
+use zkvm_jetpack::form::FPolySlice;
 use core::iter::once;
 use flume::Receiver;
 use futures::Stream;
@@ -18,7 +22,7 @@ use nockvm::mug::mug;
 use std::path::Path;
 use std::time::Instant;
 use zkvm_jetpack::hot::produce_prover_hot_state;
-use nbx_jetpack::nbx_jets;
+use nbx_jetpack::{bpoly_to_fpoly, nbx_jets, new_fpoly, snag_as_poly_mary};
 #[cfg(feature = "gpu")]
 use nbx_jetpack::gpu;
 
@@ -74,6 +78,10 @@ pub enum GpuTest {
     Codewords {
         #[arg(help = "path to mp_substitute_ultra subject.jam")]
         codeword_sam: String,
+    },
+    Deep {
+        #[arg(help = "path to mp_substitute_ultra subject.jam")]
+        deep_sam: String,
     },
 }
 
@@ -164,6 +172,139 @@ impl GpuTest {
                 println!("{:?} {:?}", &codeword_array.dat[..10], mh.h);
                 println!("CPU: {:.02} {height} | {} {}", t.elapsed().as_secs_f32(), codeword_array.step, codeword_array.len);
                 std::fs::write("cpu.txt", format!("{:#?}", &codeword_array.dat));
+
+                Ok(())
+            }
+            Self::Deep { deep_sam } => {
+                let subject = load_jam(deep_sam)?;
+                let subject = *unsafe { subject.root() };
+
+                let sam = slot(subject, 6).unwrap();
+                let [trace_polys, trace_openings, composition_pieces, composition_piece_openings, weights, omicrons, deep_challenge, comp_eval_point] =
+                    sam.uncell().unwrap();
+
+                // Convert nouns to appropriate types
+                let trace_polys = HoonList::try_from(trace_polys).unwrap()
+                    .into_iter()
+                    .map(|x| MarySlice::try_from(x))
+                    .collect::<core::result::Result<Vec<_>, _>>()
+                    .or_else(|_| Err("")).unwrap();
+
+                let Ok(trace_openings) = FPolySlice::try_from(trace_openings) else {
+                    panic!("trace_openings is not a valid FPolySlice");
+                };
+
+                let composition_pieces = HoonList::try_from(composition_pieces).unwrap()
+                    .into_iter()
+                    .map(|x| FPolySlice::try_from(x).map(|v| PolyVec(v.0.to_vec())))
+                    .collect::<core::result::Result<Vec<_>, _>>()
+                    .or_else(|_| {
+                        debug!("composition_pieces contain invalid FPolySlice");
+                        Err("")
+                    }).unwrap();
+
+                let Ok(composition_piece_openings) = FPolySlice::try_from(composition_piece_openings) else {
+                    panic!("composition_piece_openings is not a valid FPolySlice");
+                };
+
+                let Ok(weights) = FPolySlice::try_from(weights) else {
+                    panic!("weights is not a valid FPolySlice");
+                };
+
+                let Ok(omicrons) = FPolySlice::try_from(omicrons) else {
+                    panic!("omicrons is not a valid FPolySlice");
+                };
+
+                let deep_challenge = deep_challenge.as_felt().unwrap();
+                let comp_eval_point = comp_eval_point.as_felt().unwrap();
+
+                let mut engine = DeepEngine::new(weights);
+
+                //let mut acc = zero_fpoly();
+                let mut num = 0usize;
+
+                //let mut cache = Default::default();
+
+                for (o, point) in [deep_challenge, comp_eval_point]
+                    .iter()
+                    .copied()
+                    .enumerate()
+                {
+                    let fpc_point = new_fpoly(&[*point]);
+                    //println!("POINT {o} @ acc={}", vmug(stack, &acc.0));
+                    // |^  ^-  fpoly
+                    // =/  [acc=fpoly num=@]
+                    //   %^  zip-roll  (range (lent trace-polys))  trace-polys
+                    //   |=  [[i=@ p=mary] acc=_zero-fpoly num=@]
+                    for (i, &p) in trace_polys.iter().enumerate() {
+                        //println!("POLY {o}.{i} {} {}", vmug(stack, &acc.0), mmug(stack, &p));
+                        // =/  lis=(list fpoly)
+                        //   %+  turn  (range len.array.p)
+                        //   |=  i=@
+                        //   (bpoly-to-fpoly (~(snag-as-bpoly ave p) i))
+                        let mut lis = Vec::with_capacity(p.len as usize);
+                        for i in 0..p.len {
+                            let bp = snag_as_poly_mary(p, i as usize);
+                            let fp = bpoly_to_fpoly(bp);
+                            lis.push(fp);
+                        }
+
+                        // =/  omicron  (~(snag fop omicrons) i)
+                        let omicron = omicrons.0[i];
+                        //println!("OMICRON {:?}", fat(stack, omicron));
+
+                        // =/  [first-row=fpoly num=@]    :: first row:  f(x)-f(Z)/x-Z
+                        //   %-  weighted-linear-combo
+                        //   :*  lis
+                        //       trace-openings
+                        //       num
+                        //       (fp-c deep-challenge)
+                        //       weights
+                        //   ==
+                        let new_num = engine.weighted_linear_combo(
+                            &lis,
+                            trace_openings,
+                            num,
+                            (&fpc_point).into(),
+                            num,
+                        ).unwrap();
+                        //println!("FIRST-ROW {}", vmug(stack, &first_row.0));
+
+                        // =/  [second-row=fpoly num=@]   :: second row:  f(x)-f(gZ)/x-gZ
+                        //   %-  weighted-linear-combo
+                        //   :*  lis
+                        //       trace-openings
+                        //       num
+                        //       (fp-c (fmul omicron deep-challenge))
+                        //       weights
+                        //   ==
+                        let point_omi_dc = new_fpoly(&[fmul_(&omicron, point)]);
+                        let new_num = engine.weighted_linear_combo(
+                            &lis,
+                            trace_openings,
+                            new_num,
+                            (&point_omi_dc).into(),
+                            new_num,
+                        ).unwrap();
+                        //println!("SECOND-ROW {}", vmug(stack, &second_row.0));
+
+                        // :_  num
+                        num = new_num;
+                        // :(fpadd acc first-row second-row)
+                        //acc = fpadd(acc, (&first_row).into());
+                        //acc = fpadd(acc, (&second_row).into());
+                    }
+                }
+
+                let t = Instant::now();
+                let gpu_res = engine.clone().reduce_gpu();
+                std::fs::write("gpu.txt", format!("{:#?}", &gpu_res.0));
+                println!("GPU {:.02} {:?}", t.elapsed().as_secs_f64(), &gpu_res.0[..10]);
+                let t = Instant::now();
+                let cpu_res = engine.reduce_cpu();
+                println!("CPU {:.02} {:?}", t.elapsed().as_secs_f64(), &cpu_res.0[..10]);
+                std::fs::write("cpu.txt", format!("{:#?}", &cpu_res.0));
+                println!("EQ: {}", gpu_res == cpu_res);
 
                 Ok(())
             }

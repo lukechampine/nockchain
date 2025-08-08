@@ -281,7 +281,7 @@ pub fn build_shaders(options: BuildOptions<impl AsRef<Path>>) {
 
     let math_emu = emulate_extended_math as usize;
 
-    for shader in ["hash_fixed", "hash_variable", "substitute_mul", "substitute_accum", "bp_shift", "bp_ntt", "bp_ntt_swap", "mary_transpose", "montify", "montyred", "hash_varlen_multiple", "hash_fixed_multiple", "hash_10_fixedprepend"] {
+    for shader in ["hash_fixed", "hash_variable", "substitute_mul", "substitute_accum", "bp_shift", "bp_ntt", "fp_ntt", "p_ntt_swap", "mary_transpose", "montify", "montyred", "hash_varlen_multiple", "hash_fixed_multiple", "hash_10_fixedprepend", "weighted_combo_finish", "fp_hadamard_samepoly", "fp_accum"] {
         let artifact = compiler
             .compile_into_spirv(
                 &format!(

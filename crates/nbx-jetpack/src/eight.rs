@@ -95,7 +95,7 @@ pub fn compute_deep(stack: &mut NockStack, inp: Noun) -> Result {
         omicrons.0.len()
     );*/
 
-    let mut engine = DeepEngine::default();
+    let mut engine = DeepEngine::new(weights);
 
     //let mut acc = zero_fpoly();
     let mut num = 0usize;
@@ -139,12 +139,11 @@ pub fn compute_deep(stack: &mut NockStack, inp: Noun) -> Result {
             //       weights
             //   ==
             let new_num = engine.weighted_linear_combo(
-                stack,
                 &lis,
                 trace_openings,
                 num,
                 (&fpc_point).into(),
-                weights,
+                num,
             )?;
             //println!("FIRST-ROW {}", vmug(stack, &first_row.0));
 
@@ -158,12 +157,11 @@ pub fn compute_deep(stack: &mut NockStack, inp: Noun) -> Result {
             //   ==
             let point_omi_dc = new_fpoly(&[fmul_(&omicron, point)]);
             let new_num = engine.weighted_linear_combo(
-                stack,
                 &lis,
                 trace_openings,
                 new_num,
                 (&point_omi_dc).into(),
-                weights,
+                new_num,
             )?;
             //println!("SECOND-ROW {}", vmug(stack, &second_row.0));
 
@@ -217,12 +215,11 @@ pub fn compute_deep(stack: &mut NockStack, inp: Noun) -> Result {
     let x_poly = new_fpoly(&[fpow_(deep_challenge, composition_pieces.len() as u64)]);
 
     engine.weighted_linear_combo(
-        stack,
         &composition_pieces,
         composition_piece_openings,
-        0,
+        num,
         (&x_poly).into(),
-        PolySlice(slag_ref(num, weights.0)),
+        0,
     )?;
 
     /*println!(

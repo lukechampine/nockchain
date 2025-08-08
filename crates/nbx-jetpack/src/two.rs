@@ -354,7 +354,7 @@ pub fn fpdiv<'a>(
     // %.  +(dq)
     // %~  scag  fop
     // (fpmul (pinv-mod-x-to +(dq) rg) rf)
-    let pinned = pinv_mod_x_to(stack, dq + 1, (&rg).into());
+    let pinned = pinv_mod_x_to(dq + 1, (&rg).into());
     //println!("pinved={}", vmug(stack, &pinned.0));
     let mulled = fpmul(stack, pinned, rf);
     //println!("mulled={}", vmug(stack, &mulled.0));
@@ -906,15 +906,15 @@ where
 }
 
 // ::  +pinv-mod-x-to: computes p^{-1} mod x^l
-pub fn pinv_mod_x_to<'a>(stack: &mut NockStack, l: usize, p: FPolySlice) -> FPolyVec {
-    jam_to(stack, p.0, "pmxt-p");
-    jam_to2(stack, D(l as _), "pmxt-l");
+pub fn pinv_mod_x_to<'a>(l: usize, p: FPolySlice) -> FPolyVec {
+    //jam_to(stack, p.0, "pmxt-p");
+    //jam_to2(stack, D(l as _), "pmxt-l");
     // |=  [l=@ p=fpoly]
     // ^-  fpoly
     // (~(scag fop (hensel-lift-inverse p (xeb l))) l)
-    let mut lifted = hensel_lift_inverse(stack, p, xeb(l));
+    let mut lifted = hensel_lift_inverse(p, xeb(l));
     lifted.0.truncate(l);
-    jam_to(stack, &lifted.0, "pmxt-r");
+    //jam_to(stack, &lifted.0, "pmxt-r");
     lifted
 }
 
@@ -924,9 +924,9 @@ pub fn pinv_mod_x_to<'a>(stack: &mut NockStack, l: usize, p: FPolySlice) -> FPol
 // ::    Given a(x) such that p(x)a(x) = 1 mod x^{2^i}, then a*p = 1 + x^{2^i}s(x) (see s below).
 // ::    Letting t(x) = -a(x)*s(x) mod x^{2^i}, then p's inverse modulo x^{2^{i+1}} is
 // ::    a(x) + x^{2^i}t(x)
-fn hensel_lift_inverse<'a>(stack: &mut NockStack, p: FPolySlice, level: usize) -> FPolyVec {
-    jam_to(stack, p.0, "hli-p");
-    jam_to2(stack, D(level as _), "hli-l");
+fn hensel_lift_inverse<'a>(p: FPolySlice, level: usize) -> FPolyVec {
+    //jam_to(stack, p.0, "hli-p");
+    //jam_to2(stack, D(level as _), "hli-l");
     // |=  [p=fpoly level=@]
     // ^-  fpoly
     // ~|  "Polynomial must have constant term equal to 1."
@@ -946,12 +946,12 @@ fn hensel_lift_inverse<'a>(stack: &mut NockStack, p: FPolySlice, level: usize) -
         let bex_i = 1 << i;
         //println!("bexed {bex_i}");
         // =/  s  (~(slag fop (fpmul p inv)) bex-i)
-        let s = fpmul(stack, copy_slice(p), inv.clone());
+        let s = fpmul_fast(copy_slice(p), inv.clone());
         let s = PolyVec(slag_vec(bex_i, s.0));
         //println!("s {}", vmug(stack, s.0));
         // =/  t  (~(scag fop (fpmul (fpscal (lift (bneg 1)) inv) s)) bex-i)
         let t = fpscal(Felt::lift(Belt(bneg(1))), inv.clone());
-        let mut t = fpmul(stack, t, s);
+        let mut t = fpmul_fast(t, s);
         //println!("t {}", vmug(stack, scag_ref(bex_i, &t.0)));
         //println!("l {bex_i}");
         // $(i +(i), inv (fpadd inv (pmul-by-x-to bex-i t)))
@@ -967,7 +967,7 @@ fn hensel_lift_inverse<'a>(stack: &mut NockStack, p: FPolySlice, level: usize) -
         //println!("p {}", vmug(stack, &t.0));
         inv = fpadd(inv, (&t).into());
     }
-    jam_to(stack, &inv.0, "hli-r");
+    //jam_to(stack, &inv.0, "hli-r");
     inv
 }
 

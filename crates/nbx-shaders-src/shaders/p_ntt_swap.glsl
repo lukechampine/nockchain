@@ -39,9 +39,14 @@ void main() {
     U64 a = buf[coff];
     U64 b = buf[roff];
 
+    /*if (coff >= 3069 && coff <= 3071) {
+        debugPrintfEXT("SWAP %08x%08x %u %u %u %u | %08x%08x <-> %08x%08x", uint(mask >> 32), uint(mask), elemIdx, polyIdx, coff, roff, uint(a >> 32), uint(a), uint(b >> 32), uint(b));
+    }*/
+
     // TODO: make this branchless. We can't do xor trick, because offsets might overlap with other threads.
     if (mask != U64(0)) {
         buf[coff] = b;
         buf[roff] = a;
     }
+
 }

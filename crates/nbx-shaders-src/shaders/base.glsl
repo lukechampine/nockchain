@@ -65,4 +65,6 @@ bool notEqual(uint a, uint b) {
 #define BOOL bvec4
 #include <gbase>
 
+#include <felt>
+
 #endif

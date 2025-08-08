@@ -12,8 +12,10 @@ use crate::log::*;
 use wgpu::{Backends, Buffer, Device, Queue, DeviceType, SubmissionIndex, CommandBuffer};
 use zkvm_jetpack::form::Melt;
 
-use self::codewords::{BpNttUniform, BpShiftUniform, Hash10FixedPrependUniform, HashFixedMultipleUniform, HashVarlenMultipleUniform, MaryTransposeUniform, MontUniform};
+use self::codewords::{BpShiftUniform, Hash10FixedPrependUniform, HashFixedMultipleUniform, HashVarlenMultipleUniform, MaryTransposeUniform, MontUniform};
+use self::deep::{FpAccumUniform, FpHadamardSamepolyUniform, WeightedComboFinishUniform};
 use self::substitute::{AccumUniform, MulUniform, SubstituteIterOps};
+use self::util::PNttUniform;
 use super::substitute::SubstituteEngine;
 use crate::hash::{HashEngine, NounDigest, ReduceOp, VariableReduceOp};
 use crate::instruments::{local_instruments, Instruments};
@@ -21,6 +23,9 @@ use crate::instruments::{local_instruments, Instruments};
 mod hash;
 mod substitute;
 mod codewords;
+mod deep;
+
+pub(crate) mod util;
 
 struct Pipeline {
     pipeline: wgpu::ComputePipeline,
@@ -37,14 +42,18 @@ struct Gpu {
     substitute_mul: Pipeline,
     substitute_accum: Pipeline,
     bp_shift: Pipeline,
-    bp_ntt_swap: Pipeline,
+    p_ntt_swap: Pipeline,
     bp_ntt: Pipeline,
+    fp_ntt: Pipeline,
     mary_transpose: Pipeline,
     montify: Pipeline,
     montyred: Pipeline,
     hash_varlen_multiple: Pipeline,
     hash_fixed_multiple: Pipeline,
     hash_10_fixedprepend: Pipeline,
+    weighted_combo_finish: Pipeline,
+    fp_hadamard_samepoly: Pipeline,
+    fp_accum: Pipeline,
     debug_capture: Arc<Mutex<Option<bool>>>,
 }
 
@@ -111,7 +120,7 @@ impl Gpu {
 
         // Shader related
 
-        let [hash_fixed, hash_variable, substitute_mul, substitute_accum, bp_shift, bp_ntt_swap, bp_ntt, mary_transpose, montify, montyred, hash_varlen_multiple, hash_fixed_multiple, hash_10_fixedprepend] = [
+        let [hash_fixed, hash_variable, substitute_mul, substitute_accum, bp_shift, p_ntt_swap, bp_ntt, fp_ntt, mary_transpose, montify, montyred, hash_varlen_multiple, hash_fixed_multiple, hash_10_fixedprepend, weighted_combo_finish, fp_hadamard_samepoly, fp_accum] = [
             (
                 Some(size_of::<ReduceOp>()),
                 "hash_fixed",
@@ -144,15 +153,21 @@ impl Gpu {
             ),
             (
                 None,
-                "bp_ntt_swap",
+                "p_ntt_swap",
                 Either::Right(&[false, false]),
-                Some(size_of::<BpNttUniform>()),
+                Some(size_of::<PNttUniform>()),
             ),
             (
                 None,
                 "bp_ntt",
                 Either::Right(&[false]),
-                Some(size_of::<BpNttUniform>()),
+                Some(size_of::<PNttUniform>()),
+            ),
+            (
+                None,
+                "fp_ntt",
+                Either::Right(&[false]),
+                Some(size_of::<PNttUniform>()),
             ),
             (
                 None,
@@ -189,6 +204,24 @@ impl Gpu {
                 "hash_10_fixedprepend",
                 Either::Right(&[true]),
                 Some(size_of::<Hash10FixedPrependUniform>()),
+            ),
+            (
+                None,
+                "weighted_combo_finish",
+                Either::Right(&[true, true, true]),
+                Some(size_of::<WeightedComboFinishUniform>()),
+            ),
+            (
+                None,
+                "fp_hadamard_samepoly",
+                Either::Right(&[true]),
+                Some(size_of::<FpHadamardSamepolyUniform>()),
+            ),
+            (
+                None,
+                "fp_accum",
+                Either::Right(&[false]),
+                Some(size_of::<FpAccumUniform>()),
             ),
         ]
         .map(|(ops_sz, source_label, inputs, uniform_sz)| {
@@ -305,14 +338,18 @@ impl Gpu {
             substitute_mul,
             substitute_accum,
             bp_shift,
-            bp_ntt_swap,
+            p_ntt_swap,
             bp_ntt,
+            fp_ntt,
             mary_transpose,
             montify,
             montyred,
             hash_varlen_multiple,
             hash_fixed_multiple,
             hash_10_fixedprepend,
+            weighted_combo_finish,
+            fp_hadamard_samepoly,
+            fp_accum,
             debug_capture: Mutex::new(Some(
                 std::env::var("GPU_DEBUGGER").as_deref().unwrap_or("0") != "0",
             ))

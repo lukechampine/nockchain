@@ -24,24 +24,24 @@ pub struct SubstituteIterOps {
 
 #[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
 #[repr(C)]
-pub(super) struct MulUniform {
-    poly_len: u32,
-    chunks_per_buf: u32,
-    ops: u32,
-    num_ops: u32,
-    inp: u32,
-    accum_mask: u32,
-    out: u32,
+pub struct MulUniform {
+    pub poly_len: u32,
+    pub chunks_per_buf: u32,
+    pub ops: u32,
+    pub num_ops: u32,
+    pub inp: u32,
+    pub accum_mask: u32,
+    pub out: u32,
 }
 
 #[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
 #[repr(C)]
-pub(super) struct AccumUniform {
-    inp_a: u32,
-    inp_b: u32,
-    num_elems: u32,
-    out: u32,
-    out_mask: u32,
+pub struct AccumUniform {
+    pub inp_a: u32,
+    pub inp_b: u32,
+    pub num_elems: u32,
+    pub out: u32,
+    pub out_mask: u32,
 }
 
 impl FromBuffer for Vec<Vec<Melt>> {

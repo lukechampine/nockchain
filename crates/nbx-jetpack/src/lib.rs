@@ -41,7 +41,8 @@ use two::*;
 use zoon::*;
 use seven::*;
 
-pub use two::mp_substitute_ultra_impl;
+pub use one::snag_as_poly_mary;
+pub use two::{mp_substitute_ultra_impl, new_fpoly, bpoly_to_fpoly};
 pub use eight::compute_table_polys;
 
 use zkvm_jetpack::jets::utils::jet_err;
