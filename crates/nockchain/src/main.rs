@@ -18,8 +18,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     boot::init_default_tracing(&cli.nockapp_cli);
 
     let prover_hot_state = produce_prover_hot_state();
-    let nbx_jets = nbx_jetpack::nbx_jets().collect::<Vec<_>>();
-    let prover_hot_state = [nbx_jets, prover_hot_state].concat();
     let mut nockchain: NockApp =
         nockchain::init_with_kernel(Some(cli), KERNEL, prover_hot_state.as_slice()).await?;
     nockchain.run().await?;
