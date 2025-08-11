@@ -24,6 +24,7 @@ members = [
   "crates/nbx-shaders-build",
   "crates/nbx-tip5",
   "crates/nockchain-jettest",
+  "crates/nockchain-metrics-exporter",
   "crates/jojo",
 ]
 

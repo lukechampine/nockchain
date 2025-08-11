@@ -4506,6 +4506,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "nockchain-metrics-exporter"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bardecoder",
+ "clap",
+ "either",
+ "getrandom 0.2.16",
+ "gnort",
+ "ibig",
+ "image",
+ "metrics",
+ "metrics-exporter-prometheus",
+ "metrics-util",
+ "nockapp",
+ "nockvm",
+ "nockvm_macros",
+ "tempfile",
+ "termimad",
+ "thiserror 2.0.12",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "nockchain-wallet"
 version = "0.1.0"
 dependencies = [
