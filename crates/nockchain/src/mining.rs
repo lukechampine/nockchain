@@ -23,8 +23,9 @@ use rand::Rng;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, watch, Mutex};
 use tokio::task::JoinHandle;
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, error, info, instrument, warn};
 use zkvm_jetpack::form::PRIME;
+use zkvm_jetpack::hand::structs::HoonList;
 use zkvm_jetpack::noun::noun_ext::NounExt as OtherNounExt;
 
 pub enum MiningWire {

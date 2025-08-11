@@ -321,12 +321,11 @@ impl NockCancelToken {
                 break false;
             } else {
                 trace!("Nock cancellation: cancelling");
-                if let Ok(_) = self.running_status.compare_exchange(
-                    running,
-                    running.neg(),
-                    Ordering::SeqCst,
-                    Ordering::SeqCst,
-                ) {
+                if self
+                    .running_status
+                    .compare_exchange(running, running.neg(), Ordering::SeqCst, Ordering::SeqCst)
+                    .is_ok()
+                {
                     break true;
                 }
             }
@@ -798,14 +797,11 @@ pub fn interpret(context: &mut Context, mut subject: Noun, formula: Noun) -> Res
                                     // jetted code.
                                     if let Some((path, trace_info)) =
                                         context.trace_info.as_mut().and_then(|v| {
-                                            context
-                                                .cold
-                                                .matches(stack, &mut res)
-                                                .zip(Some(v))
+                                            context.cold.matches(stack, &mut res).zip(Some(v))
                                         })
                                     {
-                                        trace_info.append_trace(stack, path, false);
-                                    };
+                                        trace_info.append_trace(stack, path);
+                                    }
 
                                     subject = res;
                                     push_formula(stack, formula, true)?;
@@ -828,14 +824,11 @@ pub fn interpret(context: &mut Context, mut subject: Noun, formula: Noun) -> Res
                                     // jetted code.
                                     if let Some((path, trace_info)) =
                                         context.trace_info.as_mut().and_then(|v| {
-                                            context
-                                                .cold
-                                                .matches(stack, &mut res)
-                                                .zip(Some(v))
+                                            context.cold.matches(stack, &mut res).zip(Some(v))
                                         })
                                     {
-                                        trace_info.append_trace(stack, path, false);
-                                    };
+                                        trace_info.append_trace(stack, path);
+                                    }
                                 }
                             } else {
                                 // Axis into core must be atom
@@ -1062,19 +1055,17 @@ pub fn interpret(context: &mut Context, mut subject: Noun, formula: Noun) -> Res
             }
         } else if running_status == NockCancelToken::RUNNING_IDLE {
             break;
-        } else {
-            if context
-                .running_status
-                .compare_exchange(
-                    running_status,
-                    running_status - 1,
-                    Ordering::SeqCst,
-                    Ordering::SeqCst,
-                )
-                .is_ok()
-            {
-                break;
-            }
+        } else if context
+            .running_status
+            .compare_exchange(
+                running_status,
+                running_status - 1,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            )
+            .is_ok()
+        {
+            break;
         }
     }
 
@@ -1308,7 +1299,10 @@ fn exit(
         context.restore(snapshot);
 
         if context.stack.copying() {
-            assert!(context.stack.get_frame_pointer() != virtual_frame);
+            assert!(!std::ptr::eq(
+                context.stack.get_frame_pointer(),
+                virtual_frame
+            ));
             context.stack.frame_pop();
         }
 
@@ -1327,7 +1321,7 @@ fn exit(
             }
         };
 
-        while stack.get_frame_pointer() != virtual_frame {
+        while !std::ptr::eq(stack.get_frame_pointer(), virtual_frame) {
             stack.preserve(&mut preserve);
             stack.frame_pop();
         }
@@ -1348,7 +1342,7 @@ fn mean_frame_push(stack: &mut NockStack, slots: usize) {
         let trace = *(stack.local_noun_pointer(0));
         stack.frame_push(slots + 2);
         *(stack.local_noun_pointer(0)) = trace;
-        *(stack.local_noun_pointer(1) as *mut *const TraceStack) = std::ptr::null();
+        *(stack.local_noun_pointer(1) as *mut *const Noun) = std::ptr::null();
     }
 }
 
@@ -1784,13 +1778,11 @@ mod debug {
                 if !atom.is_normalized() {
                     if atom.size() == 1 {
                         panic!(
-                            "Un-normalized indirect_atom (should be direct) returned from jet for {:?}",
-                            path
+                            "Un-normalized indirect_atom (should be direct) returned from jet for {path:?}",
                         );
                     } else {
                         panic!(
-                            "Un-normalized indirect_atom (last word 0) returned from jet for {:?}",
-                            path
+                            "Un-normalized indirect_atom (last word 0) returned from jet for {path:?}",
                         );
                     }
                 }

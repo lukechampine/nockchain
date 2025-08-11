@@ -107,7 +107,7 @@ impl GpuTest {
 
                 let inp = slot(subject, 6).unwrap();
 
-                let [p, trace_evals, height, chal_map, dyns] = inp.uncell()?;
+                let [p, trace_evals, height, chals, dyns] = inp.uncell()?;
 
                 let Ok(trace_evals) = BPolySlice::try_from(trace_evals) else {
                     return Err(anyhow!("Can't parse trace_evals"));
@@ -116,10 +116,9 @@ impl GpuTest {
                 let trace_evals: MPolyVec = trace_evals.into();
 
                 let height = height.as_atom()?.as_u64()?;
-                let chal_map = HoonMapIter::try_from(chal_map).ok().into_iter().flatten().map(|v| {
-                    let [k, v] = v.uncell().unwrap().map(|v| v.as_atom().unwrap().as_u64().unwrap());
-                    (k, Belt(v))
-                }).collect::<BTreeMap<_, _>>();
+                let Ok(chals) = BPolySlice::try_from(chals) else {
+                    return Err(anyhow!("Can't parse chals"));
+                };
 
                 let Ok(dyns) = BPolySlice::try_from(dyns) else {
                     return Err(anyhow!("Can't parse dyns"));
@@ -131,7 +130,7 @@ impl GpuTest {
                     0,
                     p,
                     (&trace_evals).into(),
-                    &chal_map,
+                    chals,
                     dyns,
                 ).unwrap();
                 nbx_jetpack::gpu::gpu_sub_test(engine).unwrap();

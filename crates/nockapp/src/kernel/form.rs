@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 use std::any::Any;
-use std::fs::File;
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -16,16 +15,13 @@ use nockvm::jets::nock::util::mook;
 use nockvm::mem::NockStack;
 use nockvm::mug::met3_usize;
 use nockvm::noun::{Atom, Cell, DirectAtom, IndirectAtom, Noun, Slots, D, T};
-use nockvm::trace::{
-    path_to_cord, write_serf_trace_safe, FileBackend, IntervalFilter, KeywordFilter, TraceBackend,
-    TraceFilter, TraceInfo, TracingBackend,
-};
+use nockvm::trace::{path_to_cord, write_serf_trace_safe};
 use nockvm_macros::tas;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::Duration;
 use tracing::{debug, warn};
 
-use crate::kernel::boot::{TraceMode, TraceOpts};
+use crate::kernel::boot::TraceOpts;
 use crate::metrics::NockAppMetrics;
 use crate::nockapp::wire::{wire_to_noun, WireRepr};
 use crate::noun::slab::NounSlab;
@@ -114,7 +110,7 @@ impl<C: SerfCheckpoint + Send + 'static> SerfThread<C> {
         constant_hot_state: Vec<HotEntry>,
         nock_stack_size: usize,
         test_jets: Vec<NounSlab>,
-        trace_info: Option<TraceInfo>,
+        trace: TraceOpts,
     ) -> Result<Self> {
         let (action_sender, action_receiver) = mpsc::channel(1);
         let (event_number_sender, event_number_receiver) = oneshot::channel();
@@ -127,7 +123,7 @@ impl<C: SerfCheckpoint + Send + 'static> SerfThread<C> {
             .spawn(move || {
                 let stack = NockStack::new(nock_stack_size, 0);
                 let serf = Serf::new(
-                    stack, checkpoint, &kernel_bytes, &constant_hot_state, test_jets, trace_info,
+                    stack, checkpoint, &kernel_bytes, &constant_hot_state, test_jets, trace,
                 );
                 event_number_sender
                     .send(serf.event_num.clone())
@@ -159,10 +155,7 @@ impl<C> SerfThread<C> {
         let (result, result_recv) = oneshot::channel();
         async move {
             action_sender
-                .send(SerfAction::ProvideMetrics {
-                    metrics,
-                    result: result,
-                })
+                .send(SerfAction::ProvideMetrics { metrics, result })
                 .await?;
             Ok(result_recv.await?)
         }
@@ -274,16 +267,14 @@ impl<C> SerfThread<C> {
 
     pub(crate) fn poke_sync(&self, wire: WireRepr, cause: NounSlab) -> Result<NounSlab> {
         let (result, result_fut) = oneshot::channel();
-        let (result_ack_sender, result_ack) = oneshot::channel();
+        let (_result_ack_sender, result_ack) = oneshot::channel();
         self.action_sender.blocking_send(SerfAction::Poke {
             wire,
             cause,
             result,
             result_ack,
         })?;
-        let res = result_fut.blocking_recv()?;
-        let _ = result_ack_sender.send(());
-        res
+        result_fut.blocking_recv()?
     }
 
     pub(crate) fn peek_sync(&self, ovo: NounSlab) -> Result<NounSlab> {
@@ -311,7 +302,7 @@ impl<C> SerfThread<C> {
             action_sender
                 .send(SerfAction::Import { state, result })
                 .await?;
-            Ok(result_fut.await??)
+            result_fut.await?
         }
     }
 
@@ -320,7 +311,7 @@ impl<C> SerfThread<C> {
         let action_sender = self.action_sender.clone();
         async move {
             action_sender.send(SerfAction::Export { result }).await?;
-            Ok(result_fut.await??)
+            result_fut.await?
         }
     }
 
@@ -382,9 +373,8 @@ fn serf_loop<C: SerfCheckpoint>(
                     ker_hash: serf.ker_hash,
                     event_num: serf.event_num.load(Ordering::SeqCst),
                 });
-                let _ = result.send(load_state).map_err(|err| {
+                let _ = result.send(load_state).inspect_err(|_err| {
                     debug!("Failed to send to dropped channel");
-                    err
                 });
             }
             SerfAction::Import { state, result } => {
@@ -423,9 +413,8 @@ fn serf_loop<C: SerfCheckpoint>(
                         Ok(slab)
                     },
                 );
-                let _ = result.send(kernel_state_slab).map_err(|e| {
+                let _ = result.send(kernel_state_slab).inspect_err(|_e| {
                     debug!("Tried to send to dropped result channel");
-                    e
                 });
                 let action_elapsed = action_start.elapsed();
                 if let Some(nockapp_metrics) = &serf.metrics {
@@ -441,9 +430,8 @@ fn serf_loop<C: SerfCheckpoint>(
                     slab.copy_into(cold_state_noun);
                     slab
                 };
-                let _ = result.send(cold_state_slab).map_err(|e| {
+                let _ = result.send(cold_state_slab).inspect_err(|_e| {
                     debug!("Could not send cold state to dropped channel.");
-                    e
                 });
                 let action_elapsed = action_start.elapsed();
                 if let Some(nockapp_metrics) = &serf.metrics {
@@ -472,9 +460,8 @@ fn serf_loop<C: SerfCheckpoint>(
                 if inhibit.load(Ordering::SeqCst) {
                     let _ = result
                         .send(Err(CrownError::Unknown("Serf stopping".to_string())))
-                        .map_err(|e| {
+                        .inspect_err(|_e| {
                             debug!("Tried to send inhibited peek state to dropped channel");
-                            e
                         });
                 } else {
                     let ovo_noun = ovo.copy_to_stack(serf.stack());
@@ -484,9 +471,8 @@ fn serf_loop<C: SerfCheckpoint>(
                         slab.copy_into(noun);
                         slab
                     });
-                    let _ = result.send(noun_slab_res).map_err(|e| {
+                    let _ = result.send(noun_slab_res).inspect_err(|_e| {
                         debug!("Tried to send peek state to dropped channel");
-                        e
                     });
                 };
                 let action_elapsed = action_start.elapsed();
@@ -498,14 +484,13 @@ fn serf_loop<C: SerfCheckpoint>(
                 wire,
                 cause,
                 result,
-                result_ack,
+                result_ack: _,
             } => {
                 if inhibit.load(Ordering::SeqCst) {
                     let _ = result
                         .send(Err(CrownError::Unknown("Serf stopping".to_string())))
-                        .map_err(|e| {
+                        .inspect_err(|_e| {
                             debug!("Failed to send inihibited poke result from serf thread");
-                            e
                         });
                 } else {
                     let cause_noun = cause.copy_to_stack(serf.stack());
@@ -515,25 +500,19 @@ fn serf_loop<C: SerfCheckpoint>(
                         slab.copy_into(noun);
                         slab
                     });
-                    let _ = result.send(noun_slab_res).map_err(|e| {
+                    let _ = result.send(noun_slab_res).inspect_err(|_e| {
                         debug!("Failed to send poke result from serf thread");
-                        e
                     });
                 };
                 let action_elapsed = action_start.elapsed();
                 if let Some(nockapp_metrics) = &serf.metrics {
                     nockapp_metrics.serf_loop_poke.add_timing(&action_elapsed);
                 };
-                let _ = result_ack.blocking_recv().map_err(|e| {
-                    debug!("Failed to receive result ack in serf thread");
-                    e
-                });
             }
             SerfAction::ProvideMetrics { metrics, result } => {
                 serf.metrics = Some(metrics);
-                let _ = result.send(()).map_err(|e| {
+                let _ = result.send(()).inspect_err(|_e| {
                     debug!("Failed to send metric-provision result from serf thread");
-                    e
                 });
                 let action_elapsed = action_start.elapsed();
                 if let Some(nockapp_metrics) = &serf.metrics {
@@ -603,12 +582,12 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         checkpoint: Option<C>,
         hot_state: &[HotEntry],
         test_jets: Vec<NounSlab>,
-        trace_opts: TraceOpts,
+        trace: TraceOpts,
     ) -> Result<Self> {
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
         let serf = SerfThread::new(
-            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE, test_jets, trace_opts.into(),
+            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE, test_jets, trace,
         )
         .await?;
         Ok(Self { serf })
@@ -619,12 +598,12 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         checkpoint: Option<C>,
         hot_state: &[HotEntry],
         test_jets: Vec<NounSlab>,
-        trace_info: Option<TraceInfo>,
+        trace: TraceOpts,
     ) -> Result<Self> {
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
         let serf = SerfThread::new(
-            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_TINY, test_jets, trace_info,
+            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_TINY, test_jets, trace,
         )
         .await?;
         Ok(Self { serf })
@@ -635,12 +614,12 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         checkpoint: Option<C>,
         hot_state: &[HotEntry],
         test_jets: Vec<NounSlab>,
-        trace_info: Option<TraceInfo>,
+        trace: TraceOpts,
     ) -> Result<Self> {
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
         let serf = SerfThread::new(
-            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_SMALL, test_jets, trace_info,
+            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_SMALL, test_jets, trace,
         )
         .await?;
         Ok(Self { serf })
@@ -651,7 +630,7 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         checkpoint: Option<C>,
         hot_state: &[HotEntry],
         test_jets: Vec<NounSlab>,
-        trace: Option<TraceInfo>,
+        trace: TraceOpts,
     ) -> Result<Self> {
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
@@ -667,7 +646,7 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         checkpoint: Option<C>,
         hot_state: &[HotEntry],
         test_jets: Vec<NounSlab>,
-        trace: Option<TraceInfo>,
+        trace: TraceOpts,
     ) -> Result<Self> {
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
@@ -683,12 +662,12 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         checkpoint: Option<C>,
         hot_state: &[HotEntry],
         test_jets: Vec<NounSlab>,
-        trace_info: Option<TraceInfo>,
+        trace: TraceOpts,
     ) -> Result<Self> {
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
         let serf = SerfThread::new(
-            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_HUGE, test_jets, trace_info,
+            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_HUGE, test_jets, trace,
         )
         .await?;
         Ok(Self { serf })
@@ -709,9 +688,9 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         kernel: &[u8],
         checkpoint: Option<C>,
         test_jets: Vec<NounSlab>,
-        trace_opts: TraceOpts,
+        trace: TraceOpts,
     ) -> Result<Self> {
-        Self::load_with_hot_state(kernel, checkpoint, &Vec::new(), test_jets, trace_opts.into()).await
+        Self::load_with_hot_state(kernel, checkpoint, &Vec::new(), test_jets, trace).await
     }
 
     /// Produces a checkpoint of the kernel state.
@@ -726,6 +705,14 @@ impl<C> Kernel<C> {
         self.serf.poke(wire, cause)
     }
 
+    pub fn poke_sync(&self, wire: WireRepr, cause: NounSlab) -> Result<NounSlab> {
+        self.serf.poke_sync(wire, cause)
+    }
+
+    pub fn peek_sync(&self, ovo: NounSlab) -> Result<NounSlab> {
+        self.serf.peek_sync(ovo)
+    }
+
     pub fn poke_timeout(
         &self,
         wire: WireRepr,
@@ -733,14 +720,6 @@ impl<C> Kernel<C> {
         timeout: Duration,
     ) -> impl Future<Output = Result<NounSlab>> {
         self.serf.poke_timeout(wire, cause, timeout)
-    }
-
-    pub fn poke_sync(&self, wire: WireRepr, cause: NounSlab) -> Result<NounSlab> {
-        self.serf.poke_sync(wire, cause)
-    }
-
-    pub fn peek_sync(&self, ovo: NounSlab) -> Result<NounSlab> {
-        self.serf.peek_sync(ovo)
     }
 
     // We are very carefully ensuring the future does not contain the "self" reference to ensure no lifetime issues when spawning tasks
@@ -762,10 +741,6 @@ impl<C> Kernel<C> {
         metrics: Arc<NockAppMetrics>,
     ) -> impl Future<Output = Result<()>> {
         self.serf.provide_metrics(metrics)
-    }
-
-    pub async fn stop(mut self) -> Result<()> {
-        self.serf.stop().await
     }
 }
 
@@ -806,7 +781,7 @@ impl Serf {
         kernel_bytes: &[u8],
         constant_hot_state: &[HotEntry],
         test_jets: Vec<NounSlab>,
-        trace_info: Option<TraceInfo>,
+        trace: TraceOpts,
     ) -> Self {
         let hot_state = [URBIT_HOT_STATE, constant_hot_state].concat();
 
@@ -839,7 +814,7 @@ impl Serf {
 
         let event_num = Arc::new(AtomicU64::new(event_num_raw));
 
-        let mut context = create_context(stack, &hot_state, cold, trace_info, test_jets);
+        let mut context = create_context(stack, &hot_state, cold, trace.into(), test_jets);
         let cancel_token = context.cancel_token();
 
         let mut arvo = {
@@ -1144,13 +1119,9 @@ impl Serf {
                     self.context.stack.preserve(&mut fec);
                     self.preserve_event_update_leftovers();
                 }
-                Ok(self.poke_bail(eve, eve, ovo, fec))
+                Ok(fec)
             }
-            Err(goof_crud) => {
-                let stack = &mut self.context.stack;
-                let lud = T(stack, &[goof_crud, goof, D(0)]);
-                Ok(self.poke_bail_noun(lud))
-            }
+            Err(goof_crud) => Err(CrownError::KernelError(Some(goof_crud))),
         }
     }
 
@@ -1322,7 +1293,7 @@ mod tests {
             .join(jam);
         let jam_bytes =
             fs::read(jam_path).unwrap_or_else(|_| panic!("Failed to read {} file", jam));
-        Kernel::load(&jam_bytes, None, vec![], false)
+        Kernel::load(&jam_bytes, None, vec![], TraceOpts::default())
             .await
             .expect("Could not load kernel")
     }

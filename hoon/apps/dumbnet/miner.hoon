@@ -16,7 +16,7 @@
     ==
   +$  effect  [%mine-result (each [hash=noun-digest:tip5 mine-success] dig=noun-digest:tip5)]
   +$  kernel-state  [%state version=%1]
-  +$  cause  
+  +$  cause
     $%  [%0 header=noun-digest:tip5 nonce=noun-digest:tip5 target=bignum:bignum pow-len=@]
         [%1 header=noun-digest:tip5 nonce=noun-digest:tip5 target=bignum:bignum pow-len=@]
         [%2 header=noun-digest:tip5 nonce=noun-digest:tip5 target=bignum:bignum pow-len=@]
@@ -43,7 +43,7 @@
     =/  cause  ((soft cause) dat)
     ?~  cause
       ~&  "cause {<dat>}"
-      ~>  %slog.[0 [%leaf "error: bad cause"]]
+      ~>  %slog.[1 'poke: Bad cause']
       `k
     =/  cause  u.cause
     =/  input=prover-input:sp
@@ -53,7 +53,7 @@
         %2  [%2 header.cause nonce.cause pow-len.cause]
       ==
     :: XX TODO set up stark config, construct effect
-    =/  [prf=proof:sp dig=tip5-hash-atom] 
+    =/  [prf=proof:sp dig=tip5-hash-atom]
       (prove-block-inner:mine input)
     :_  k
     ?:  (check-target:mine dig target.cause)

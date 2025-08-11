@@ -315,13 +315,13 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
     //         tworow-trace-polys=(list bpoly)
     //         constraint-map=(map @ constraints)
     //         constraint-counts=(map @ constraint-counts)
-    //         composition-chals=(map @ bpoly)
-    //         chal-map=(map @ belt)
-    //         dyn-map=(map @ bpoly)
+    //         weights-map=(map @ bpoly)
+    //         challenges=bpoly
+    //         dyn-list=(list bpoly)
     //         is-extra=?
     //     ==
     // ^-  bpoly
-    let [omicrons, heights, tworow_trace_polys, constraint_map, constraint_counts, composition_chals, chal_map, dyn_map, is_extra] =
+    let [omicrons, heights, tworow_trace_polys, constraint_map, constraint_counts, weights_map, challenges, dyn_list, is_extra] =
         sam.uncell()?;
 
     let Ok(omicrons) = BPolySlice::try_from(omicrons) else {
@@ -342,26 +342,21 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
         return jet_err();
     };
 
-    let chal_map = HoonMapIter::try_from(chal_map)
-        .ok()
-        .into_iter()
-        .flat_map(|v| {
-            v.map(|v| {
-                let [ck, cv] = v
-                    .uncell()
-                    .unwrap()
-                    .map(|v| v.as_atom().unwrap().as_u64().unwrap());
-                (ck, Belt(cv))
-            })
-        })
-        .collect::<BTreeMap<u64, Belt>>();
+    let Ok(challenges) = BPolySlice::try_from(challenges) else {
+        return jet_err();
+    };
 
-    let [constraint_map, constraint_counts, composition_chals, /*chal_map,*/ dyn_map] = [
+    let Ok(dyn_list) = HoonList::try_from(dyn_list).map(|v| {
+        v.map(|v| BPolySlice::try_from(v).unwrap())
+            .collect::<Vec<_>>()
+    }) else {
+        return jet_err();
+    };
+
+    let [constraint_map, constraint_counts, weights_map] = [
         constraint_map,
         constraint_counts,
-        composition_chals,
-        /*chal_map,*/
-        dyn_map,
+        weights_map,
     ]
     .map(HoonMap::try_from)
     .map(|v| v.ok());
@@ -400,11 +395,8 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
         let trace: PolySlice<Elem> = trace.into();
         // =/  constraints  (~(got by constraint-w-deg-map.dp) i)
         let constraints2 = constraint_w_deg_map.get(&(i as u64)).unwrap();
-        // =/  dyns  (~(got by dyn-map) i)
-        let dyns = dyn_map
-            .and_then(|v| v.get(stack, D(i as _)))
-            .ok_or_else(det_err)?;
-        let dyns = BPolySlice::try_from(dyns)?;
+        // =/  dyns  (snag i dyn-list)
+        let dyns = dyn_list[i];
 
         for constraints in constraints2 {
             for (_, mp) in constraints.iter() {
@@ -415,7 +407,7 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
                         0,
                         *mp,
                         trace,
-                        &chal_map,
+                        challenges,
                         dyns,
                 )?);
             }
@@ -438,11 +430,11 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
         // =/  last-row  (init-bpoly ~[(bneg (binv omicron)) 1])      ::  f(X)=X-g^{-1}
         let last_row = [Elem::from_u64(bneg(binv(omicron.0))), Elem::one()];
         let last_row = PolySlice(&last_row);
-        // =/  chals  (~(got by composition-chals) i)
-        let chals = composition_chals
+        // =/  weights  (~(got by weights-map) i)
+        let weights = weights_map
             .and_then(|v| v.get(stack, D(i as _)))
             .ok_or_else(det_err)?;
-        let chals2 = BPolySlice::try_from(chals)?;
+        let weights2 = BPolySlice::try_from(weights)?;
         // =/  counts  (~(got by constraint-counts) i)
         let counts = constraint_counts
             .and_then(|v| v.get(stack, D(i as _)))
@@ -467,7 +459,7 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
         let dividends =
             [boundary_zerofier, row_zerofier, transition_zerofier, last_row, row_zerofier];
 
-        let mut chals = chals2.0;
+        let mut weights = weights2.0;
         for (o, ((constraints, count), dividend)) in
             constraints2.iter().zip(counts.into_iter()).zip(dividends).enumerate()
         {
@@ -477,20 +469,20 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
             }
 
             // NOTE: not in order here, and different iterations have diff parameters
-            // (~(scag bop chals) (mul 2 boundary.counts))
-            let (weights, next_chals) = chals.split_at(2 * (count as usize));
-            chals = next_chals;
+            // (~(scag bop weights) (mul 2 boundary.counts))
+            let (cur_weights, next_weights) = weights.split_at(2 * (count as usize));
+            weights = next_weights;
             // %-  process-composition-constraints
             // :*  boundary.constraints
             //     trace
-            //     (~(scag bop chals) (mul 2 boundary.counts))
+            //     (~(scag bop weights) (mul 2 boundary.counts))
             //     dyns
             // ==
             let processed_constraints = process_composition_constraints(
                 &mut all_comps,
                 &mut comp_cnts,
                 constraints,
-                PolySlice(weights),
+                PolySlice(cur_weights),
                 fri_deg_bound,
             )?;
             // %-  bpdiv

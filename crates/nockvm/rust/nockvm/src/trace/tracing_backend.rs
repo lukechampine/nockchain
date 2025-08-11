@@ -1,18 +1,18 @@
-use super::*;
+use std::cmp::{Eq, PartialEq};
+use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
+use std::sync::Mutex;
+
 use either::Either;
-use std::{
-    cmp::{Eq, PartialEq},
-    collections::HashSet,
-    hash::{Hash, Hasher},
-    sync::Mutex,
-};
-use tracing::{
-    callsite::DefaultCallsite,
-    dispatcher::{self, Dispatch},
-    span::Attributes,
-    Id, Level, Metadata,
-};
-use tracing_core::{field::FieldSet, identify_callsite, metadata::Kind};
+use tracing::callsite::DefaultCallsite;
+use tracing::dispatcher::{self, Dispatch};
+use tracing::span::Attributes;
+use tracing::{Id, Level, Metadata};
+use tracing_core::field::FieldSet;
+use tracing_core::identify_callsite;
+use tracing_core::metadata::Kind;
+
+use super::*;
 
 #[derive(Clone, Copy)]
 struct TraceData {
@@ -49,24 +49,8 @@ impl TraceEntry {
         let path: &'static str = Box::leak(path.into());
         let chum: &'static str = Box::leak(chum.into());
 
-        // TODO: figure out why passing path as `file` metadata field messes up function names in
-        // tracy. For now, let's extract gate/core, and pass it as name.
-        let name = path.trim_start_matches('/');
-        /*let mut cnt = 0;
-        let name = name
-            .split_once(|v| {
-                if v == '/' {
-                    cnt += 1;
-                    cnt > 1
-                } else {
-                    false
-                }
-            })
-            .map(|(v, _)| v)
-            .unwrap_or(name);*/
-
         let metadata = Box::leak(Box::new(Metadata::new(
-            name,
+            path,
             "nockcode",
             level,
             None,
@@ -99,13 +83,13 @@ impl Eq for TraceEntry {}
 
 impl PartialEq for TraceEntry {
     fn eq(&self, other: &TraceEntry) -> bool {
-        (*self.chum).eq(&*other.chum)
+        (*self.chum).eq(other.chum)
     }
 }
 
 impl std::borrow::Borrow<str> for TraceEntry {
     fn borrow(&self) -> &str {
-        &self.chum
+        self.chum
     }
 }
 
@@ -115,6 +99,12 @@ static GLOBAL_ENTRIES: Mutex<Option<HashSet<TraceEntry>>> = Mutex::new(None);
 pub struct TracingBackend {
     entries: HashSet<TraceEntry>,
     subscriber: Option<Dispatch>,
+}
+
+impl Default for TracingBackend {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TracingBackend {
@@ -140,7 +130,7 @@ impl Drop for TracingBackend {
 }
 
 impl TraceBackend for TracingBackend {
-    fn append_trace(&mut self, stack: &mut NockStack, path: Noun) -> Option<NonNull<TraceStack>> {
+    fn append_trace(&mut self, stack: &mut NockStack, path: Noun) {
         let mut tmp = path;
 
         let chum = loop {
@@ -150,7 +140,9 @@ impl TraceBackend for TracingBackend {
             }
         };
 
-        let chum = std::str::from_utf8(chum.as_ne_bytes()).ok()?;
+        let Ok(chum) = std::str::from_utf8(chum.as_ne_bytes()) else {
+            return;
+        };
 
         let chum = chum.trim_end_matches('\0');
 
@@ -166,7 +158,7 @@ impl TraceBackend for TracingBackend {
         let id = if let Some(entry) = self.entries.get(chum) {
             entry.id.clone()
         } else {
-            let entry = TraceEntry::new(chum, path, &subscriber, Level::DEBUG);
+            let entry = TraceEntry::new(chum, path, subscriber, Level::DEBUG);
             let id = entry.id.clone();
             self.entries.insert(entry);
             id
@@ -174,19 +166,18 @@ impl TraceBackend for TracingBackend {
 
         subscriber.enter(&id);
 
-        unsafe {
-            let new_trace_entry = stack.struct_alloc(1);
-            *new_trace_entry = TraceStack::new(TraceData {
+        TraceStack::push_on_stack(
+            stack,
+            TraceData {
                 span_id: id.into_u64(),
-            });
-            Some(NonNull::new_unchecked(new_trace_entry as *mut TraceStack))
-        }
+            },
+        );
     }
 
     unsafe fn write_nock_trace(
         &mut self,
         _: &mut NockStack,
-        trace_stack: *const TraceStack<()>,
+        trace_stack: *const TraceStack,
     ) -> Result<(), Error> {
         let mut trace_stack = trace_stack as *const TraceStack<TraceData>;
 

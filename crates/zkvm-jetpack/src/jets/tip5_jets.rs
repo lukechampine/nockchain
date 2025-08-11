@@ -34,7 +34,7 @@ pub fn hoon_list_to_sponge(list: Noun) -> Result<[Melt; STATE_SIZE], JetErr> {
         let cell = current.as_cell()?;
         sponge[i] = Melt(cell.head().as_atom()?.as_u64()?);
         current = cell.tail();
-        i = i + 1;
+        i += 1;
     }
 
     if i != STATE_SIZE {
@@ -89,12 +89,12 @@ pub fn tip5_absorb_input(mut input_to_absorb: &[Melt], mut sponge: &mut [Melt; 1
     let mut cnt_q = q;
     loop {
         let (scag_input, slag_input) = input_to_absorb.split_at(RATE);
-        tip5_absorb_rate(&mut sponge, scag_input);
+        tip5_absorb_rate(sponge, scag_input);
 
         if cnt_q == 0 {
             break;
         }
-        cnt_q = cnt_q - 1;
+        cnt_q -= 1;
         input_to_absorb = slag_input;
     }
 }
@@ -137,8 +137,8 @@ fn hash_varlen(mut input_vec: Vec<Belt>) -> [u64; 5] {
     tip5_absorb_input(&input_vec, &mut sponge, q);
 
     // calc digest
-    let digest = tip5_calc_digest(&sponge);
-    digest
+
+    tip5_calc_digest(&sponge)
 }
 
 pub fn create_init_sponge_variable() -> [Melt; STATE_SIZE] {
@@ -366,14 +366,14 @@ pub fn hash_hashable(stack: &mut NockStack, h: Noun) -> Result<Noun, JetErr> {
 
     if h_head.is_direct() {
         let tag = h_head.as_direct()?;
-        let res = match tag.data() {
+
+        match tag.data() {
             tas!(b"hash") => hash_hashable_hash(stack, h_tail),
             tas!(b"leaf") => hash_hashable_leaf(stack, h_tail),
             tas!(b"list") => hash_hashable_list(stack, h_tail),
             tas!(b"mary") => hash_hashable_mary(stack, h_tail),
             _ => hash_hashable_other(stack, h_head, h_tail),
-        };
-        res
+        }
     } else {
         hash_hashable_other(stack, h_head, h_tail)
     }

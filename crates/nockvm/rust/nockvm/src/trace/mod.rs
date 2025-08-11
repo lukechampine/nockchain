@@ -1,5 +1,6 @@
 use std::io::Error;
 use std::path::PathBuf;
+use std::ptr::NonNull;
 use std::result::Result;
 use std::time::Instant;
 
@@ -13,10 +14,9 @@ use crate::jets::form::util::scow;
 use crate::mem::NockStack;
 use crate::mug::met3_usize;
 use crate::noun::{Atom, DirectAtom, IndirectAtom, Noun};
-use core::ptr::NonNull;
 
-mod file;
-pub use file::*;
+mod json;
+pub use json::*;
 
 mod tracing_backend;
 pub use tracing_backend::*;
@@ -27,7 +27,7 @@ pub use filter::*;
 crate::gdb!();
 
 pub trait TraceBackend: Send {
-    fn append_trace(&mut self, stack: &mut NockStack, path: Noun) -> Option<NonNull<TraceStack>>;
+    fn append_trace(&mut self, stack: &mut NockStack, path: Noun);
 
     unsafe fn write_nock_trace(
         &mut self,
@@ -52,10 +52,16 @@ pub struct TraceStack<T = ()> {
 }
 
 impl<T> TraceStack<T> {
-    pub fn new(data: T) -> Self {
-        Self {
-            next: core::ptr::null(),
-            data,
+    pub fn push_on_stack(stack: &mut NockStack, data: T) -> NonNull<TraceStack> {
+        unsafe {
+            let trace_stack = *(stack.local_noun_pointer(1) as *const *const Self);
+            let new_trace_entry = stack.struct_alloc(1);
+            *new_trace_entry = Self {
+                next: trace_stack,
+                data,
+            };
+            *(stack.local_noun_pointer(1) as *mut *mut Self) = new_trace_entry;
+            NonNull::new_unchecked(new_trace_entry as *mut TraceStack)
         }
     }
 }
@@ -80,29 +86,23 @@ pub struct TraceInfo {
 }
 
 impl TraceInfo {
-    pub fn append_trace(
-        &mut self,
-        stack: &mut NockStack,
-        path: Noun,
-        force_unlinked: bool,
-    ) -> Option<NonNull<TraceStack>> {
+    pub fn append_trace(&mut self, stack: &mut NockStack, path: Noun) {
         if let Some(filter) = self.filter.as_mut() {
             if !filter.should_trace(path) {
-                return None;
+                return;
             }
         }
 
-        let mut new_trace_entry = self.backend.append_trace(stack, path)?;
+        self.backend.append_trace(stack, path);
+    }
+}
 
-        if !force_unlinked {
-            unsafe {
-                let cur_trace_stack = *(stack.local_noun_pointer(1) as *const *const TraceStack);
-                new_trace_entry.as_mut().next = cur_trace_stack;
-                *(stack.local_noun_pointer(1) as *mut *const TraceStack) = new_trace_entry.as_ptr();
-            }
+impl From<JsonBackend> for TraceInfo {
+    fn from(backend: JsonBackend) -> Self {
+        Self {
+            backend: Box::new(backend),
+            filter: None,
         }
-
-        Some(new_trace_entry)
     }
 }
 
@@ -140,7 +140,7 @@ pub fn write_serf_trace(info: &mut TraceInfo, name: &str, start: Instant) -> Res
 pub unsafe fn write_nock_trace(
     stack: &mut NockStack,
     info: &mut TraceInfo,
-    trace_stack: *const TraceStack<()>,
+    trace_stack: *const TraceStack,
 ) -> Result<(), Error> {
     info.backend.write_nock_trace(stack, trace_stack)
 }

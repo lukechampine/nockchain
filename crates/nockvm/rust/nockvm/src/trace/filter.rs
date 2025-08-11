@@ -66,7 +66,7 @@ impl<T: AsRef<str> + Send> TraceFilter for KeywordFilter<T> {
             if let Ok(c) = n.as_cell() {
                 return has_keywords(c.head(), cnt - 1, kw) || has_keywords(c.tail(), cnt - 1, kw);
             }
-            return false;
+            false
         }
 
         has_keywords(path, 10, &self.keywords)
