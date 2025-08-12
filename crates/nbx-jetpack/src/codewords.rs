@@ -31,26 +31,36 @@ impl<'a> CodewordEngine<'a> {
     }
 
     pub fn reduce(self) -> (Mary, usize, MerkHeap) {
-        #[cfg(feature = "validate-gpu")]
-        {
-            let cpu_result = self.clone().reduce_cpu();
-            let gpu_result = self.reduce_gpu();
+        // If the GPU is not enabled, return the CPU result directly
+        #[cfg(not(feature = "gpu"))]
+        return self.reduce_cpu();
 
-            // Compare results and log any mismatches
-            if cpu_result != gpu_result {
-                warn!("The result of `codewords` with the GPU does not match the result of the CPU")
+        #[cfg(feature = "gpu")]
+        {
+            // If the GPU is enabled but should not be used, return the CPU result directly
+            if !gpu::should_use_gpu() {
+                return self.reduce_cpu();
             }
 
-            // Return CPU result as the "trusted" version
-            return cpu_result;
-        }
-
-        #[cfg(all(not(feature = "validate-gpu"), feature = "gpu"))]
-        if gpu::should_use_gpu() {
+            // If the GPU result is not validated, return the GPU result directly
+            #[cfg(not(feature = "validate-gpu"))]
             return self.reduce_gpu();
-        }
 
-        self.reduce_cpu()
+            #[cfg(feature = "validate-gpu")]
+            {
+                let cpu_result = self.clone().reduce_cpu();
+                let gpu_result = self.reduce_gpu();
+
+                // Emit warnings if the CPU and GPU results are different
+                if cpu_result != gpu_result {
+                    warn!("The result of the CPU and GPU are different for the `codewords` operation")
+                }
+
+                // Even if the result is computed using a GPU for validation, always return the CPU
+                //  result as it is considered more reliable.
+                cpu_result
+            }
+        }
     }
 
     #[tracing::instrument(skip_all)]
