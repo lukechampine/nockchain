@@ -242,7 +242,7 @@ impl<'a> ReduceChunkSlice<'a> {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ReduceChunk {
     pub ops_variable: Vec<VariableReduceOp>,
     pub ops_fixed: Vec<ReduceOp>,
@@ -292,7 +292,7 @@ impl ReduceChunk {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ReduceStage {
     pub chunks: Vec<ReduceChunk>,
 }
@@ -425,6 +425,7 @@ fn pad_chunk(buf: &mut Vec<Melt>, len: usize) {
     buf.resize(buf.len() + padded_chunk(len) - len - 1, Melt::zero())
 }
 
+#[derive(Clone)]
 pub struct HashEngine {
     stages: Vec<ReduceStage>,
     out_stages: usize,
@@ -586,15 +587,36 @@ impl HashEngine {
             return vec![];
         }
 
-        #[cfg(feature = "gpu")]
-        if gpu::should_use_gpu() {
-            Submittable::gpu_process(self)
-        } else {
-            self.reduce_cpu()
-        }
-
+        // If the GPU is not enabled, return the CPU result directly
         #[cfg(not(feature = "gpu"))]
-        self.reduce_cpu()
+        return self.reduce_cpu();
+
+        #[cfg(feature = "gpu")]
+        {
+            // If the GPU is enabled but should not be used, return the CPU result directly
+            if !gpu::should_use_gpu() {
+                return self.reduce_cpu();
+            }
+
+            // If the GPU result is not validated, return the GPU result directly
+            #[cfg(not(feature = "validate-gpu"))]
+            return Submittable::gpu_process(self);
+
+            #[cfg(feature = "validate-gpu")]
+            {
+                let cpu_result = self.clone().reduce_cpu();
+                let gpu_result = Submittable::gpu_process(self);
+
+                // Emit warnings if the CPU and GPU results are different
+                if cpu_result != gpu_result {
+                    warn!("The result of the CPU and GPU are different for the `hash` operation")
+                }
+
+                // Even if the result is computed using a GPU for validation, always return the CPU
+                //  result as it is considered more reliable.
+                cpu_result
+            }
+        }
     }
 
     pub fn push_mary(&mut self, stage: usize, ma: MarySlice) -> usize {

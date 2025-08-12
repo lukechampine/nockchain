@@ -2,6 +2,7 @@ use zkvm_jetpack::form::mary::{Mary, MarySlice};
 use zkvm_jetpack::form::math::mary::mary_transpose;
 use zkvm_jetpack::form::Belt;
 
+use crate::log::*;
 use crate::eight::compute_lde;
 use crate::three::{build_merk_heap_impl, MerkHeap};
 use crate::utils::xeb;
@@ -30,15 +31,36 @@ impl<'a> CodewordEngine<'a> {
     }
 
     pub fn reduce(self) -> (Mary, usize, MerkHeap) {
-        #[cfg(feature = "gpu")]
-        if gpu::should_use_gpu() {
-            self.reduce_gpu()
-        } else {
-            self.reduce_cpu()
-        }
-
+        // If the GPU is not enabled, return the CPU result directly
         #[cfg(not(feature = "gpu"))]
-        self.reduce_cpu()
+        return self.reduce_cpu();
+
+        #[cfg(feature = "gpu")]
+        {
+            // If the GPU is enabled but should not be used, return the CPU result directly
+            if !gpu::should_use_gpu() {
+                return self.reduce_cpu();
+            }
+
+            // If the GPU result is not validated, return the GPU result directly
+            #[cfg(not(feature = "validate-gpu"))]
+            return self.reduce_gpu();
+
+            #[cfg(feature = "validate-gpu")]
+            {
+                let cpu_result = self.clone().reduce_cpu();
+                let gpu_result = self.reduce_gpu();
+
+                // Emit warnings if the CPU and GPU results are different
+                if cpu_result != gpu_result {
+                    warn!("The result of the CPU and GPU are different for the `codewords` operation")
+                }
+
+                // Even if the result is computed using a GPU for validation, always return the CPU
+                //  result as it is considered more reliable.
+                cpu_result
+            }
+        }
     }
 
     #[tracing::instrument(skip_all)]
