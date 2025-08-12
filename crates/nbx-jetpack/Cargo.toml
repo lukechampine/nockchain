@@ -6,8 +6,9 @@ edition.workspace = true
 [features]
 default = []
 gpu = ["nbx-shaders", "pollster", "wgpu", "naga"]
-gpu-prod = ["gpu", "nbx-shaders/comptime", "nbx-shaders/spirv_passthrough"]
+gpu-prod = ["gpu", "nbx-shaders/comptime", "spirv_passthrough"]
 stealthy = []
+spirv_passthrough = ["nbx-shaders/spirv_passthrough"]
 
 [dependencies]
 nockvm.workspace = true
@@ -30,8 +31,5 @@ nbx-tip5.workspace = true
 pollster = { workspace = true, optional = true }
 wgpu = { workspace = true, optional = true }
 naga = { workspace = true, optional = true }
-nbx-shaders = { workspace = true, optional = true, features = [
-    # "comptime",
-    "spirv_passthrough"
-] }
+nbx-shaders = { workspace = true, optional = true }
 
