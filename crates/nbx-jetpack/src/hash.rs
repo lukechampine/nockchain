@@ -242,7 +242,7 @@ impl<'a> ReduceChunkSlice<'a> {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ReduceChunk {
     pub ops_variable: Vec<VariableReduceOp>,
     pub ops_fixed: Vec<ReduceOp>,
@@ -292,7 +292,7 @@ impl ReduceChunk {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ReduceStage {
     pub chunks: Vec<ReduceChunk>,
 }
@@ -425,6 +425,7 @@ fn pad_chunk(buf: &mut Vec<Melt>, len: usize) {
     buf.resize(buf.len() + padded_chunk(len) - len - 1, Melt::zero())
 }
 
+#[derive(Clone)]
 pub struct HashEngine {
     stages: Vec<ReduceStage>,
     out_stages: usize,
@@ -586,14 +587,25 @@ impl HashEngine {
             return vec![];
         }
 
-        #[cfg(feature = "gpu")]
-        if gpu::should_use_gpu() {
-            Submittable::gpu_process(self)
-        } else {
-            self.reduce_cpu()
+        #[cfg(feature = "validate-gpu")]
+        {
+            let cpu_result = self.clone().reduce_cpu();
+            let gpu_result = Submittable::gpu_process(self);
+
+            // Compare results and log any mismatches
+            if cpu_result != gpu_result {
+                warn!("The result of `hash` with the GPU does not match the result of the CPU")
+            }
+
+            // Return CPU result as the "trusted" version
+            return cpu_result;
         }
 
-        #[cfg(not(feature = "gpu"))]
+        #[cfg(all(not(feature = "validate-gpu"), feature = "gpu"))]
+        if !gpu::should_use_gpu() {
+            return Submittable::gpu_process(self);
+        }
+
         self.reduce_cpu()
     }
 

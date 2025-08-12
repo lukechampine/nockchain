@@ -2,6 +2,7 @@ use zkvm_jetpack::form::mary::{Mary, MarySlice};
 use zkvm_jetpack::form::math::mary::mary_transpose;
 use zkvm_jetpack::form::Belt;
 
+use crate::log::*;
 use crate::eight::compute_lde;
 use crate::three::{build_merk_heap_impl, MerkHeap};
 use crate::utils::xeb;
@@ -30,14 +31,25 @@ impl<'a> CodewordEngine<'a> {
     }
 
     pub fn reduce(self) -> (Mary, usize, MerkHeap) {
-        #[cfg(feature = "gpu")]
-        if gpu::should_use_gpu() {
-            self.reduce_gpu()
-        } else {
-            self.reduce_cpu()
+        #[cfg(feature = "validate-gpu")]
+        {
+            let cpu_result = self.clone().reduce_cpu();
+            let gpu_result = self.reduce_gpu();
+
+            // Compare results and log any mismatches
+            if cpu_result != gpu_result {
+                warn!("The result of `codewords` with the GPU does not match the result of the CPU")
+            }
+
+            // Return CPU result as the "trusted" version
+            return cpu_result;
         }
 
-        #[cfg(not(feature = "gpu"))]
+        #[cfg(all(not(feature = "validate-gpu"), feature = "gpu"))]
+        if gpu::should_use_gpu() {
+            return self.reduce_gpu();
+        }
+
         self.reduce_cpu()
     }
 

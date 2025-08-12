@@ -389,6 +389,7 @@ pub fn build_merk_heap(stack: &mut NockStack, ma: Noun) -> Result {
     Ok(T(stack, &[height, mh]))
 }
 
+#[derive(PartialEq)]
 pub struct MerkHeap {
     pub h: NounDigest,
     pub m: Mary,

@@ -1,4 +1,5 @@
 use std::rc::Rc;
+use crate::log::*;
 
 use nbx_tip5::base::binv;
 use nockvm::jets::JetErr;
@@ -205,14 +206,25 @@ impl<'a> DeepEngine<'a> {
     }
 
     pub fn reduce(self) -> FPolyVec {
-        #[cfg(feature = "gpu")]
-        if gpu::should_use_gpu() {
-            self.reduce_gpu()
-        } else {
-            self.reduce_cpu()
+        #[cfg(feature = "validate-gpu")]
+        {
+            let cpu_result = self.clone().reduce_cpu();
+            let gpu_result = self.reduce_gpu();
+
+            // Compare results and log any mismatches
+            if cpu_result != gpu_result {
+                warn!("The result of `deep` with the GPU does not match the result of the CPU")
+            }
+
+            // Return CPU result as the "trusted" version
+            return cpu_result;
         }
 
-        #[cfg(not(feature = "gpu"))]
+        #[cfg(all(not(feature = "validate-gpu"), feature = "gpu"))]
+        if gpu::should_use_gpu() {
+            return self.reduce_gpu();
+        }
+
         self.reduce_cpu()
     }
 

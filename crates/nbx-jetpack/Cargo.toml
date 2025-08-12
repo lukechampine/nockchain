@@ -9,6 +9,7 @@ gpu = ["nbx-shaders", "pollster", "wgpu", "naga"]
 gpu-prod = ["gpu", "nbx-shaders/comptime", "spirv_passthrough"]
 stealthy = []
 spirv_passthrough = ["nbx-shaders/spirv_passthrough"]
+validate-gpu = ["gpu"]
 
 [dependencies]
 nockvm.workspace = true
