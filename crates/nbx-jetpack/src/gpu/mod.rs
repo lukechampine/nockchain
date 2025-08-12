@@ -101,14 +101,18 @@ impl Gpu {
 
                 let required_limits = wgpu::Limits::downlevel_defaults();
 
+                let required_features = wgpu::Features::SHADER_INT64;
+
+                #[cfg(feature = "spirv_passthrough")]
+                let required_features = required_features | wgpu::Features::SPIRV_SHADER_PASSTHROUGH;
+
                 let (device, queue) =
                     pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                         label: None,
-                        required_features: wgpu::Features::SHADER_INT64
-                            | wgpu::Features::SPIRV_SHADER_PASSTHROUGH,
-                            required_limits,
-                            memory_hints: wgpu::MemoryHints::MemoryUsage,
-                            trace: wgpu::Trace::Off,
+                        required_features,
+                        required_limits,
+                        memory_hints: wgpu::MemoryHints::MemoryUsage,
+                        trace: wgpu::Trace::Off,
                     }))?;
 
                 e.insert((device, queue)).clone()
