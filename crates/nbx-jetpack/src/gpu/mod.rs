@@ -176,19 +176,19 @@ impl Gpu {
             (
                 None,
                 "mary_transpose",
-                Either::Right(&[true]),
+                Either::Right(&[false]),
                 Some(size_of::<MaryTransposeUniform>()),
             ),
             (
                 None,
                 "montify",
-                Either::Right(&[true]),
+                Either::Right(&[false]),
                 Some(size_of::<MontUniform>()),
             ),
             (
                 None,
                 "montyred",
-                Either::Right(&[true]),
+                Either::Right(&[false]),
                 Some(size_of::<MontUniform>()),
             ),
             (
@@ -212,13 +212,13 @@ impl Gpu {
             (
                 None,
                 "weighted_combo_finish",
-                Either::Right(&[true, true, true]),
+                Either::Right(&[false, false, false]),
                 Some(size_of::<WeightedComboFinishUniform>()),
             ),
             (
                 None,
                 "fp_hadamard_samepoly",
-                Either::Right(&[true]),
+                Either::Right(&[false]),
                 Some(size_of::<FpHadamardSamepolyUniform>()),
             ),
             (
