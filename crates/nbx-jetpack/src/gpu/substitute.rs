@@ -141,17 +141,15 @@ impl<'a> Submittable for SubstituteEngine<'a, Melt> {
                                     let mut cur_splits = BTreeMap::new();
                                     // Trace indices
                                     {
-                                        let mut var_ops = mul.vars.clone();
-                                        var_ops.sort_by_key(|v| v.chunk);
                                         let iter_ops = SubstituteIterOps {
                                             scal: mul.scal,
                                             vars: subs.len() as u32,
-                                            num_vars: var_ops.len() as u16,
+                                            num_vars: mul.vars.len() as u16,
                                             iter_id: u as _,
                                         };
-                                        buf_ids.push((None, var_ops.len()));
+                                        buf_ids.push((None, mul.vars.len()));
                                         //trace!("vars: {var_ops:?}");
-                                        subs.extend(var_ops);
+                                        subs.extend(mul.vars.clone());
                                         let e = ops_map.entry(None).or_default();
                                         cur_splits.insert(None, e.len());
                                         e.push(iter_ops);
@@ -159,10 +157,8 @@ impl<'a> Submittable for SubstituteEngine<'a, Melt> {
 
                                     // Prev out indices
                                     // We need to split these ops up by appropriate buffer ID
-                                    let mut com_ops = mul.coms.clone();
-                                    com_ops.sort_by_key(|v| v.chunk);
                                     let mut prev_buf = None;
-                                    for com_ops in com_ops.split(|v| {
+                                    for com_ops in mul.coms.split(|v| {
                                         let buf = v.chunk as usize / chunks_per_buf;
                                         if prev_buf.is_none() {
                                             prev_buf = Some(buf);

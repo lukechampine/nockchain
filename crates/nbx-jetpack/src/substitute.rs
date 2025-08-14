@@ -1,6 +1,3 @@
-use std::sync::OnceLock;
-use crate::log::*;
-
 use nbx_tip5::melt::Melt;
 
 use zkvm_jetpack::form::math::poly::*;
@@ -13,7 +10,7 @@ use super::gpu;
 // 64MB in melts/belts
 pub const MAX_CHUNK_SIZE: usize = 0x4000000 / core::mem::size_of::<u64>();
 
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable, Debug)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable, Debug, Ord, Eq, PartialEq, PartialOrd)]
 #[repr(C)]
 pub struct SubstituteOp {
     pub chunk: u32,
@@ -253,6 +250,33 @@ impl<'a, E: ElementEx> SubstituteEngine<'a, E> {
         }
         let stage = &mut self.stages[stage];
         let iter = &mut stage.iters[iter];
-        iter.muls.push(mul);
+
+        // Use the observation the combination of `vars` & `coms` is not unique such that multiple
+        // multiplications can be combined if they are of the following form;
+        //
+        // scal1 × chunk_A^exp_A × chunk_B^exp_B
+        // scal2 × chunk_A^exp_A × chunk_B^exp_B
+        //
+        // Can be deduplicated into a single multiplication in the form of;
+        // (scal1 + scal2) × chunk_A^exp_A × chunk_B^exp_B
+
+        let mut mul = mul;
+        // NOTE: Hadamard product operations are element-wise multiplication. This operation
+        //      is commutative and associative. Which means that the order of operations can
+        //      be shifted. By sorting the operations, they are consistent for comparison.
+        mul.vars.sort_unstable();
+        mul.coms.sort_unstable();
+
+        match iter
+            .muls
+            .binary_search_by_key(&(&mul.vars, &mul.coms), |mul| (&mul.vars, &mul.coms))
+        {
+            Ok(index) => {
+                iter.muls[index].scal += mul.scal;
+            }
+            Err(index) => {
+                iter.muls.insert(index, mul);
+            }
+        }
     }
 }
