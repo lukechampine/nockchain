@@ -2,8 +2,9 @@
 
 set -e
 
-WALLET="./target/release/nockchain-wallet"
-SOCK=("--nockchain-socket" "miner4/.socket/nockchain_npc.sock")
+WALLET="nockchain-wallet"
+SOCK=("--nockchain-socket" "nockchain_miner/nockchain.sock")
+SSH="root@nockbox4203"
 ADDR="$1"
 
-exec "$WALLET" ${SOCK[*]} list-notes-by-pubkey -p "$ADDR" | tee txnotes_$ADDR.txt
+ssh -T "$SSH" "$WALLET ${SOCK[*]} --color never list-notes-by-pubkey $ADDR" | awk '/^- Name:/{printf "%s", $0; getline; print $0; next}1' | tee txnotes_$ADDR.txt

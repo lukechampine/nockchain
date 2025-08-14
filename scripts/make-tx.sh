@@ -13,8 +13,8 @@ SOCK=("--nockchain-socket" "miner4/miner.sock")
 
 
 # exec "$WALLET" ${SOCK[*]} list-notes-by-pubkey -p "$ADDR" | tee txnotes.txt
-cat txnotes_$ADDR.txt | grep -a "\(assets\|block height\|signers\|name\)" > txfiltered
-echo "[ $(cat txfiltered | sed 's/- name: \(.*\)/{ "name": "\1", /g' | sed 's/\.//g' | sed 's/- assets: 0i\(.*\)/"assets": \1,/g' | sed 's/- block height: 0i\(.*\)/"block height": \1,/g' | sed 's/- signers: \(.*\)/"signers": "\1" },/g') ]" | sed 's/\(.*\), ]/\1 ]/g' > tx.json
+cat txnotes_$ADDR.txt | grep -a "\(Assets\|Block Height\|Signers\|Name\)" > txfiltered
+echo "[ $(cat txfiltered | sed 's/- Name: \(.*\)/{ "name": "\1", /g' | sed 's/\.//g' | sed 's/- Assets: \(.*\)/"assets": \1,/g' | sed 's/- Block Height: \(.*\)/"block height": \1,/g' | sed 's/- Signers: \(.*\)/"signers": "\1" },/g') ]" | sed 's/\(.*\), ]/\1 ]/g' > tx.json
 
 jq --argjson threshold "$AMT" --argjson bh "$BLOCK_HEIGHT" --argjson skip "$SKIP" '
   (
@@ -46,4 +46,4 @@ echo "Notes to send: $(jq 'length' txtosend.json)"
 
 # echo "$NAMES" "$ASSETS" "$RECIPIENTS"
 
-RUST_LOG=error exec "$WALLET" simple-spend --names "$NAMES" --recipients "$RECIPIENTS" --gifts "$ASSETS" --fee 0 # | grep -a "saving draft to"
+RUST_LOG=error exec "$WALLET" create-tx --names "$NAMES" --recipients "$RECIPIENTS" --gifts "$ASSETS" --fee 0 # | grep -a "saving draft to"
