@@ -5,5 +5,4 @@
 #define PADD(a, b) fadd(a, b)
 #define PSUB(a, b) fsub(a, b)
 #define PRINT_PELT(f, v) debugPrintfEXT("%08x%08x %08x%08x %08x%08x", uint(v.x >> 32), uint(v.x), uint(v.y >> 32), uint(v.y), uint(v.z >> 32), uint(v.z))
-#define BUF_LEN(b) (b.length() / 3)
 #include <p_ntt_base>

@@ -9,15 +9,19 @@ layout(std140, binding = 0) uniform Globals {
     uint numElems;
 };
 
+layout(std140, binding = 1) uniform ExtraGlobals {
+    uint numTwiddles;
+};
+
 // Output of the shader.
-layout(std430, binding = 1) buffer OutputBuf {
+layout(std430, binding = 2) buffer OutputBuf {
     U64 buf[];
 };
 
 // Input to the shader. The length of the array is determined by what buffer is bound.
 //
 // Out of bounds accesses
-layout(std430, binding = 2) buffer TwiddlesBuf {
+layout(std430, binding = 3) buffer TwiddlesBuf {
     U64 twiddles[];
 };
 
@@ -36,11 +40,11 @@ void main() {
     uint elemIdx = (i + idx) % (polyLen / 2);
     uint polyIdx = (i + idx) / (polyLen / 2);
 
-    uint twiddleIdx = elemIdx % BUF_LEN(twiddles);
-    uint twiddleNum = elemIdx / BUF_LEN(twiddles);
+    uint twiddleIdx = elemIdx % numTwiddles;
+    uint twiddleNum = elemIdx / numTwiddles;
 
-    uint offU = off + polyIdx * polyLen + twiddleNum * (BUF_LEN(twiddles) * 2) + twiddleIdx;
-    uint offV = offU + BUF_LEN(twiddles);
+    uint offU = off + polyIdx * polyLen + twiddleNum * (numTwiddles * 2) + twiddleIdx;
+    uint offV = offU + numTwiddles;
 
     /*if (offU == OFF) {
         debugPrintfEXT("OFF 0: %u %u %u %u %u %u %u", elemIdx, polyIdx, twiddleIdx, twiddleNum, idx, offU, offV);

@@ -459,17 +459,16 @@ impl<'a> Submittable for SubstituteEngine<'a, Melt> {
                                     label: None,
                                     layout: &pipeline.bind_group_layout,
                                     entries: &[
-                                        wgpu::BindGroupEntry {
-                                            binding: 0,
-                                            // SubstituteIterOps
-                                            resource: ops.as_entire_binding(),
-                                        },
                                         // Contains the starting offset within the SubstituteIterOps
                                         // The shader offsets with gl_WorkGroupID * gl_WorkGroupSize / poly_len
                                         // to access the right operation.
                                         wgpu::BindGroupEntry {
-                                            binding: 1,
+                                            binding: 0,
                                             resource: uniform.as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 1,
+                                            resource: ops.as_entire_binding(),
                                         },
                                         // Output buffer - get from bufs, or go directly to main output, if
                                         // we have only one set of muls.

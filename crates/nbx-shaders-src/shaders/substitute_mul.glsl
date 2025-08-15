@@ -13,10 +13,7 @@ struct SubstituteOp {
 };
 
 layout(local_size_x = 256) in;
-layout(std430, binding = 0) readonly buffer OpsBuf {
-    SubstituteOps allOps[];
-};
-layout(std140, binding = 1) uniform Globals {
+layout(std140, binding = 0) uniform Globals {
     uint polyLen;
     uint chunksPerBuf;
     uint opsOffset;
@@ -24,6 +21,9 @@ layout(std140, binding = 1) uniform Globals {
     uint inpOffset;
     uint accumMask;
     uint outOffset;
+};
+layout(std430, binding = 1) readonly buffer OpsBuf {
+    SubstituteOps allOps[];
 };
 // Output of the shader.
 layout(std430, binding = 2) buffer OutputBuf {

@@ -142,6 +142,14 @@ pub fn p_ntt(
     for stage in 0..log_2_of_n {
         let twiddles = &twiddles[stage as usize];
 
+        let twiddle_uniform = (twiddles.size() / ((elem_len * size_of::<u64>()) as u64)) as u32;
+
+        let twiddle_uniform = gpu.device.create_buffer_init(&BufferInitDescriptor {
+            label: Some(&format!("ntt twiddle-uniform {stage}")),
+            contents: bytemuck::cast_slice(&[twiddle_uniform]),
+            usage: BufferUsages::UNIFORM,
+        });
+
         for (uniform, workgroup_count) in &uniforms {
             let bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: None,
@@ -153,10 +161,14 @@ pub fn p_ntt(
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: out.as_entire_binding(),
+                        resource: twiddle_uniform.as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
+                        resource: out.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
                         resource: twiddles.as_entire_binding(),
                     },
                 ],

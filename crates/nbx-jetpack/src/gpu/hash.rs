@@ -26,6 +26,7 @@ impl FromBuffer for Vec<NounDigest> {
     }
 }
 
+#[derive(Debug)]
 struct FixedRunArgs {
     input: Buffer,
     output: Buffer,
@@ -292,11 +293,11 @@ impl Submittable for HashEngine {
                             entries: &[
                                 wgpu::BindGroupEntry {
                                     binding: 0,
-                                    resource: runargs.fixed.as_entire_binding(),
+                                    resource: runargs.uniform.as_entire_binding(),
                                 },
                                 wgpu::BindGroupEntry {
                                     binding: 1,
-                                    resource: runargs.uniform.as_entire_binding(),
+                                    resource: runargs.fixed.as_entire_binding(),
                                 },
                                 wgpu::BindGroupEntry {
                                     binding: 2,
@@ -325,11 +326,11 @@ impl Submittable for HashEngine {
                             entries: &[
                                 wgpu::BindGroupEntry {
                                     binding: 0,
-                                    resource: runargs.variable.as_entire_binding(),
+                                    resource: runargs.uniform.as_entire_binding(),
                                 },
                                 wgpu::BindGroupEntry {
                                     binding: 1,
-                                    resource: runargs.uniform.as_entire_binding(),
+                                    resource: runargs.variable.as_entire_binding(),
                                 },
                                 wgpu::BindGroupEntry {
                                     binding: 2,

@@ -102,10 +102,10 @@ pub fn get_shader_module(device: &Device, shader: &str) -> ShaderModule {
     let module = unsafe {
         device.create_shader_module_passthrough(wgpu::ShaderModuleDescriptorPassthrough::Msl(
             wgpu::ShaderModuleDescriptorMsl {
-                entry_point: "main".to_string(),
+                entry_point: "main_".to_string(),
                 label: Label::Some(shader),
                 source: source.into(),
-                num_workgroups: (256, 0, 0),
+                num_workgroups: (256, 1, 1),
             },
         ))
     };

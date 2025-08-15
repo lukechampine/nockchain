@@ -132,103 +132,103 @@ impl Gpu {
                 Some(size_of::<ReduceOp>()),
                 "hash_fixed",
                 Either::Left(1),
-                Some(size_of::<WgOffsets>()),
+                &[size_of::<WgOffsets>()] as &[_],
             ),
             (
                 Some(size_of::<VariableReduceOp>()),
                 "hash_variable",
                 Either::Left(1),
-                Some(size_of::<WgOffsets>()),
+                &[size_of::<WgOffsets>()],
             ),
             (
                 Some(size_of::<SubstituteIterOps>()),
                 "substitute_mul",
                 Either::Right(&[true, false][..]),
-                Some(size_of::<MulUniform>()),
+                &[size_of::<MulUniform>()],
             ),
             (
                 None,
                 "substitute_accum",
                 Either::Right(&[false]),
-                Some(size_of::<AccumUniform>()),
+                &[size_of::<AccumUniform>()],
             ),
             (
                 None,
                 "bp_shift",
                 Either::Right(&[false, false]),
-                Some(size_of::<BpShiftUniform>()),
+                &[size_of::<BpShiftUniform>()],
             ),
             (
                 None,
                 "p_ntt_swap",
                 Either::Right(&[false, false]),
-                Some(size_of::<PNttUniform>()),
+                &[size_of::<PNttUniform>()],
             ),
             (
                 None,
                 "bp_ntt",
                 Either::Right(&[false]),
-                Some(size_of::<PNttUniform>()),
+                &[size_of::<PNttUniform>(), size_of::<u32>()],
             ),
             (
                 None,
                 "fp_ntt",
                 Either::Right(&[false]),
-                Some(size_of::<PNttUniform>()),
+                &[size_of::<PNttUniform>(), size_of::<u32>()],
             ),
             (
                 None,
                 "mary_transpose",
                 Either::Right(&[false]),
-                Some(size_of::<MaryTransposeUniform>()),
+                &[size_of::<MaryTransposeUniform>()],
             ),
             (
                 None,
                 "montify",
                 Either::Right(&[false]),
-                Some(size_of::<MontUniform>()),
+                &[size_of::<MontUniform>()],
             ),
             (
                 None,
                 "montyred",
                 Either::Right(&[false]),
-                Some(size_of::<MontUniform>()),
+                &[size_of::<MontUniform>()],
             ),
             (
                 None,
                 "hash_varlen_multiple",
                 Either::Right(&[true]),
-                Some(size_of::<HashVarlenMultipleUniform>()),
+                &[size_of::<HashVarlenMultipleUniform>()],
             ),
             (
                 None,
                 "hash_fixed_multiple",
                 Either::Right(&[true]),
-                Some(size_of::<HashFixedMultipleUniform>()),
+                &[size_of::<HashFixedMultipleUniform>()],
             ),
             (
                 None,
                 "hash_10_fixedprepend",
                 Either::Right(&[true]),
-                Some(size_of::<Hash10FixedPrependUniform>()),
+                &[size_of::<Hash10FixedPrependUniform>()],
             ),
             (
                 None,
                 "weighted_combo_finish",
                 Either::Right(&[false, false, false]),
-                Some(size_of::<WeightedComboFinishUniform>()),
+                &[size_of::<WeightedComboFinishUniform>()],
             ),
             (
                 None,
                 "fp_hadamard_samepoly",
                 Either::Right(&[false]),
-                Some(size_of::<FpHadamardSamepolyUniform>()),
+                &[size_of::<FpHadamardSamepolyUniform>()],
             ),
             (
                 None,
                 "fp_accum",
                 Either::Right(&[false]),
-                Some(size_of::<FpAccumUniform>()),
+                &[size_of::<FpAccumUniform>()],
             ),
         ]
         .map(|(ops_sz, source_label, inputs, uniform_sz)| {
@@ -237,14 +237,14 @@ impl Gpu {
 
             let mut entries = vec![];
 
-            if let Some(sz) = ops_sz {
+            for sz in uniform_sz.iter().copied() {
                 entries.push(
-                    // Ops buffer
+                    // Offsets
                     wgpu::BindGroupLayoutEntry {
                         binding: entries.len() as _,
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            ty: wgpu::BufferBindingType::Uniform,
                             // This is the size of a single element in the buffer.
                             min_binding_size: Some(NonZeroU64::new(sz as _).unwrap()),
                             has_dynamic_offset: false,
@@ -254,14 +254,14 @@ impl Gpu {
                 );
             }
 
-            if let Some(sz) = uniform_sz {
+            if let Some(sz) = ops_sz {
                 entries.push(
-                    // Offsets
+                    // Ops buffer
                     wgpu::BindGroupLayoutEntry {
                         binding: entries.len() as _,
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
                             // This is the size of a single element in the buffer.
                             min_binding_size: Some(NonZeroU64::new(sz as _).unwrap()),
                             has_dynamic_offset: false,
@@ -373,7 +373,7 @@ fn get_gpu() -> Rc<Gpu> {
     GPU.with(|v| v.get().expect("GPU not initialized").clone())
 }
 
-#[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
+#[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod, Debug)]
 #[repr(C)]
 struct WgOffsets {
     ops: u32,
@@ -459,7 +459,7 @@ fn cpu_reduce(engine: HashEngine) -> Vec<NounDigest> {
     let c = cur.capacity() / DIGEST_LENGTH;
     core::mem::forget(cur);
     unsafe { Vec::from_raw_parts(p as *mut NounDigest, l, c) }*/
-    engine.reduce()
+    engine.reduce_cpu()
 }
 
 pub fn gpu_test() -> Result<(), Box<dyn std::error::Error>> {

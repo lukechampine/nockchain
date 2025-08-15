@@ -304,8 +304,10 @@ pub fn build_shaders(options: BuildOptions<impl AsRef<Path>>) {
         std::fs::write(&spv_path, artifact.as_binary_u8()).expect("Unable to write SPIR-V file");
 
         let spv = spirv_cross2::Module::from_words(words_from_bytes(artifact.as_binary_u8()));
-        let compiler = spirv_cross2::Compiler::<spirv_cross2::targets::Msl>::new(spv).unwrap();
+        let mut compiler = spirv_cross2::Compiler::<spirv_cross2::targets::Msl>::new(spv).unwrap();
+        compiler.rename_entry_point("main", "main_", spirv_cross2::spirv::ExecutionModel::GLCompute);
         let mut compiler_options = msl::CompilerOptions::default();
+        compiler_options.enable_decoration_binding = true;
         compiler_options.version = msl::MslVersion::new(2, 3, 0);
         let msl = compiler.compile(&compiler_options).unwrap();
         let msl_path = out_dir.as_ref().join(format!("{shader}.msl"));

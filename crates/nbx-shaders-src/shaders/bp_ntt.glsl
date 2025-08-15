@@ -6,5 +6,4 @@
 #define PSUB(a, b) bsub(a, b)
 #define PRINT_PELT(f, v) {}
 //debugPrintfEXT(f "%08x%08x %08x%08x %08x%08x", uint(v.x >> 32), uint(v.x), uint(v.y >> 32), uint(v.y), uint(v.z >> 32), uint(v.z))
-#define BUF_LEN(b) b.length()
 #include <p_ntt_base>

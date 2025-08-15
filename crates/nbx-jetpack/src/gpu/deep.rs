@@ -318,9 +318,9 @@ fn weighted_combo(
     weights_off: usize,
 ) -> Buffer {
     // NTT with twiddles
-    let out_len = (rf_polys.size() as usize) / size_of::<Felt>();
+    let rf_polys_len = (rf_polys.size() as usize) / size_of::<Felt>();
     p_ntt(
-        gpu, compute_pass, stride as u32, rf_polys, 0, out_len as u64, twiddles, 3, &gpu.fp_ntt,
+        gpu, compute_pass, stride as u32, rf_polys, 0, rf_polys_len as u64, twiddles, 3, &gpu.fp_ntt,
     );
 
     // hadamard
@@ -328,7 +328,7 @@ fn weighted_combo(
 
     // NTT with ifft_twiddles
     p_ntt(
-        gpu, compute_pass, stride as u32, rf_polys, 0, out_len as u64, ifft_twiddles, 3,
+        gpu, compute_pass, stride as u32, rf_polys, 0, rf_polys_len as u64, ifft_twiddles, 3,
         &gpu.fp_ntt,
     );
 
@@ -340,9 +340,11 @@ fn weighted_combo(
     let pipeline = &gpu.weighted_combo_finish;
     compute_pass.set_pipeline(&pipeline.pipeline);
 
+    let out_len = (rf_polys_len / stride) * (id_x.dq + 1);
+
     let out_poly = gpu.device.create_buffer(&BufferDescriptor {
         label: Some("weighted-combo-finish out"),
-        size: ((out_len / stride) * (id_x.dq + 1) * size_of::<Felt>()) as u64,
+        size: (out_len * size_of::<Felt>()) as u64,
         usage: BufferUsages::STORAGE,
         mapped_at_creation: false,
     });

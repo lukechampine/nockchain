@@ -442,15 +442,15 @@ fn build_merk_heap(
     );
 
     let codewords_hashed = hash_varlen_multiple(gpu, compute_pass, &codeword_melts, codeword_step);
-    let len_reduced = hash_10_fixedprepend(gpu, compute_pass, len_hash, &codewords_hashed);
-    let step_reduced = hash_10_fixedprepend(gpu, compute_pass, step_hash, &len_reduced);
+    let len_reduced = hash_10_fixedprepend(gpu, compute_pass, len_hash, &codewords_hashed, "len");
+    let step_reduced = hash_10_fixedprepend(gpu, compute_pass, step_hash, &len_reduced, "step");
 
     let mut out = vec![step_reduced.clone()];
 
     // Then, reduce until one digest
     let mut cbuf = step_reduced;
     while cbuf.size() > (size_of::<NounDigest<Melt>>() as u64) {
-        cbuf = hash_fixed_multiple(gpu, compute_pass, &cbuf);
+        cbuf = hash_fixed_multiple(gpu, compute_pass, &cbuf, out.len());
         out.push(cbuf.clone());
     }
 
@@ -614,12 +614,12 @@ pub struct HashFixedMultipleUniform {
     num_elems: u32,
 }
 
-fn hash_fixed_multiple(gpu: &Gpu, compute_pass: &mut ComputePass, input: &Buffer) -> Buffer {
+fn hash_fixed_multiple(gpu: &Gpu, compute_pass: &mut ComputePass, input: &Buffer, cnt: usize) -> Buffer {
     // We are reducing to 5 * (len / 8 / step) melts
-    let num_hashes = (input.size() as usize) / size_of::<NounDigest<Melt>>();
+    let num_hashes = (input.size() as usize) / size_of::<NounDigest<Melt>>() / 2;
 
     let output = gpu.device.create_buffer(&BufferDescriptor {
-        label: Some("hash-fixed-multiple"),
+        label: Some(&format!("hash-fixed-multiple-{cnt}")),
         size: input.size() / 2,
         usage: BufferUsages::STORAGE,
         mapped_at_creation: false,
@@ -687,12 +687,13 @@ fn hash_10_fixedprepend(
     compute_pass: &mut ComputePass,
     prepend: NounDigest<Melt>,
     input: &Buffer,
+    extra_label: &str,
 ) -> Buffer {
     // We are reducing to 5 * (len / 8 / step) melts
     let num_hashes = (input.size() as usize) / size_of::<NounDigest<Melt>>();
 
     let output = gpu.device.create_buffer(&BufferDescriptor {
-        label: Some("hash-10-fixedprepend"),
+        label: Some(&format!("hash-10-fixedprepend-{extra_label}")),
         size: input.size(),
         usage: BufferUsages::STORAGE,
         mapped_at_creation: false,

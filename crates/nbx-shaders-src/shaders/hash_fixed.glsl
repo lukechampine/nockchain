@@ -1,12 +1,12 @@
 layout(local_size_x = 256) in;
-layout(std430, binding = 0) readonly buffer OpsBuf {
-    ReduceOp ops[];
-};
-layout(std140, binding = 1) uniform Globals {
+layout(std140, binding = 0) uniform Globals {
     uint opsOffset;
     uint numOps;
     uint inpOffset;
     uint outOffset;
+};
+layout(std430, binding = 1) readonly buffer OpsBuf {
+    ReduceOp ops[];
 };
 // Output of the shader.
 layout(std430, binding = 2) buffer OutputBuf {
