@@ -11,4 +11,4 @@ nbx-shaders-src = { workspace = true, optional = true }
 
 [features]
 comptime = ["nbx-shaders-src"]
-spirv_passthrough = []
+shader_passthrough = []

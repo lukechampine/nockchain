@@ -6,7 +6,7 @@ fn main() {
         nbx_shaders_src::build_shaders(
             nbx_shaders_src::BuildOptions::new(out_dir)
                 .emit_cargo_rerun(true)
-                .emulate_extended_math(!cfg!(feature = "spirv_passthrough")),
+                .emulate_extended_math(!cfg!(feature = "shader_passthrough")),
         );
     }
 }

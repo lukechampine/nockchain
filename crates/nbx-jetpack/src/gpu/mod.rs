@@ -103,8 +103,11 @@ impl Gpu {
 
                 let required_features = wgpu::Features::SHADER_INT64;
 
-                #[cfg(feature = "spirv_passthrough")]
+                #[cfg(all(feature = "shader_passthrough", target_os = "linux"))]
                 let required_features = required_features | wgpu::Features::SPIRV_SHADER_PASSTHROUGH;
+
+                #[cfg(all(feature = "shader_passthrough", target_os = "macos"))]
+                let required_features = required_features | wgpu::Features::MSL_SHADER_PASSTHROUGH;
 
                 let (device, queue) =
                     pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {

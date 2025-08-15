@@ -208,6 +208,7 @@ naga = "25"
 bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.4"
 shaderc = { version = "0.9", features = ["prefer-static-linking"] }
+spirv-cross2 = { version = "0.4.6", features = ["msl"] }
 
 thiserror = "2.0.11"
 tikv-jemallocator = { version = "0.6" }

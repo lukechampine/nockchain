@@ -5,4 +5,5 @@ edition.workspace = true
 
 [dependencies]
 shaderc.workspace = true
+spirv-cross2.workspace = true
 nbx-tip5.workspace = true

@@ -3,6 +3,7 @@ use std::path::Path;
 use shaderc::{
     CompileOptions, Compiler, IncludeCallbackResult, IncludeType, ResolvedInclude, ShaderKind,
 };
+use spirv_cross2::{compile::msl, self};
 
 pub struct BuildOptions<T> {
     out_dir: T,
@@ -301,5 +302,22 @@ pub fn build_shaders(options: BuildOptions<impl AsRef<Path>>) {
 
         let spv_path = out_dir.as_ref().join(format!("{shader}.spv"));
         std::fs::write(&spv_path, artifact.as_binary_u8()).expect("Unable to write SPIR-V file");
+
+        let spv = spirv_cross2::Module::from_words(words_from_bytes(artifact.as_binary_u8()));
+        let compiler = spirv_cross2::Compiler::<spirv_cross2::targets::Msl>::new(spv).unwrap();
+        let mut compiler_options = msl::CompilerOptions::default();
+        compiler_options.version = msl::MslVersion::new(2, 3, 0);
+        let msl = compiler.compile(&compiler_options).unwrap();
+        let msl_path = out_dir.as_ref().join(format!("{shader}.msl"));
+        std::fs::write(&msl_path, msl.to_string().as_bytes()).expect("Unable to write MSL file");
+    }
+}
+
+fn words_from_bytes(buf: &[u8]) -> &[u32] {
+    unsafe {
+        std::slice::from_raw_parts(
+            buf.as_ptr() as *const u32,
+            buf.len() / std::mem::size_of::<u32>(),
+        )
     }
 }
