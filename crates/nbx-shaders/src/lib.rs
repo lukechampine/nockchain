@@ -42,7 +42,7 @@ macro_rules! include_shader {
 
         let shader: LazyLock<Cow<'static, ShaderElem>> = LazyLock::new(|| {
             #[cfg(target_os = "macos")]
-            let make_shader = |b: &'static [u8]| Cow::Borrowed(str::from_utf8(b).unwrap());
+            let make_shader = |b: &'static [u8]| Cow::Borrowed(std::str::from_utf8(b).unwrap());
 
             #[cfg(any(not(feature = "shader_passthrough"), target_os = "linux"))]
             let make_shader = wgpu::util::make_spirv_raw;
