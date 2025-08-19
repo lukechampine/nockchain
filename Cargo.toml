@@ -28,6 +28,8 @@ members = [
   "crates/jojo",
 ]
 
+exclude = ["excluded_crates/mds-codegen"]
+
 resolver = "2"
 
 [workspace.package]

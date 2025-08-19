@@ -1,0 +1,10 @@
+# NOTE: Not linked with the rest of the codebase, to isolate GPLv2 contam.
+
+[package]
+name = "mds-codegen"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+twenty-first = "0.38"
+itertools = "0.14"
