@@ -1,12 +1,13 @@
 use std::cell::RefCell;
+use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::rc::Rc;
 
 use itertools::Itertools;
 use twenty_first::shared_math::circuit::{
-    self, Circuit, CircuitBuilder, CircuitExpression, CircuitMonad,
+    BinOp, Circuit, CircuitBuilder, CircuitExpression, CircuitMonad,
 };
 use twenty_first::shared_math::mds::recursive_cyclic_mul;
-use twenty_first::shared_math::tip5::STATE_SIZE;
 
 #[allow(dead_code)]
 fn build_recursive_cyclic_mul_circuit() -> [Circuit<u64>; 16] {
@@ -45,71 +46,221 @@ fn build_recursive_cyclic_mul_circuit() -> [Circuit<u64>; 16] {
         .unwrap()
 }
 
-fn spit_code(c: &[Circuit<u64>]) {
-    fn fmt_node(id: usize) -> String {
-        format!("n_{id}")
+fn fmt_node_id(id: usize) -> String {
+    format!("n_{id}")
+}
+fn fmt_input(i: usize) -> String {
+    format!("(input[{i}] as u64)")
+}
+
+/// Count *uses by parents* for each node across all requested outputs.
+/// This is *edge multiplicity*: if a node feeds 3 parents (possibly via two different outputs), count = 3.
+fn compute_use_counts(outputs: &[Rc<RefCell<Circuit<u64>>>]) -> BTreeMap<usize, usize> {
+    let mut uses: BTreeMap<usize, usize> = BTreeMap::new();
+    // Worklist with multiplicity of demand (here 1 per appearance is fine).
+    let mut stack: Vec<Rc<RefCell<Circuit<u64>>>> = outputs.to_vec();
+
+    while let Some(nrc) = stack.pop() {
+        let n = nrc.borrow();
+        match &n.expression {
+            CircuitExpression::BinaryOperation(_, a, b) => {
+                *uses.entry(a.borrow().id).or_insert_with(|| {
+                    stack.push(a.clone());
+                    0
+                }) += 1;
+                *uses.entry(b.borrow().id).or_insert_with(|| {
+                    stack.push(b.clone());
+                    0
+                }) += 1;
+            }
+            CircuitExpression::Input(_) | CircuitExpression::Constant(_) => {
+                uses.remove(&n.id);
+            }
+        }
+    }
+    uses
+}
+
+fn expand_expr(e: &Circuit<u64>, uses: &BTreeMap<usize, usize>) -> String {
+    match &e.expression {
+        CircuitExpression::BinaryOperation(o, a, b) => {
+            let a = a.borrow();
+            let b = b.borrow();
+            let a = if uses.contains_key(&a.id) {
+                fmt_node_id(a.id)
+            } else {
+                expand_expr(&a, uses)
+            };
+            let b = if uses.contains_key(&b.id) {
+                fmt_node_id(b.id)
+            } else {
+                expand_expr(&b, uses)
+            };
+            let o = match o {
+                BinOp::Add => "wrapping_add",
+                BinOp::Sub => "wrapping_sub",
+                BinOp::Mul => "wrapping_mul",
+            };
+            format!("{a}.{o}({b})")
+        }
+        CircuitExpression::Input(i) => fmt_input(*i),
+        CircuitExpression::Constant(c) => {
+            format!("0x{c:x}u64")
+        }
+    }
+}
+
+struct DeclLayer {
+    exprs: Vec<Rc<RefCell<Circuit<u64>>>>,
+}
+
+impl DeclLayer {
+    pub fn spit_code(&self, uses: &BTreeMap<usize, usize>, indent: &str) -> Vec<String> {
+        let mut out = vec![];
+        for e in &self.exprs {
+            let e = e.borrow();
+            out.push(format!(
+                "{indent}let {} = {};",
+                fmt_node_id(e.id),
+                expand_expr(&e, uses)
+            ));
+        }
+        out
+    }
+}
+
+struct Compiler {
+    uses: BTreeMap<usize, usize>,
+    out: Vec<Rc<RefCell<Circuit<u64>>>>,
+    layers: Vec<DeclLayer>,
+}
+
+impl Compiler {
+    pub fn new(out: Vec<Rc<RefCell<Circuit<u64>>>>) -> Self {
+        Self {
+            uses: compute_use_counts(&out),
+            out,
+            layers: vec![],
+        }
     }
 
-    // start stack with all outputs
-    let mut stack: Vec<(Rc<RefCell<Circuit<u64>>>, bool)> = c
+    pub fn build_layers(&mut self) {
+        let mut stack = self.out.clone();
+        let mut consumed = BTreeSet::new();
+        loop {
+            let mut next_stack = vec![];
+            while let Some(erc) = stack.pop() {
+                let e = erc.borrow();
+                match self.uses.entry(e.id) {
+                    Entry::Occupied(mut entry) => {
+                        let entry = entry.get_mut();
+                        if *entry == 0 {
+                            assert!(consumed.insert(e.id), "{}", e.id);
+                            if let CircuitExpression::BinaryOperation(_, a, b) = &e.expression {
+                                stack.push(a.clone());
+                                stack.push(b.clone());
+                            }
+                        } else {
+                            if *entry == 1 {
+                                next_stack.push(erc.clone());
+                            }
+                            *entry -= 1;
+                        }
+                    }
+                    Entry::Vacant(_) => {
+                        if let CircuitExpression::BinaryOperation(_, a, b) = &e.expression {
+                            stack.push(a.clone());
+                            stack.push(b.clone());
+                        }
+                    }
+                }
+            }
+            if !next_stack.is_empty() {
+                // Sort layer by ID, because that seems to give nice memory layout
+                next_stack.sort_by_key(|v| v.borrow().id);
+                self.layers.push(DeclLayer {
+                    exprs: next_stack.clone(),
+                });
+                core::mem::swap(&mut stack, &mut next_stack);
+            } else {
+                break;
+            }
+        }
+        for (k, v) in self.uses.iter() {
+            assert_eq!(*v, 0, "{k} uses not 0");
+        }
+    }
+
+    pub fn spit_code(&mut self) -> String {
+        let mut lines = vec![
+            "// generated with mds-codegen".to_string(),
+            "pub const fn generated(input: &[u32; 16]) -> [u64; 16] {".to_string(),
+        ];
+
+        for (i, layer) in self.layers.iter().rev().enumerate() {
+            lines.push(format!("    // layer {i}"));
+            lines.extend(layer.spit_code(&self.uses, "    "));
+        }
+
+        lines.push("    // output".to_string());
+        lines.push("    [".to_string());
+        for e in &self.out {
+            lines.push(format!("        {},", expand_expr(&e.borrow(), &self.uses)));
+        }
+        lines.push("    ]".to_string());
+
+        lines.push("}".to_string());
+        lines.join("\n")
+    }
+}
+
+fn fold_identical_exprs(outputs: &[Rc<RefCell<Circuit<u64>>>]) {
+    loop {
+        let mut visited = BTreeSet::new();
+        let mut expr_map = HashMap::new();
+        let mut stack = outputs.to_vec();
+        let mut exprs_hit = 0;
+        while let Some(erc) = stack.pop() {
+            let e = erc.borrow();
+            if !visited.insert(e.id) {
+                continue;
+            }
+            exprs_hit += 1;
+            if let CircuitExpression::BinaryOperation(o, a, b) = &e.expression {
+                expr_map
+                    .entry((*o, a.borrow().id, b.borrow().id))
+                    .or_insert(vec![])
+                    .push(erc.clone());
+                stack.push(a.clone());
+                stack.push(b.clone());
+            }
+        }
+        let mut folded_count = 0;
+        for (_, v) in expr_map {
+            if v.len() > 1 {
+                let first = v[0].borrow().id;
+                v.iter().for_each(|v| v.borrow_mut().id = first);
+                folded_count += 1;
+            }
+        }
+        eprintln!("Folded from {exprs_hit} - {folded_count} exprs");
+        if folded_count == 0 {
+            break;
+        }
+    }
+}
+
+pub fn spit_code(outputs: &[Circuit<u64>]) {
+    let outputs: Vec<Rc<RefCell<Circuit<u64>>>> = outputs
         .iter()
         .map(|v| Rc::new(RefCell::new(v.clone())))
-        .map(|n| (n, false)) // false = not yet expanded
         .collect();
 
-    let mut emitted = std::collections::BTreeSet::new();
-    let mut out: Vec<String> = Vec::new();
+    fold_identical_exprs(&outputs);
 
-    while let Some((node, expanded)) = stack.pop() {
-        let id = node.borrow().id;
-
-        // if we're seeing it before expansion, push a finish marker then its deps
-        if !expanded {
-            if emitted.contains(&id) {
-                continue;
-            } // already fully handled
-            stack.push((node.clone(), true)); // finish marker
-            match &node.borrow().expression {
-                CircuitExpression::BinaryOperation(_, a, b) => {
-                    stack.push((a.clone(), false));
-                    stack.push((b.clone(), false));
-                }
-                CircuitExpression::Input(_) | CircuitExpression::Constant(_) => {}
-            }
-            continue;
-        }
-
-        // finish time: children have been handled; emit now (once)
-        if !emitted.insert(id) {
-            continue;
-        }
-
-        let rhs = match &node.borrow().expression {
-            CircuitExpression::Input(i) => format!("input[{i}] as u64"),
-            CircuitExpression::Constant(c) => format!("0x{c:x}u64"),
-            CircuitExpression::BinaryOperation(op, a, b) => {
-                let a = fmt_node(a.borrow().id);
-                let b = fmt_node(b.borrow().id);
-                match op {
-                    circuit::BinOp::Add => format!("{a}.wrapping_add({b})"),
-                    circuit::BinOp::Sub => format!("{a}.wrapping_sub({b})"),
-                    circuit::BinOp::Mul => format!("{a}.wrapping_mul({b})"),
-                }
-            }
-        };
-        out.push(format!("    let {} = {rhs};", fmt_node(id)));
-    }
-
-    // final value vector (in the order of c)
-    out.push(format!(
-        "    [{}]",
-        c.iter()
-            .map(|v| fmt_node(v.id))
-            .collect::<Vec<_>>()
-            .join(", ")
-    ));
-
-    println!("// generated with mds-codegen\npub const fn generated(input: &[u32; 16]) -> [u64; 16] {{\n{}\n}}", out.join("\n"));
+    let mut compiler = Compiler::new(outputs);
+    compiler.build_layers();
+    println!("{}", compiler.spit_code());
 }
 
 fn main() {

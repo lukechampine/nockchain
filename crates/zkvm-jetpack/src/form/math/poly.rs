@@ -305,7 +305,7 @@ pub fn pscal_<T: ElementEx>(scalar: T, b: &[T]) -> Vec<T> {
     res
 }
 
-#[inline(never)]
+#[inline]
 pub fn p_hadamard_inplace<T: ElementEx, O: Copy + Into<T>>(a: &mut [T], b: &[O]) {
     assert_eq!(
         a.len(),

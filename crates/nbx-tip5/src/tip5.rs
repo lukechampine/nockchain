@@ -162,13 +162,19 @@ pub const ROUND_CONSTANTS2: [Melt; NUM_ROUNDS * STATE_SIZE] = const {
 
 pub fn permute(sponge: &mut [Melt; 16]) {
     const_for!(i in 0..NUM_ROUNDS => {
-        let a = sbox_layer(sponge);
-        let b = linear_layer(&a);
+        let mut a = sbox_layer(sponge);
+        rcs_layer(&mut a, i);
+        *sponge = a;
+    });
+}
 
-        const_for!(j in 0..STATE_SIZE => {
-            let r_cons = ROUND_CONSTANTS2[i * STATE_SIZE + j];
-            sponge[j] = Melt(badd(r_cons.0, b[j].0));
-        });
+#[inline(always)]
+const fn rcs_layer(sponge: &mut [Melt; 16], round_num: usize) {
+    let b = linear_layer(sponge);
+
+    const_for!(j in 0..STATE_SIZE => {
+        let r_cons = ROUND_CONSTANTS2[round_num * STATE_SIZE + j];
+        sponge[j] = Melt(badd(r_cons.0, b[j].0));
     });
 }
 
@@ -184,7 +190,10 @@ const fn sbox_layer(state: &[Melt; STATE_SIZE]) -> [Melt; STATE_SIZE] {
     });
 
     const_for!(j in NUM_SPLIT_AND_LOOKUP..STATE_SIZE => {
-        res[j] = state[j].pow(7);
+        let s1 = state[j].0;
+        let s2 = montiply_ser(s1, s1);
+        let s4 = montiply_ser(s2, s2);
+        res[j].0 = montiply_ser(montiply_ser(s1, s2), s4);
     });
 
     res
