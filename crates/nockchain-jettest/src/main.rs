@@ -464,6 +464,7 @@ async fn run_kernel(
         NOCK_STACK_SIZE_TINY,
         vec![],
         cli.trace_opts.into(),
+        false,
     )
     .await
     .expect("Could not load mining kernel");

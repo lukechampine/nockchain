@@ -71,6 +71,20 @@ pub fn bp_intercosate(offset: Belt, order: u32, values: BPolyVec) -> BPolyVec {
     PolyVec(ifft)
 }
 
+pub fn bp_shift_by_unity_sam(stack: &mut NockStack, sam: Noun) -> Result {
+    let [bp, n] = sam.uncell()?;
+    let Ok(bp) = BPolySlice::try_from(bp) else {
+        return jet_err();
+    };
+    let n = n.as_atom()?.as_u64()?;
+    let (h, slc) = new_handle_mut_slice::<Belt>(stack, Some(bp.len()));
+    let n = core::cmp::min(n, bp.len() as u64) as usize;
+    let sp = bp.len() - n;
+    slc[..sp].copy_from_slice(&bp.0[n..]);
+    slc[sp..].copy_from_slice(&bp.0[..n]);
+    Ok(finalize_poly(stack, Some(bp.len()), h))
+}
+
 pub fn interpolate_table_sam(stack: &mut NockStack, sam: Noun) -> Result {
     let [table, domain_len] = sam.uncell()?;
     let Ok(table) = MarySlice::try_from(table) else { return jet_err() };

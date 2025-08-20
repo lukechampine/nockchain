@@ -669,6 +669,7 @@ impl MinerHandle {
             NOCK_STACK_SIZE_TINY,
             test_jets,
             Default::default(),
+            false,
         )
         .await
         .expect("Could not load mining kernel");

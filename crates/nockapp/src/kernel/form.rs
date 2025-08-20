@@ -111,6 +111,7 @@ impl<C: SerfCheckpoint + Send + 'static> SerfThread<C> {
         nock_stack_size: usize,
         test_jets: Vec<NounSlab>,
         trace: TraceOpts,
+        always_preserve_updates: bool,
     ) -> Result<Self> {
         let (action_sender, action_receiver) = mpsc::channel(1);
         let (event_number_sender, event_number_receiver) = oneshot::channel();
@@ -123,7 +124,7 @@ impl<C: SerfCheckpoint + Send + 'static> SerfThread<C> {
             .spawn(move || {
                 let stack = NockStack::new(nock_stack_size, 0);
                 let serf = Serf::new(
-                    stack, checkpoint, &kernel_bytes, &constant_hot_state, test_jets, trace,
+                    stack, checkpoint, &kernel_bytes, &constant_hot_state, test_jets, trace, always_preserve_updates,
                 );
                 event_number_sender
                     .send(serf.event_num.clone())
@@ -587,7 +588,7 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
         let serf = SerfThread::new(
-            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE, test_jets, trace,
+            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE, test_jets, trace, true,
         )
         .await?;
         Ok(Self { serf })
@@ -603,7 +604,7 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
         let serf = SerfThread::new(
-            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_TINY, test_jets, trace,
+            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_TINY, test_jets, trace, true,
         )
         .await?;
         Ok(Self { serf })
@@ -619,7 +620,7 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
         let serf = SerfThread::new(
-            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_SMALL, test_jets, trace,
+            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_SMALL, test_jets, trace, true,
         )
         .await?;
         Ok(Self { serf })
@@ -635,7 +636,7 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
         let serf = SerfThread::new(
-            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_MEDIUM, test_jets, trace,
+            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_MEDIUM, test_jets, trace, true,
         )
         .await?;
         Ok(Self { serf })
@@ -651,7 +652,7 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
         let serf = SerfThread::new(
-            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_LARGE, test_jets, trace,
+            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_LARGE, test_jets, trace, true,
         )
         .await?;
         Ok(Self { serf })
@@ -667,7 +668,7 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
         let serf = SerfThread::new(
-            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_HUGE, test_jets, trace,
+            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_HUGE, test_jets, trace, true,
         )
         .await?;
         Ok(Self { serf })
@@ -759,6 +760,7 @@ pub struct Serf {
     pub event_num: Arc<AtomicU64>,
     /// A metrics
     pub metrics: Option<Arc<NockAppMetrics>>,
+    pub always_preserve_updates: bool,
 }
 
 impl Serf {
@@ -782,6 +784,7 @@ impl Serf {
         constant_hot_state: &[HotEntry],
         test_jets: Vec<NounSlab>,
         trace: TraceOpts,
+        always_preserve_updates: bool,
     ) -> Self {
         let hot_state = [URBIT_HOT_STATE, constant_hot_state].concat();
 
@@ -853,6 +856,7 @@ impl Serf {
             event_num,
             cancel_token,
             metrics: None,
+            always_preserve_updates,
         };
 
         if let Some(kernel_state) = maybe_state {
@@ -956,8 +960,12 @@ impl Serf {
 
                 unsafe {
                     self.event_update(eve + 1, cell.tail());
-                    self.stack().preserve(&mut fec);
-                    self.preserve_event_update_leftovers();
+                    // If always_preserve_updates is not set, do it every 64 events, because
+                    // otherwise we'll end up leaking too much memory.
+                    if self.always_preserve_updates || (eve + 1) % 64 == 0 {
+                        self.stack().preserve(&mut fec);
+                        self.preserve_event_update_leftovers();
+                    }
                 }
                 Ok(fec)
             }

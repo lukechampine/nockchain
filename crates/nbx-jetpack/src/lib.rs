@@ -19,6 +19,7 @@ mod two;
 mod seven;
 mod utils;
 mod zoon;
+mod hoon;
 
 #[cfg(feature = "gpu")]
 pub mod gpu;
@@ -40,6 +41,7 @@ use three::*;
 use two::*;
 use zoon::*;
 use seven::*;
+use hoon::*;
 
 pub use one::snag_as_poly_mary;
 pub use two::{mp_substitute_ultra_impl, new_fpoly, bpoly_to_fpoly};
@@ -251,6 +253,8 @@ sam_jet! {
     compute_codeword_commitments_jet => compute_codeword_commitments_sam,
     interpolate_table_jet => interpolate_table_sam,
     bp_intercosate_jet => bp_intercosate_sam,
+    bp_shift_by_unity_jet => bp_shift_by_unity_sam,
+    sort_jet => list_sort 'raw,
 }
 
 pub const NBX_ONE_JETS: &[HotEntry] = &[
@@ -521,6 +525,21 @@ pub const NBX_TWO_JETS: &[HotEntry] = &[
         ],
         1,
         bp_intercosate_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"bp-shift-by-unity"),
+        ],
+        1,
+        bp_shift_by_unity_jet,
     ),
 ];
 
@@ -1036,6 +1055,17 @@ pub const NBX_ZOON_JETS: &[HotEntry] = &[(
     zby_key_jet,
 )];
 
+pub const NBX_HOON_JETS: &[HotEntry] = &[(
+    &[
+        K_138,
+        Left(b"one"),
+        Left(b"two"),
+        Left(b"sort"),
+    ],
+    1,
+    sort_jet,
+)];
+
 pub fn nbx_jets() -> impl Iterator<Item = HotEntry> {
     [
         NBX_ONE_JETS,
@@ -1049,6 +1079,7 @@ pub fn nbx_jets() -> impl Iterator<Item = HotEntry> {
         NBX_COMPUTE_V0_V1_JETS,
         NBX_MEMORY_V2_JETS,
         NBX_COMPUTE_V2_JETS,
+        NBX_HOON_JETS,
         //NBX_ZOON_JETS,
     ]
     .map(|v| v.iter().copied())
