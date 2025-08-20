@@ -78,7 +78,7 @@ pub const fn mont_reduction(x: u128) -> u64 {
     let x2 = (x >> 64) as u64;
 
     let a = x1.wrapping_add(x1 << 32);
-    let e = (x1 << 32) > a;
+    let e = (x1 << 32) > a || x1 > a;
     let b = a.wrapping_sub(a >> 32).wrapping_sub(e as u64);
 
     let r = x2.wrapping_sub(b);
