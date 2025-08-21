@@ -960,9 +960,9 @@ impl Serf {
 
                 unsafe {
                     self.event_update(eve + 1, cell.tail());
-                    // If always_preserve_updates is not set, do it every 64 events, because
+                    // If always_preserve_updates is not set, do it every 16 events, because
                     // otherwise we'll end up leaking too much memory.
-                    if self.always_preserve_updates || (eve + 1) % 64 == 0 {
+                    if self.always_preserve_updates || (eve + 1) % 16 == 0 {
                         self.stack().preserve(&mut fec);
                         self.preserve_event_update_leftovers();
                     }
