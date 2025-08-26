@@ -13,7 +13,6 @@ use zkvm_jetpack::form::Melt;
 use crate::engine::Engine;
 use crate::gpu::queue::GpuQueue;
 use self::codewords::{BpShiftUniform, Hash10FixedPrependUniform, HashFixedMultipleUniform, HashVarlenMultipleUniform, MaryTransposeUniform, MontUniform};
-use self::deep::{FpAccumUniform, FpHadamardSamepolyUniform, WeightedComboFinishUniform};
 use self::substitute::{AccumUniform, MulUniform, SubstituteIterOps};
 use self::util::PNttUniform;
 use super::substitute::SubstituteEngine;
@@ -26,7 +25,6 @@ pub use registry::GpuRegistry;
 mod hash;
 mod substitute;
 mod codewords;
-mod deep;
 
 pub(crate) mod util;
 mod queue;
@@ -60,9 +58,6 @@ pub struct Gpu {
     hash_varlen_multiple: Pipeline,
     hash_fixed_multiple: Pipeline,
     hash_10_fixedprepend: Pipeline,
-    weighted_combo_finish: Pipeline,
-    fp_hadamard_samepoly: Pipeline,
-    fp_accum: Pipeline,
     debug_capture: Arc<Mutex<Option<bool>>>,
 }
 
@@ -136,7 +131,7 @@ impl Gpu {
 
         // Shader related
 
-        let [hash_fixed, hash_variable, substitute_mul, substitute_accum, bp_shift, p_ntt_swap, bp_ntt, fp_ntt, mary_transpose, montify, montyred, hash_varlen_multiple, hash_fixed_multiple, hash_10_fixedprepend, weighted_combo_finish, fp_hadamard_samepoly, fp_accum] = [
+        let [hash_fixed, hash_variable, substitute_mul, substitute_accum, bp_shift, p_ntt_swap, bp_ntt, fp_ntt, mary_transpose, montify, montyred, hash_varlen_multiple, hash_fixed_multiple, hash_10_fixedprepend] = [
             (
                 Some(size_of::<ReduceOp>()),
                 "hash_fixed",
@@ -220,24 +215,6 @@ impl Gpu {
                 "hash_10_fixedprepend",
                 Either::Right(&[true]),
                 &[size_of::<Hash10FixedPrependUniform>()],
-            ),
-            (
-                None,
-                "weighted_combo_finish",
-                Either::Right(&[false, false, false]),
-                &[size_of::<WeightedComboFinishUniform>()],
-            ),
-            (
-                None,
-                "fp_hadamard_samepoly",
-                Either::Right(&[false]),
-                &[size_of::<FpHadamardSamepolyUniform>()],
-            ),
-            (
-                None,
-                "fp_accum",
-                Either::Right(&[false]),
-                &[size_of::<FpAccumUniform>()],
             ),
         ]
         .map(|(ops_sz, source_label, inputs, uniform_sz)| {
@@ -364,9 +341,6 @@ impl Gpu {
             hash_varlen_multiple,
             hash_fixed_multiple,
             hash_10_fixedprepend,
-            weighted_combo_finish,
-            fp_hadamard_samepoly,
-            fp_accum,
             debug_capture: Mutex::new(Some(
                 std::env::var("GPU_DEBUGGER").as_deref().unwrap_or("0") != "0",
             ))

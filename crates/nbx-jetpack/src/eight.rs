@@ -1,13 +1,11 @@
 use crate::engine::Engine;
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::noun::{Atom, IndirectAtom, Noun, D, T};
-use crate::deep::DeepEngine;
+use crate::deep::{DeepEngine, DivisorBatch};
 use crate::log::*;
-use zkvm_jetpack::form::math::mary::mary_transpose;
 
 use crate::codewords::CodewordEngine;
 use crate::seven::height_mary;
@@ -86,92 +84,66 @@ pub fn compute_deep(stack: &mut NockStack, inp: Noun) -> Result {
     let deep_challenge = deep_challenge.as_felt()?;
     let comp_eval_point = comp_eval_point.as_felt()?;
 
-    /*println!(
-        "COMPUTE DEEP: tp={} to={} cp={} cpo={} w={} o={} dc={deep_challenge:?} cep={comp_eval_point:?}",
-        trace_polys.len(),
-        trace_openings.0.len(),
-        composition_pieces.len(),
-        composition_piece_openings.0.len(),
-        weights.0.len(),
-        omicrons.0.len()
-    );*/
-
     let mut engine = DeepEngine::new(weights);
 
-    //let mut acc = zero_fpoly();
     let mut num = 0usize;
 
-    //let mut cache = Default::default();
+    // The reference implementation computes the following for every polynomial;
+    //  result = Σ (weight_i * (poly_i - eval_i) / (X - point))
+    //
+    // It's worth noting that a lot of the polynomials share the same divisor. Hence, to reduce the
+    //  number of expensive divisions, the polynomials can be batched by their divisor. Per batch,
+    //  the work becomes the following;
+    // result = (Σ (weight_i * (poly_i - eval_i)) / (X - point)
 
-    for (o, point) in [deep_challenge, comp_eval_point]
-        .iter()
-        .copied()
-        .enumerate()
-    {
-        let fpc_point = new_fpoly(&[*point]);
-        //println!("POINT {o} @ acc={}", vmug(stack, &acc.0));
+    for point in [deep_challenge, comp_eval_point] {
+        let mut point_batch = DivisorBatch {
+            polys: Vec::new(),
+            openings: Vec::new(),
+            weights: Vec::new(),
+            evaluation_point: *point,
+        };
+
         // |^  ^-  fpoly
         // =/  [acc=fpoly num=@]
         //   %^  zip-roll  (range (lent trace-polys))  trace-polys
         //   |=  [[i=@ p=mary] acc=_zero-fpoly num=@]
         for (i, &p) in trace_polys.iter().enumerate() {
-            //println!("POLY {o}.{i} {} {}", vmug(stack, &acc.0), mmug(stack, &p));
+            // =/  omicron  (~(snag fop omicrons) i)
+            let omicron = omicrons.0[i];
+
+            // Omicron batch: divisor = (id - omicron*point)
+            let omicron_point = fmul_(&omicron, &point);
+            let mut omicron_batch = DivisorBatch {
+                polys: Vec::with_capacity(p.len as usize),
+                openings: Vec::with_capacity(p.len as usize),
+                weights: Vec::with_capacity(p.len as usize),
+                evaluation_point: omicron_point,
+            };
+
             // =/  lis=(list fpoly)
             //   %+  turn  (range len.array.p)
             //   |=  i=@
             //   (bpoly-to-fpoly (~(snag-as-bpoly ave p) i))
-            let mut lis = Vec::with_capacity(p.len as usize);
-            for i in 0..p.len {
-                let bp = snag_as_poly_mary(p, i as usize);
+            for j in 0..p.len {
+                let bp = snag_as_poly_mary(p, j as usize);
                 let fp = bpoly_to_fpoly(bp);
-                lis.push(fp);
+
+                point_batch.polys.push(fp.clone());
+                point_batch.openings.push(trace_openings.0[num + j as usize]);
+                point_batch.weights.push(weights.0[num + j as usize]);
+
+                omicron_batch.polys.push(fp);
+                omicron_batch.openings.push(trace_openings.0[num + p.len as usize + j as usize]);
+                omicron_batch.weights.push(weights.0[num + p.len as usize + j as usize]);
             }
 
-            // =/  omicron  (~(snag fop omicrons) i)
-            let omicron = omicrons.0[i];
-            //println!("OMICRON {:?}", fat(stack, omicron));
+            engine.add_batch(omicron_batch);
 
-            // =/  [first-row=fpoly num=@]    :: first row:  f(x)-f(Z)/x-Z
-            //   %-  weighted-linear-combo
-            //   :*  lis
-            //       trace-openings
-            //       num
-            //       (fp-c deep-challenge)
-            //       weights
-            //   ==
-            let new_num = engine.weighted_linear_combo(
-                &lis,
-                trace_openings,
-                num,
-                (&fpc_point).into(),
-                num,
-            )?;
-            //println!("FIRST-ROW {}", vmug(stack, &first_row.0));
-
-            // =/  [second-row=fpoly num=@]   :: second row:  f(x)-f(gZ)/x-gZ
-            //   %-  weighted-linear-combo
-            //   :*  lis
-            //       trace-openings
-            //       num
-            //       (fp-c (fmul omicron deep-challenge))
-            //       weights
-            //   ==
-            let point_omi_dc = new_fpoly(&[fmul_(&omicron, point)]);
-            let new_num = engine.weighted_linear_combo(
-                &lis,
-                trace_openings,
-                new_num,
-                (&point_omi_dc).into(),
-                new_num,
-            )?;
-            //println!("SECOND-ROW {}", vmug(stack, &second_row.0));
-
-            // :_  num
-            num = new_num;
-            // :(fpadd acc first-row second-row)
-            //acc = fpadd(acc, (&first_row).into());
-            //acc = fpadd(acc, (&second_row).into());
+            num += 2 * p.len as usize;
         }
+
+        engine.add_batch(point_batch);
     }
 
     // ::
@@ -213,21 +185,21 @@ pub fn compute_deep(stack: &mut NockStack, inp: Noun) -> Result {
     //       (fp-c (fpow deep-challenge (lent composition-pieces))) :: f(X)=X^D
     //       (~(slag fop weights) num)
     //   ==
-    let x_poly = new_fpoly(&[fpow_(deep_challenge, composition_pieces.len() as u64)]);
+    let comp_eval_point = fpow_(deep_challenge, composition_pieces.len() as u64);
+    let mut comp_batch = DivisorBatch {
+        polys: Vec::with_capacity(composition_pieces.len()),
+        openings: Vec::with_capacity(composition_pieces.len()),
+        weights: Vec::with_capacity(composition_pieces.len()),
+        evaluation_point: comp_eval_point,
+    };
 
-    engine.weighted_linear_combo(
-        &composition_pieces,
-        composition_piece_openings,
-        num,
-        (&x_poly).into(),
-        0,
-    )?;
+    for (poly_idx, poly) in composition_pieces.iter().enumerate() {
+        comp_batch.polys.push(poly.clone());
+        comp_batch.openings.push(composition_piece_openings.0[poly_idx]);
+        comp_batch.weights.push(weights.0[num + poly_idx]);
+    }
 
-    /*println!(
-        "PIECES @ pieces={} acc={}",
-        vmug(stack, &pieces.0),
-        vmug(stack, &acc.0)
-    );*/
+    engine.add_batch(comp_batch);
 
     // (fpadd acc pieces)
     let acc = engine.reduce();

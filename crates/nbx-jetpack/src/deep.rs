@@ -2,20 +2,16 @@ use std::sync::Arc;
 use crate::log::*;
 
 use nbx_tip5::base::binv;
-use nockvm::jets::JetErr;
-use nockvm::mem::NockStack;
 use zkvm_jetpack::form::math::poly::{
     p_fft_twiddles, p_hadamard_inplace, p_ntt_twiddled, p_ntt_twiddles, pscal_inplace,
 };
 use zkvm_jetpack::form::{Belt, ElementEx, FPolySlice, FPolyVec, Felt, PolySlice, PolyVec};
-
-use crate::engine::Engine;
-#[cfg(feature = "gpu")]
-use super::gpu;
+use crate::new_fpoly;
 use crate::two::{
     con_mon, fdegree, fpadd, fpscal, fpsub, id_fpoly, pinv_mod_x_to, zero_fpoly, zeroextend_slice,
 };
 use crate::utils::{scag_vec, xeb};
+use crate::parallel::prelude::*;
 
 #[derive(Clone)]
 pub struct WeightedDivConst {
@@ -124,124 +120,80 @@ pub struct LinearCombo {
     pub weights_off: usize,
 }
 
+#[derive(Debug, Clone)]
+pub struct DivisorBatch {
+    pub polys: Vec<FPolyVec>,
+    pub openings: Vec<Felt>,
+    pub weights: Vec<Felt>,
+    pub evaluation_point: Felt,
+}
+
+impl DivisorBatch {
+    fn get_divisor_polynomial(&self) -> FPolyVec {
+        let id = id_fpoly();
+        let point_poly = new_fpoly(&[self.evaluation_point]);
+        fpsub((&id).into(), (&point_poly).into())
+    }
+
+    #[tracing::instrument(skip_all)]
+    fn weighted_division(self) -> FPolyVec {
+        assert_eq!(self.polys.len(), self.openings.len());
+        assert_eq!(self.polys.len(), self.weights.len());
+
+        if self.polys.is_empty() {
+            return zero_fpoly();
+        }
+
+        let div_const = WeightedDivConst::new(
+            self.get_divisor_polynomial(),
+            self.polys[0].0.len()
+        );
+
+        let mut weighted_numerator = zero_fpoly();
+
+        for ((poly, opening), weight) in self.polys.iter().zip(self.openings).zip(self.weights) {
+            let numerator = fpsub(poly.into(), PolySlice(&[opening]));
+            let weighted_term = fpscal(weight, numerator);
+            weighted_numerator = fpadd(weighted_numerator, (&weighted_term).into());
+        }
+
+        let (lead, mut rf) = fpdiv_lead_rf(weighted_numerator, &div_const);
+
+        let expected_len = div_const.pinned_ntt.0.len();
+        rf.0.resize(expected_len, Felt::zero());
+
+        fpdiv_with_cache(lead, rf, &div_const)
+    }
+}
+
 #[derive(Clone)]
 pub struct DeepEngine<'a> {
-    combos: Vec<LinearCombo>,
+    divisor_batches: Vec<DivisorBatch>,
     weights: FPolySlice<'a>,
 }
 
 impl<'a> DeepEngine<'a> {
     pub fn new(weights: FPolySlice<'a>) -> Self {
         Self {
-            combos: vec![],
+            divisor_batches: vec![],
             weights,
         }
     }
 
-    pub fn destruct(self) -> (Vec<LinearCombo>, FPolySlice<'a>) {
-        (self.combos, self.weights)
+    pub fn add_batch(&mut self, batch: DivisorBatch) {
+        // It is in theory possible that multiple batches have the same point and can be combined.
+        //  However, testing has shown this is not the case
+        self.divisor_batches.push(batch);
     }
 
     #[tracing::instrument(skip_all)]
-    pub fn weighted_linear_combo(
-        &mut self,
-        //stack: &mut NockStack,
-        //cache: &mut HashMap<(FPolyVec, FPolyVec), core::result::Result<FPolyVec, JetErr>>,
-        polys: &[FPolyVec],
-        openings: FPolySlice,
-        idx: usize,
-        x_poly: FPolySlice,
-        mut idx_poly: usize,
-    ) -> core::result::Result<usize, JetErr> {
-        // |=  [polys=(list fpoly) openings=fpoly idx=@ x-poly=fpoly weights=fpoly]
-        // ^-  [fpoly @]
-        // =-  [acc num]
-        let mut num = idx;
-        let weights_off = num;
-
-        let id = id_fpoly();
-        let id_x = fpsub((&id).into(), x_poly);
-        let id_x = WeightedDivConst::new(id_x, polys[0].0.len());
-
-        // %+  roll  polys
-        // |=  [poly=fpoly acc=_zero-fpoly num=_idx]
-        let mut rf_polys = Vec::with_capacity(polys.len() * id_x.deg_prod);
-        let mut lead_felts = Vec::with_capacity(polys.len());
-
-        for poly in polys {
-            let poly: FPolySlice = poly.into();
-            // :_  +(num)
-            // %+  fpadd  acc
-            // %+  fpscal  (~(snag fop weights) num)
-            // %+  fpdiv
-            //   (fpsub poly (fp-c (~(snag fop openings) num)))
-            // (fpsub id-fpoly x-poly)
-            // NOTE: id_x = (fpsub id-fpoly x-poly)
-            let fpc = [openings.0[idx_poly]];
-            /*println!(
-            "id-x {} {} {}",
-            vmug(stack, &id_x.0),
-            vmug(stack, poly.0),
-            vmug(stack, &fpc)
-            );*/
-            let fpc = PolySlice(&fpc);
-            let r1 = fpsub(poly, fpc);
-
-            let (lead, rf) = fpdiv_lead_rf(r1, &id_x);
-            rf_polys.extend_from_slice(&rf.0);
-            rf_polys.resize(rf_polys.len() + id_x.deg_prod - rf.0.len(), Felt::zero());
-            lead_felts.push(lead);
-
-            num += 1;
-            idx_poly += 1;
-        }
-
-        self.combos.push(LinearCombo {
-            id_x,
-            rf_polys,
-            lead_felts,
-            weights_off,
-        });
-
-        Ok(num)
-    }
-}
-impl Engine for DeepEngine<'_> {
-    type Output = FPolyVec;
-
-    #[tracing::instrument(skip_all)]
-    fn reduce_cpu(self) -> Self::Output {
-        let mut acc: FPolyVec = zero_fpoly();
-
-        for LinearCombo {
-            id_x,
-            rf_polys,
-            lead_felts,
-            weights_off,
-        } in self.combos
-        {
-            use crate::parallel::prelude::*;
-            let rf = rf_polys.par_chunks_exact(id_x.deg_prod);
-            let weights = &self.weights.0[weights_off..];
-            let acc2 = lead_felts.into_par_iter().zip(rf).zip(weights).fold(
-                zero_fpoly,
-                |mut acc, ((lead, rf), weights)| {
-                let res = fpdiv_with_cache(lead, PolyVec(rf.to_vec()), &id_x);
-                let res = fpscal(*weights, res);
-                acc = fpadd(acc, (&res).into());
-                acc
-            })
-            .reduce(zero_fpoly, |a, b| fpadd(a, (&b).into()));
-            acc = fpadd(acc2, (&acc).into());
-        }
-
-        acc
-    }
-
-    #[cfg(feature = "gpu")]
-    #[tracing::instrument(skip_all)]
-    fn reduce_gpu(self, gpu: gpu::GpuHandle) -> Self::Output {
-        use super::gpu::Submittable;
-        Submittable::gpu_process(self, gpu).res
+    pub fn reduce(self) -> FPolyVec {
+        self.divisor_batches
+            .into_par_iter()
+            .map(|batch| batch.weighted_division())
+            .reduce(
+                || zero_fpoly(),
+                |acc, result| fpadd(acc, (&result).into())
+            )
     }
 }
