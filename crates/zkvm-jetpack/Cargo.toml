@@ -21,6 +21,7 @@ tracing.workspace = true
 bitvec.workspace = true
 nbx-tip5.workspace = true
 bytemuck.workspace = true
+const_for.workspace = true
 
 [dev-dependencies]
 quickcheck.workspace = true

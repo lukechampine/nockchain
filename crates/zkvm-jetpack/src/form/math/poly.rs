@@ -1,3 +1,4 @@
+use const_for::const_for;
 use std::any::{Any, TypeId};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -8,13 +9,25 @@ use crate::form::{Belt, ElementEx, FieldError, Poly, PolySlice};
 use super::binv;
 
 #[inline]
-fn bitreverse(mut n: u32, l: u32) -> u32 {
+const fn bitreverse(mut n: u32, l: u32) -> u32 {
     let mut r = 0;
-    for _ in 0..l {
+    const_for!(_ in 0..l => {
         r = (r << 1) | (n & 1);
         n >>= 1;
-    }
+    });
     r
+}
+
+const fn generate_bit_reverse_table<const N: usize>() -> [u32; N] {
+    let mut table = [0u32; N];
+    let log_n = N.ilog2();
+
+    let mut i = 0;
+    while i < N {
+        table[i] = bitreverse(i as u32, log_n);
+        i += 1;
+    }
+    table
 }
 
 #[inline(always)]
@@ -128,12 +141,18 @@ pub fn p_ntt_inplace<T: ElementEx>(p: &mut [T], root: &T) {
     p_ntt_twiddled_inplace(p, &twiddles)
 }
 
+static BIT_REVERSE: [u32; 65536] = generate_bit_reverse_table::<65536>();
+
 #[inline(never)]
 pub fn p_ntt_twiddled_inplace<T: ElementEx>(x: &mut [T], twiddles: &[impl AsRef<[T]>]) {
+    debug_assert!(x.len() <= 65536);
     let log_2_of_n = x.len().ilog2();
 
     for k in 0..x.len() {
-        let rk = bitreverse(k as u32, log_2_of_n) as usize;
+        // While the input size of this function is capped, it is also called with smaller inputs.
+        //  The same lookup table can be re-used by truncating the bit reversal to the correct
+        //  number of bits
+        let rk = (BIT_REVERSE[k] >> (16 - log_2_of_n)) as usize;
         if k < rk {
             x.swap(rk, k);
         }

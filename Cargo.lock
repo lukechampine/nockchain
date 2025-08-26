@@ -8404,6 +8404,7 @@ dependencies = [
  "bitvec",
  "bytemuck",
  "bytes",
+ "const_for",
  "either",
  "hex-literal",
  "ibig",
