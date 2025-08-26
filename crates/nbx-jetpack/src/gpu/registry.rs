@@ -1,5 +1,7 @@
-use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
+
+use tracing::warn;
+
 use crate::gpu::{Gpu, GpuHandle};
 
 pub struct GpuRegistry {
@@ -14,12 +16,16 @@ impl GpuRegistry {
     }
 
     pub fn get() -> &'static GpuRegistry {
-        GPU_REGISTRY.get().expect("GpuRegistry not initialized")
+        GPU_REGISTRY.get_or_init(|| {
+            warn!("GpuRegistry not initialized, falling back to CPU computations only");
+            GpuRegistry { gpus: vec![] }
+        })
     }
 
     pub fn get_available_gpu(&self) -> Option<GpuHandle> {
         // Find the first GPU that can has space in the queue for an additional item.
-        self.gpus.iter()
+        self.gpus
+            .iter()
             .find(|gpu| gpu.can_submit_work())
             .map(|gpu| GpuHandle::new(Arc::clone(gpu)))
     }
@@ -47,7 +53,8 @@ impl GpuRegistryBuilder {
 
     pub fn build(self) -> Result<(), Box<dyn std::error::Error>> {
         let registry = GpuRegistry { gpus: self.gpus };
-        GPU_REGISTRY.set(registry)
+        GPU_REGISTRY
+            .set(registry)
             .map_err(|_| "GPU registry already initialized")?;
         Ok(())
     }

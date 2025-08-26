@@ -124,8 +124,6 @@ impl Test {
                 .unwrap()
                 .build()
                 .unwrap();
-        } else {
-            gpu::GpuRegistry::builder().build().unwrap();
         }
 
         let max_disable = if permute { max_disable } else { Some(0) };
