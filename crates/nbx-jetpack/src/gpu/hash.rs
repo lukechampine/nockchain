@@ -4,7 +4,7 @@ use crate::log::*;
 use wgpu::util::DeviceExt;
 use wgpu::{Buffer, CommandBuffer};
 
-use super::{get_gpu, FromBuffer, Submittable, WgOffsets, DebugHandle};
+use super::{FromBuffer, Submittable, WgOffsets, DebugHandle, GpuHandle};
 use crate::gpu::Submission;
 use crate::instruments::local_instruments;
 use crate::hash::{HashEngine, NounDigest, ReduceChunk};
@@ -47,10 +47,9 @@ impl Submittable for HashEngine {
     type Output = Vec<NounDigest>;
 
     #[tracing::instrument(skip_all)]
-    fn submit(self) -> Submission<Self::Output, CommandBuffer> {
+    fn submit(self, gpu: GpuHandle) -> Submission<Self::Output, CommandBuffer> {
         let t = Instant::now();
 
-        let gpu = get_gpu();
         let inst = local_instruments();
         let submit_probe = inst.gpu_submit_probe();
 
@@ -381,8 +380,7 @@ impl Submittable for HashEngine {
         );
 
         Submission {
-            device: gpu.device.clone(),
-            queue: gpu.queue.clone(),
+            gpu,
             obj: command_buffer,
             downloads: vec![download],
             debug,

@@ -52,6 +52,7 @@ tracing-tracy = { workspace = true, optional = true, features = [
     "ondemand",
 ] }
 yaque = { workspace = true }
+rayon.workspace = true
 
 # Let's Encrypt and HTTPS support
 axum-server = { workspace = true }

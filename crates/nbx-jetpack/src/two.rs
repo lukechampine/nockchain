@@ -1112,9 +1112,10 @@ pub fn turn_coseword_impl<T: ElementEx>(
     assert_eq!(out.step, order);
     assert_eq!(out.len, polys.len);
     assert_eq!(core::mem::size_of::<T>(), core::mem::size_of::<u64>());
+    use crate::parallel::prelude::*;
     out.dat
-        .chunks_mut(order as _)
-        .zip(polys.dat.chunks_exact(polys.step as _))
+        .par_chunks_mut(order as _)
+        .zip(polys.dat.par_chunks_exact(polys.step as _))
         // %+  turn  (range len.array.polys)
         // |=  i=@
         // =/  bp=bpoly  (~(snag-as-bpoly ave polys) i)

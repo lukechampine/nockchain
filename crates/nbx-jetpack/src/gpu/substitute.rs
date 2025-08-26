@@ -8,7 +8,7 @@ use crate::log::*;
 use wgpu::util::DeviceExt;
 use wgpu::{Buffer, CommandBuffer};
 
-use super::{get_gpu, FromBuffer, Submittable, DebugHandle};
+use super::{FromBuffer, Submittable, DebugHandle, GpuHandle};
 use crate::gpu::Submission;
 use crate::instruments::local_instruments;
 use crate::substitute::{SubstituteEngine, MAX_CHUNK_SIZE};
@@ -58,10 +58,9 @@ impl<'a> Submittable for SubstituteEngine<'a, Melt> {
     type Output = Vec<Vec<Melt>>;
 
     #[tracing::instrument(skip_all)]
-    fn submit(self) -> Submission<Self::Output, CommandBuffer> {
+    fn submit(self, gpu: GpuHandle) -> Submission<Self::Output, CommandBuffer> {
         let t = Instant::now();
 
-        let gpu = get_gpu();
         let inst = local_instruments();
         let submit_probe = inst.gpu_submit_probe();
 
@@ -612,8 +611,7 @@ impl<'a> Submittable for SubstituteEngine<'a, Melt> {
             );
 
             Submission {
-                device: gpu.device.clone(),
-                queue: gpu.queue.clone(),
+                gpu,
                 obj: command_buffer,
                 downloads,
                 debug,

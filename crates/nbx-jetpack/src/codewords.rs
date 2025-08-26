@@ -4,6 +4,7 @@ use zkvm_jetpack::form::Belt;
 
 use crate::log::*;
 use crate::eight::compute_lde;
+use crate::engine::Engine;
 use crate::three::{build_merk_heap_impl, MerkHeap};
 use crate::utils::xeb;
 
@@ -29,63 +30,13 @@ impl<'a> CodewordEngine<'a> {
     pub fn destruct(self) -> (Vec<MarySlice<'a>>, u32, u64) {
         (self.table_polys, self.fri_domain_len, self.total_cols)
     }
+}
 
-    pub fn reduce(self) -> (Mary, usize, MerkHeap) {
-        // If the GPU is not enabled, return the CPU result directly
-        #[cfg(not(feature = "gpu"))]
-        return self.reduce_cpu();
-
-        #[cfg(feature = "gpu")]
-        {
-            // If the GPU is enabled but should not be used, return the CPU result directly
-            if !gpu::should_use_gpu() {
-                return self.reduce_cpu();
-            }
-
-            // If the GPU result is not validated, return the GPU result directly
-            #[cfg(not(feature = "validate-gpu"))]
-            return self.reduce_gpu();
-
-            #[cfg(feature = "validate-gpu")]
-            {
-                let cpu_result = self.clone().reduce_cpu();
-                let gpu_result = self.reduce_gpu();
-
-                // Emit warnings if the CPU and GPU results are different
-                if cpu_result != gpu_result {
-                    warn!("The result of the CPU and GPU are different for the `codewords` operation")
-                }
-
-                // Even if the result is computed using a GPU for validation, always return the CPU
-                //  result as it is considered more reliable.
-                cpu_result
-            }
-        }
-    }
+impl Engine for CodewordEngine<'_> {
+    type Output = (Mary, usize, MerkHeap);
 
     #[tracing::instrument(skip_all)]
-    #[cfg(feature = "gpu")]
-    pub fn reduce_gpu(self) -> (Mary, usize, MerkHeap) {
-        use nbx_tip5::melt::Melt;
-        use nbx_tip5::tip5::DIGEST_LENGTH;
-
-        use super::gpu::Submittable;
-
-        let height = xeb(self.fri_domain_len as usize);
-
-        let res = Submittable::gpu_process(self);
-        let codeword_array = res.codeword_array;
-
-        let mh = MerkHeap {
-            h: <[u64; DIGEST_LENGTH]>::try_from(&res.merk_heap.dat[..DIGEST_LENGTH]).unwrap().map(Melt::from_u64),
-            m: res.merk_heap,
-        };
-
-        (codeword_array, height, mh)
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub fn reduce_cpu(self) -> (Mary, usize, MerkHeap) {
+    fn reduce_cpu(self) -> Self::Output {
         // ::
         // ::  this mary is a list of all tables' columns, extended to codewords
         // =/  codewords=mary
@@ -109,6 +60,27 @@ impl<'a> CodewordEngine<'a> {
         // =/  merk-heap=(pair @ merk-heap:merkle)
         //   (bp-build-merk-heap:merkle codeword-array)
         let (height, mh) = build_merk_heap_impl::<Belt>(codeword_array.as_slice()).unwrap();
+
+        (codeword_array, height, mh)
+    }
+
+    #[cfg(feature = "gpu")]
+    #[tracing::instrument(skip_all)]
+    fn reduce_gpu(self, gpu: gpu::GpuHandle) -> Self::Output {
+        use nbx_tip5::melt::Melt;
+        use nbx_tip5::tip5::DIGEST_LENGTH;
+
+        use super::gpu::Submittable;
+
+        let height = xeb(self.fri_domain_len as usize);
+
+        let res = Submittable::gpu_process(self, gpu);
+        let codeword_array = res.codeword_array;
+
+        let mh = MerkHeap {
+            h: <[u64; DIGEST_LENGTH]>::try_from(&res.merk_heap.dat[..DIGEST_LENGTH]).unwrap().map(Melt::from_u64),
+            m: res.merk_heap,
+        };
 
         (codeword_array, height, mh)
     }

@@ -3,7 +3,9 @@ use nbx_tip5::melt::Melt;
 use zkvm_jetpack::form::math::poly::*;
 use zkvm_jetpack::form::poly::Poly;
 use zkvm_jetpack::form::{ElementEx, PolySlice, PolyVec};
-
+use crate::parallel::prelude::*;
+use crate::engine::Engine;
+use crate::log::*;
 #[cfg(feature = "gpu")]
 use super::gpu;
 
@@ -50,11 +52,11 @@ impl<'a, E: ElementEx> SubstituteIter<'a, E> {
 }
 
 impl<E: ElementEx> SubstituteIter<'_, E> {
-    fn reduce(self, inp: &[impl AsRef<[E]>], out: &mut [E]) {
+    fn reduce(self, inp: &[impl AsRef<[E]> + Send + Sync], out: &mut [E]) {
         let out_len = out.len();
         let inp_chunks = MAX_CHUNK_SIZE / out_len;
-        self.muls
-            .into_iter()
+        let r = self.muls
+            .into_par_iter()
             .map(|m| {
                 let acc = PolyVec(vec![m.scal; out_len]);
 
@@ -88,14 +90,14 @@ impl<E: ElementEx> SubstituteIter<'_, E> {
                         acc
                     })
             })
-            .fold(
-                out,
-                /*|| PolyVec(vec![E::zero(); out_len]),*/
-                |acc, o| {
-                    padd_in_place(acc, &o.0);
+            .reduce(
+                || PolyVec(vec![E::zero(); out_len]),
+                |mut acc, o| {
+                    padd_in_place(&mut acc.0, &o.0);
                     acc
                 },
             );
+        out.copy_from_slice(&r.0);
     }
 }
 
@@ -116,11 +118,15 @@ impl<E: ElementEx> Default for SubstituteStage<'_, E> {
 
 impl<E: ElementEx> SubstituteStage<'_, E> {
     #[tracing::instrument(skip_all)]
-    fn reduce(mut self, poly_len: usize, inp: &[impl AsRef<[E]>]) -> Vec<Vec<E>> {
-        self.iters
+    fn reduce(mut self, poly_len: usize, inp: &[impl AsRef<[E]> + Send + Sync]) -> Vec<Vec<E>> {
+        let t = self.iters
             .into_iter()
             .zip(self.out.iter_mut().flat_map(|m| m.chunks_mut(poly_len)))
+            .collect::<Vec<_>>();
+
+        t.into_par_iter()
             .for_each(|(i, o)| i.reduce(inp, o));
+
         self.out
     }
 }
@@ -131,46 +137,20 @@ pub struct SubstituteEngine<'a, E: ElementEx> {
     poly_len: usize,
 }
 
-impl SubstituteEngine<'_, Melt> {
+impl Engine for SubstituteEngine<'_, Melt> {
+    type Output = (Vec<Vec<Melt>>, usize);
+
     #[tracing::instrument(skip_all)]
-    #[cfg(feature = "gpu")]
-    pub fn reduce_gpu(self) -> (Vec<Vec<Melt>>, usize) {
-        use super::gpu::Submittable;
-        let poly_len = self.poly_len;
-        (Submittable::gpu_process(self), poly_len)
+    fn reduce_cpu(self) -> Self::Output {
+        self.reduce_cpu()
     }
 
-    pub fn reduce(self) -> (Vec<Vec<Melt>>, usize) {
-        // If the GPU is not enabled, return the CPU result directly
-        #[cfg(not(feature = "gpu"))]
-        return self.reduce_cpu();
-
-        #[cfg(feature = "gpu")]
-        {
-            // If the GPU is enabled but should not be used, return the CPU result directly
-            if !gpu::should_use_gpu() {
-                return self.reduce_cpu();
-            }
-
-            // If the GPU result is not validated, return the GPU result directly
-            #[cfg(not(feature = "validate-gpu"))]
-            return  self.reduce_gpu();
-
-            #[cfg(feature = "validate-gpu")]
-            {
-                let cpu_result = self.clone().reduce_cpu();
-                let gpu_result = self.reduce_gpu();
-
-                // Emit warnings if the CPU and GPU results are different
-                if cpu_result != gpu_result {
-                    warn!("The result of the CPU and GPU are different for the `substitute` operation")
-                }
-
-                // Even if the result is computed using a GPU for validation, always return the CPU
-                //  result as it is considered more reliable.
-                cpu_result
-            }
-        }
+    #[tracing::instrument(skip_all)]
+    #[cfg(feature = "gpu")]
+    fn reduce_gpu(self, gpu: gpu::GpuHandle) -> Self::Output {
+        use super::gpu::Submittable;
+        let poly_len = self.poly_len;
+        (Submittable::gpu_process(self, gpu), poly_len)
     }
 }
 

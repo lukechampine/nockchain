@@ -1,3 +1,4 @@
+use crate::engine::Engine;
 use nockvm::jets::JetErr;
 use nockvm::mem::NockStack;
 use nockvm::noun::*;

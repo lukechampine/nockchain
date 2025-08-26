@@ -10,9 +10,9 @@ use zkvm_jetpack::form::Belt;
 use tracing::info_span;
 
 use super::util::p_ntt;
-use super::{FromBuffer, Gpu, Pipeline, Submission, Submittable, DebugHandle};
+use super::{FromBuffer, GpuHandle, Pipeline, Submission, Submittable, DebugHandle};
 use crate::codewords::CodewordEngine;
-use crate::gpu::get_gpu;
+use crate::engine::Engine;
 use crate::hash::{HashEngine, NounDigest};
 use crate::instruments::local_instruments;
 use crate::one::G;
@@ -78,7 +78,7 @@ impl<'a> Submittable for CodewordEngine<'a> {
     type Output = CodewordResult;
 
     #[tracing::instrument(skip_all)]
-    fn submit(self) -> Submission<Self::Output, CommandBuffer> {
+    fn submit(self, gpu: GpuHandle) -> Submission<Self::Output, CommandBuffer> {
         let (table_polys, fri_domain_len, total_cols) = self.destruct();
 
         let mh_height = xeb(fri_domain_len as usize);
@@ -91,7 +91,6 @@ impl<'a> Submittable for CodewordEngine<'a> {
             mh_len,
         };
 
-        let gpu = get_gpu();
         let inst = local_instruments();
         let submit_probe = inst.gpu_submit_probe();
 
@@ -179,8 +178,7 @@ impl<'a> Submittable for CodewordEngine<'a> {
         core::mem::drop(submit_probe);
 
         Submission {
-            device: gpu.device.clone(),
-            queue: gpu.queue.clone(),
+            gpu,
             obj: command_buffer,
             downloads: vec![download, mh_download],
             debug,
@@ -201,7 +199,7 @@ pub struct BpShiftUniform {
 }
 
 fn turn_coseword(
-    gpu: &Gpu,
+    gpu: &GpuHandle,
     compute_pass: &mut ComputePass,
     polys: MarySlice,
     offset: Belt,
@@ -316,7 +314,7 @@ fn turn_coseword(
 }
 
 fn compute_lde(
-    gpu: &Gpu,
+    gpu: &GpuHandle,
     compute_pass: &mut ComputePass,
     table_polys: Vec<MarySlice>,
     fri_domain_len: u32,
@@ -354,7 +352,7 @@ pub struct MaryTransposeUniform {
 }
 
 fn mary_transpose(
-    gpu: &Gpu,
+    gpu: &GpuHandle,
     compute_pass: &mut ComputePass,
     codewords: &Buffer,
     codeword_step: u32,
@@ -416,7 +414,7 @@ fn mary_transpose(
 }
 
 fn build_merk_heap(
-    gpu: &Gpu,
+    gpu: &GpuHandle,
     compute_pass: &mut ComputePass,
     codeword_array: &Buffer,
     codeword_step: u32,
@@ -468,7 +466,7 @@ pub struct MontUniform {
 }
 
 fn mont_all(
-    gpu: &Gpu,
+    gpu: &GpuHandle,
     compute_pass: &mut ComputePass,
     pipeline: &Pipeline,
     input: &Buffer,
@@ -541,7 +539,7 @@ pub struct HashVarlenMultipleUniform {
 }
 
 fn hash_varlen_multiple(
-    gpu: &Gpu,
+    gpu: &GpuHandle,
     compute_pass: &mut ComputePass,
     input: &Buffer,
     step: u32,
@@ -614,7 +612,7 @@ pub struct HashFixedMultipleUniform {
     num_elems: u32,
 }
 
-fn hash_fixed_multiple(gpu: &Gpu, compute_pass: &mut ComputePass, input: &Buffer, cnt: usize) -> Buffer {
+fn hash_fixed_multiple(gpu: &GpuHandle, compute_pass: &mut ComputePass, input: &Buffer, cnt: usize) -> Buffer {
     // We are reducing to 5 * (len / 8 / step) melts
     let num_hashes = (input.size() as usize) / size_of::<NounDigest<Melt>>() / 2;
 
@@ -683,7 +681,7 @@ pub struct Hash10FixedPrependUniform {
 }
 
 fn hash_10_fixedprepend(
-    gpu: &Gpu,
+    gpu: &GpuHandle,
     compute_pass: &mut ComputePass,
     prepend: NounDigest<Melt>,
     input: &Buffer,

@@ -29,6 +29,8 @@ pub mod deep;
 pub mod codewords;
 
 pub mod instruments;
+pub mod engine;
+pub mod parallel;
 
 use eight::*;
 use five::*;

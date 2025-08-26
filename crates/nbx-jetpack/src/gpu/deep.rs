@@ -4,7 +4,7 @@ use wgpu::{Buffer, BufferDescriptor, BufferUsages, CommandBuffer, ComputePass};
 use zkvm_jetpack::form::{Belt, FPolyVec, Felt, PolyVec};
 
 use super::substitute::AccumUniform;
-use super::{get_gpu, DebugHandle, FromBuffer, Gpu, Submission, Submittable};
+use super::{DebugHandle, FromBuffer, Gpu, GpuHandle, Submission, Submittable};
 use crate::deep::{DeepEngine, LinearCombo, WeightedDivConst};
 use crate::gpu::util::p_ntt;
 use crate::instruments::local_instruments;
@@ -40,10 +40,9 @@ impl<'a> Submittable for DeepEngine<'a> {
     type Output = DeepResult;
 
     #[tracing::instrument(skip_all)]
-    fn submit(self) -> Submission<Self::Output, CommandBuffer> {
+    fn submit(self, gpu: GpuHandle) -> Submission<Self::Output, CommandBuffer> {
         let (combos, weights) = self.destruct();
 
-        let gpu = get_gpu();
         let inst = local_instruments();
         let submit_probe = inst.gpu_submit_probe();
 
@@ -103,8 +102,7 @@ impl<'a> Submittable for DeepEngine<'a> {
         core::mem::drop(submit_probe);
 
         Submission {
-            device: gpu.device.clone(),
-            queue: gpu.queue.clone(),
+            gpu,
             obj: command_buffer,
             downloads: vec![download],
             debug,

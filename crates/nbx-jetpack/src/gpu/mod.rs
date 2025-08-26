@@ -1,24 +1,27 @@
 use core::num::NonZeroU64;
-use std::cell::OnceCell;
 use std::marker::PhantomData;
-use std::rc::Rc;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use std::collections::{BTreeMap, btree_map::Entry};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use either::Either;
 use nbx_shaders::get_shader_module;
 use crate::log::*;
-use wgpu::{Backends, Buffer, Device, Queue, DeviceType, SubmissionIndex, CommandBuffer};
+use wgpu::{Backends, Buffer, Queue, DeviceType, SubmissionIndex, CommandBuffer};
 use zkvm_jetpack::form::Melt;
-
+use crate::engine::Engine;
+use crate::gpu::queue::GpuQueue;
 use self::codewords::{BpShiftUniform, Hash10FixedPrependUniform, HashFixedMultipleUniform, HashVarlenMultipleUniform, MaryTransposeUniform, MontUniform};
 use self::deep::{FpAccumUniform, FpHadamardSamepolyUniform, WeightedComboFinishUniform};
 use self::substitute::{AccumUniform, MulUniform, SubstituteIterOps};
 use self::util::PNttUniform;
 use super::substitute::SubstituteEngine;
 use crate::hash::{HashEngine, NounDigest, ReduceOp, VariableReduceOp};
-use crate::instruments::{local_instruments, Instruments};
+use crate::instruments::local_instruments;
+
+pub use handle::GpuHandle;
+pub use registry::GpuRegistry;
 
 mod hash;
 mod substitute;
@@ -26,6 +29,9 @@ mod codewords;
 mod deep;
 
 pub(crate) mod util;
+mod queue;
+mod registry;
+mod handle;
 
 struct Pipeline {
     pipeline: wgpu::ComputePipeline,
@@ -34,9 +40,12 @@ struct Pipeline {
 
 static GPUS: Mutex<BTreeMap<(Option<String>, usize), (wgpu::Device, wgpu::Queue)>> = Mutex::new(BTreeMap::new());
 
-struct Gpu {
+pub const DEFAULT_GPU_QUEUE_SIZE: usize = 5;
+
+pub struct Gpu {
     device: wgpu::Device,
-    queue: wgpu::Queue,
+    wgpu_queue: wgpu::Queue,
+    work_queue: GpuQueue,
     hash_fixed: Pipeline,
     hash_variable: Pipeline,
     substitute_mul: Pipeline,
@@ -58,9 +67,9 @@ struct Gpu {
 }
 
 impl Gpu {
-    fn new(gpu_name_filter: Option<&str>, gpu_idx: usize) -> Result<Self, Box<dyn std::error::Error>> {
+    fn new(gpu_name_filter: Option<&str>, gpu_idx: usize, queue_size: usize) -> Result<Self, Box<dyn std::error::Error>> {
         let mut cache = GPUS.lock()?;
-        let (device, queue) = match cache.entry((gpu_name_filter.map(String::from), gpu_idx)) {
+        let (device, wgpu_queue) = match cache.entry((gpu_name_filter.map(String::from), gpu_idx)) {
             Entry::Occupied(e) => e.get().clone(),
             Entry::Vacant(e) => {
                 let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::from_env_or_default());
@@ -339,7 +348,8 @@ impl Gpu {
 
         Ok(Self {
             device,
-            queue,
+            wgpu_queue,
+            work_queue: GpuQueue::new(queue_size),
             hash_fixed,
             hash_variable,
             substitute_mul,
@@ -363,14 +373,14 @@ impl Gpu {
             .into(),
         })
     }
-}
 
-thread_local! {
-    static GPU: OnceCell<Rc<Gpu>> = OnceCell::new();
-}
+    pub fn can_submit_work(&self) -> bool {
+        self.work_queue.can_submit_work()
+    }
 
-fn get_gpu() -> Rc<Gpu> {
-    GPU.with(|v| v.get().expect("GPU not initialized").clone())
+    pub fn finished_work(&self) {
+        self.work_queue.finished_work();
+    }
 }
 
 #[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod, Debug)]
@@ -423,49 +433,8 @@ fn get_engine() -> HashEngine {
     engine
 }
 
-fn cpu_reduce(engine: HashEngine) -> Vec<NounDigest> {
-    /*let mut cur: Vec<Melt> = vec![];
-    let mut stages = engine.destruct();
-
-    while let Some(ReduceStage {
-        ops_variable: _,
-        ops_fixed,
-        mut out,
-    }) = stages.pop()
-    {
-        use rayon::prelude::*;
-        struct MeltSlice(*mut Melt);
-        unsafe impl Send for MeltSlice {}
-        unsafe impl Sync for MeltSlice {}
-        let out_ptr = MeltSlice(out.as_mut_ptr());
-        ops_fixed.into_par_iter().for_each(|ReduceOp { source, destination }| {
-            let out = &out_ptr;
-            (0..5).into_iter().for_each(|off| {
-                let val = cur[(source + off) as usize].0;
-                let mut tmp = [Melt(0); tip5::STATE_SIZE];
-                tmp[0] = Melt(val);
-                for i in 0..1 {
-                    tip5::permute(&mut tmp);
-                }
-                unsafe { *out.0.add((destination + off) as usize) = tmp[0] };
-            });
-        });
-        cur = out;
-    }
-
-    assert_eq!(cur.len() % DIGEST_LENGTH, 0);
-    let p = cur.as_mut_ptr();
-    let l = cur.len() / DIGEST_LENGTH;
-    let c = cur.capacity() / DIGEST_LENGTH;
-    core::mem::forget(cur);
-    unsafe { Vec::from_raw_parts(p as *mut NounDigest, l, c) }*/
-    engine.reduce_cpu()
-}
-
 pub fn gpu_test() -> Result<(), Box<dyn std::error::Error>> {
-    use rayon::prelude::*;
-
-    let _ = get_gpu();
+    use crate::parallel::prelude::*;
 
     println!("Reducing");
 
@@ -483,7 +452,7 @@ pub fn gpu_test() -> Result<(), Box<dyn std::error::Error>> {
         let t2 = Instant::now();
         let gpu_submissions = hash_engines
             .into_par_iter()
-            .map(Submittable::submit)
+            .map(|engine| Submittable::submit(engine, get_available_gpu().unwrap()))
             .map(Submission::enqueue)
             .collect::<Vec<_>>();
         println!(
@@ -507,7 +476,7 @@ pub fn gpu_test() -> Result<(), Box<dyn std::error::Error>> {
 
     if true {
         let t = Instant::now();
-        let cpu_buffer = cpu_reduce(get_engine());
+        let cpu_buffer = get_engine().reduce_cpu();
         println!("{:?}", cpu_buffer);
         println!("CPU Time: {:.02}", t.elapsed().as_secs_f64());
     }
@@ -516,9 +485,7 @@ pub fn gpu_test() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 pub fn gpu_sub_test(engine: SubstituteEngine<Melt>) -> Result<(), Box<dyn std::error::Error>> {
-    use rayon::prelude::*;
-
-    let _ = get_gpu();
+    use crate::parallel::prelude::*;
 
     println!("Substituting on poly size {}", engine.poly_len());
 
@@ -535,7 +502,7 @@ pub fn gpu_sub_test(engine: SubstituteEngine<Melt>) -> Result<(), Box<dyn std::e
     let t2 = Instant::now();
     let gpu_submissions = engines
         .into_par_iter()
-        .map(Submittable::submit)
+        .map(|engine| Submittable::submit(engine, get_available_gpu().unwrap()))
         .map(Submission::enqueue)
         .collect::<Vec<_>>();
     println!(
@@ -566,16 +533,6 @@ pub fn gpu_sub_test(engine: SubstituteEngine<Melt>) -> Result<(), Box<dyn std::e
     Ok(())
 }
 
-pub fn init_gpu(gpu_name_filter: Option<&str>, gpu_idx: usize) {
-    GPU.with(|v| {
-        v.set(Gpu::new(gpu_name_filter, gpu_idx).unwrap().into())
-    }).ok().expect("GPU already initialized");
-}
-
-pub fn should_use_gpu() -> bool {
-    GPU.with(|v| v.get().is_some())
-}
-
 struct DebugHandle {
     debug: Option<Arc<Mutex<Option<bool>>>>,
 }
@@ -597,8 +554,7 @@ impl Drop for DebugHandle {
 }
 
 pub struct Submission<T: FromBuffer, O> {
-    device: Device,
-    queue: Queue,
+    gpu: GpuHandle,
     obj: O,
     downloads: Vec<Buffer>,
     debug: DebugHandle,
@@ -610,8 +566,7 @@ impl<T: FromBuffer> Submission<T, CommandBuffer> {
     #[tracing::instrument(skip_all)]
     pub fn enqueue(self) -> Submission<T, SubmissionIndex> {
         let Self {
-            device,
-            queue,
+            gpu,
             obj: command_buffer,
             downloads,
             debug,
@@ -622,11 +577,10 @@ impl<T: FromBuffer> Submission<T, CommandBuffer> {
         let inst = local_instruments();
         let _probe = inst.gpu_enqueue_probe();
 
-        let si = queue.submit([command_buffer]);
+        let si = gpu.wgpu_queue.submit([command_buffer]);
 
         Submission {
-            device,
-            queue,
+            gpu,
             obj: si,
             downloads,
             debug,
@@ -640,9 +594,8 @@ impl<T: FromBuffer> Submission<T, SubmissionIndex> {
     #[tracing::instrument(skip_all)]
     pub fn finish(self) -> T {
         let Self {
-            device,
-            queue: _,
-            obj: si,
+            gpu,
+            obj: _,
             downloads,
             debug,
             _download_convert: _,
@@ -652,36 +605,42 @@ impl<T: FromBuffer> Submission<T, SubmissionIndex> {
         let inst = local_instruments();
         let probe = inst.gpu_finish_probe();
 
+        let tracker = Arc::new(CompletionTracker::new(downloads.len()));
+
         let buffer_slices = downloads
             .iter()
-            .map(|download| {
+            .enumerate()
+            .map(|(i, download)| {
                 let buffer_slice = download.slice(..);
-                let (tx, rx) = mpsc::channel();
+                let tracker_clone = tracker.clone();
+
                 buffer_slice.map_async(wgpu::MapMode::Read, move |_| {
-                    debug!("Mapped");
-                    let _ = tx.send(());
+                    tracker_clone.mark_ready(i);
                 });
-                (buffer_slice, rx)
+
+                buffer_slice
             })
             .collect::<Vec<_>>();
 
         debug!("Map request");
 
-        device
-            .poll(wgpu::PollType::WaitForSubmissionIndex(si.clone()))
-            .unwrap();
+        loop {
+            gpu.device.poll(wgpu::PollType::Poll).unwrap();
+
+            if tracker.is_all_ready() { break; }
+
+            rayon::yield_now();
+        }
+
         debug!("Polled");
 
         let buffer_slices = buffer_slices
             .into_iter()
-            .map(|(b, r)| {
-                let _ = r.recv();
-                b.get_mapped_range()
-            })
+            .map(|b| b.get_mapped_range())
             .collect::<Vec<_>>();
 
         if debug.debug.is_some() {
-            unsafe { device.stop_graphics_debugger_capture() };
+            unsafe { gpu.device.stop_graphics_debugger_capture() };
         }
 
         core::mem::drop(probe);
@@ -699,9 +658,36 @@ pub trait FromBuffer {
 pub trait Submittable: Sized {
     type Output: FromBuffer;
 
-    fn submit(self) -> Submission<Self::Output, CommandBuffer>;
+    fn submit(self, gpu: GpuHandle) -> Submission<Self::Output, CommandBuffer>;
 
-    fn gpu_process(self) -> Self::Output {
-        self.submit().enqueue().finish()
+    fn gpu_process(self, gpu: GpuHandle) -> Self::Output {
+        self.submit(gpu).enqueue().finish()
+    }
+}
+
+pub fn get_available_gpu() -> Option<GpuHandle> {
+    GpuRegistry::get().get_available_gpu()
+}
+
+struct CompletionTracker {
+    ready_mask: AtomicU32,
+    target_mask: u32,
+}
+
+impl CompletionTracker {
+    fn new(num_buffers: usize) -> Self {
+        assert!(num_buffers < 32);
+        Self {
+            ready_mask: AtomicU32::new(0),
+            target_mask: (1 << num_buffers) - 1,
+        }
+    }
+
+    fn mark_ready(&self, index: usize) {
+        self.ready_mask.fetch_or(1 << index, Ordering::Release);
+    }
+
+    fn is_all_ready(&self) -> bool {
+        self.ready_mask.load(Ordering::Relaxed) == self.target_mask
     }
 }

@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 use crate::log::*;
 
 use nbx_tip5::base::binv;
@@ -9,6 +9,7 @@ use zkvm_jetpack::form::math::poly::{
 };
 use zkvm_jetpack::form::{Belt, ElementEx, FPolySlice, FPolyVec, Felt, PolySlice, PolyVec};
 
+use crate::engine::Engine;
 #[cfg(feature = "gpu")]
 use super::gpu;
 use crate::two::{
@@ -22,9 +23,9 @@ pub struct WeightedDivConst {
     pub dq: usize,
     pub deg_prod: usize,
     pub pinned_ntt: FPolyVec,
-    pub twiddles: Rc<[Vec<Felt>]>,
+    pub twiddles: Arc<[Vec<Felt>]>,
     pub inv_len: Felt,
-    pub ifft_twiddles: Rc<[Vec<Felt>]>,
+    pub ifft_twiddles: Arc<[Vec<Felt>]>,
 }
 
 impl WeightedDivConst {
@@ -50,13 +51,13 @@ impl WeightedDivConst {
         let deg_prod = 1 << xeb(deg_p + deg_q - 1);
 
         let a = zeroextend_slice(pinned, deg_prod, Felt::zero());
-        let twiddles = p_fft_twiddles::<Felt>(a.0.len()).unwrap();
+        let twiddles: Arc<[_]> = (*p_fft_twiddles::<Felt>(a.0.len()).unwrap()).into();
         let pinned_ntt = PolyVec(p_ntt_twiddled(a.0, &twiddles));
 
         let inv_len = Felt::from_u64(binv(pinned_ntt.0.len() as _));
         let or = Belt(pinned_ntt.0.len() as _).ordered_root().unwrap();
         let root = Felt::from_u64(binv(or.0));
-        let ifft_twiddles = p_ntt_twiddles::<Felt>(pinned_ntt.0.len(), &root);
+        let ifft_twiddles = (*p_ntt_twiddles::<Felt>(pinned_ntt.0.len(), &root)).into();
 
         Self {
             d,
@@ -204,49 +205,12 @@ impl<'a> DeepEngine<'a> {
 
         Ok(num)
     }
-
-    pub fn reduce(self) -> FPolyVec {
-        // If the GPU is not enabled, return the CPU result directly
-        #[cfg(not(feature = "gpu"))]
-        return self.reduce_cpu();
-
-        #[cfg(feature = "gpu")]
-        {
-            // If the GPU is enabled but should not be used, return the CPU result directly
-            if !gpu::should_use_gpu() {
-                return self.reduce_cpu();
-            }
-
-            // If the GPU result is not validated, return the GPU result directly
-            #[cfg(not(feature = "validate-gpu"))]
-            return self.reduce_gpu();
-
-            #[cfg(feature = "validate-gpu")]
-            {
-                let cpu_result = self.clone().reduce_cpu();
-                let gpu_result = self.reduce_gpu();
-
-                // Emit warnings if the CPU and GPU results are different
-                if cpu_result != gpu_result {
-                    warn!("The result of the CPU and GPU are different for the `deep` operation")
-                }
-
-                // Even if the result is computed using a GPU for validation, always return the CPU
-                //  result as it is considered more reliable.
-                cpu_result
-            }
-        }
-    }
-
-    #[cfg(feature = "gpu")]
-    #[tracing::instrument(skip_all)]
-    pub fn reduce_gpu(self) -> FPolyVec {
-        use super::gpu::Submittable;
-        Submittable::gpu_process(self).res
-    }
+}
+impl Engine for DeepEngine<'_> {
+    type Output = FPolyVec;
 
     #[tracing::instrument(skip_all)]
-    pub fn reduce_cpu(self) -> FPolyVec {
+    fn reduce_cpu(self) -> Self::Output {
         let mut acc: FPolyVec = zero_fpoly();
 
         for LinearCombo {
@@ -256,19 +220,28 @@ impl<'a> DeepEngine<'a> {
             weights_off,
         } in self.combos
         {
-            let rf = rf_polys.chunks_exact(id_x.deg_prod);
-            let mut rf_vec = Vec::with_capacity(id_x.deg_prod);
+            use crate::parallel::prelude::*;
+            let rf = rf_polys.par_chunks_exact(id_x.deg_prod);
             let weights = &self.weights.0[weights_off..];
-            for ((lead, rf), weights) in lead_felts.into_iter().zip(rf).zip(weights) {
-                rf_vec.clear();
-                rf_vec.extend_from_slice(rf);
-                let res = fpdiv_with_cache(lead, PolyVec(rf_vec), &id_x);
+            let acc2 = lead_felts.into_par_iter().zip(rf).zip(weights).fold(
+                zero_fpoly,
+                |mut acc, ((lead, rf), weights)| {
+                let res = fpdiv_with_cache(lead, PolyVec(rf.to_vec()), &id_x);
                 let res = fpscal(*weights, res);
                 acc = fpadd(acc, (&res).into());
-                rf_vec = res.0;
-            }
+                acc
+            })
+            .reduce(zero_fpoly, |a, b| fpadd(a, (&b).into()));
+            acc = fpadd(acc2, (&acc).into());
         }
 
         acc
+    }
+
+    #[cfg(feature = "gpu")]
+    #[tracing::instrument(skip_all)]
+    fn reduce_gpu(self, gpu: gpu::GpuHandle) -> Self::Output {
+        use super::gpu::Submittable;
+        Submittable::gpu_process(self, gpu).res
     }
 }

@@ -23,6 +23,7 @@ use std::path::Path;
 use std::time::Instant;
 use zkvm_jetpack::hot::produce_prover_hot_state;
 use nbx_jetpack::{bpoly_to_fpoly, nbx_jets, new_fpoly, snag_as_poly_mary};
+use nbx_jetpack::engine::Engine;
 #[cfg(feature = "gpu")]
 use nbx_jetpack::gpu;
 
@@ -97,7 +98,11 @@ impl GpuTest {
         use std::collections::BTreeMap;
         use std::time::Instant;
 
-        nbx_jetpack::gpu::init_gpu(None, 0);
+        gpu::GpuRegistry::builder()
+            .add_gpu(None, 0, gpu::DEFAULT_GPU_QUEUE_SIZE)
+            .unwrap()
+            .build()
+            .unwrap();
 
         match self {
             Self::Hash => Ok(nbx_jetpack::gpu::gpu_test().unwrap()),
@@ -162,7 +167,7 @@ impl GpuTest {
                 let table_polys = table_polys_vec.iter().map(MarySlice::from).collect::<Vec<_>>();
                 let engine = CodewordEngine::new(table_polys, fri_domain_len, total_cols);
                 let t = Instant::now();
-                let (codeword_array, height, mh) = engine.clone().reduce_gpu();
+                let (codeword_array, height, mh) = engine.clone().reduce_gpu(gpu::get_available_gpu().unwrap());
                 println!("{}", codeword_array.dat.len());
                 println!("{:?} {:?}", &codeword_array.dat[..10], mh.h);
                 std::fs::write("gpu.txt", format!("{:#?}", &codeword_array.dat));
@@ -296,7 +301,7 @@ impl GpuTest {
                 }
 
                 let t = Instant::now();
-                let gpu_res = engine.clone().reduce_gpu();
+                let gpu_res = engine.clone().reduce_gpu(gpu::get_available_gpu().unwrap());
                 std::fs::write("gpu.txt", format!("{:#?}", &gpu_res.0));
                 println!("GPU {:.02} {:?}", t.elapsed().as_secs_f64(), &gpu_res.0[..10]);
                 let t = Instant::now();
@@ -363,13 +368,20 @@ impl Test {
             gpu_id,
         } = self;
 
-        let init_call = move || {
-            #[cfg(feature = "gpu")]
-            if use_gpu {
-                gpu::init_gpu(gpu_filter.as_deref(), gpu_id);
-            }
-        };
-        let init_call = Some(init_call);
+        #[cfg(feature = "gpu")]
+        if use_gpu {
+            gpu::GpuRegistry::builder()
+                .add_gpu(
+                    gpu_filter.as_deref(),
+                    gpu_id,
+                    gpu::DEFAULT_GPU_QUEUE_SIZE
+                )
+                .unwrap()
+                .build()
+                .unwrap();
+        } else {
+            gpu::GpuRegistry::builder().build().unwrap();
+        }
 
         let max_disable = if permute { max_disable } else { Some(0) };
 
@@ -407,7 +419,7 @@ impl Test {
                 }
 
                 let time = Instant::now();
-                let res = on_kernel(src_event.clone(), final_hot_state, cli.clone(), init_call.clone()).await?;
+                let res = on_kernel(src_event.clone(), final_hot_state, cli.clone()).await?;
                 let res_hash = hash_slab(&res);
 
                 println!(
@@ -454,9 +466,7 @@ async fn run_kernel(
     pokes: impl Stream<Item = SendSlab> + Send + 'static,
     hot_state: Vec<HotEntry>,
     cli: Cli,
-    init_call: Option<impl FnOnce() + Send + 'static>
 ) -> Receiver<SendSlab> {
-
     let serf = SerfThread::<SaveableCheckpoint>::new(
         kernels::miner::KERNEL.into(),
         None,
@@ -465,13 +475,10 @@ async fn run_kernel(
         vec![],
         cli.trace_opts.into(),
         false,
+        cfg!(feature = "gpu"),
     )
     .await
     .expect("Could not load mining kernel");
-
-    if let Some(init_call) = init_call {
-        serf.call_fn(init_call).await.unwrap();
-    }
 
     let (tx, rx) = flume::bounded(0);
 
@@ -494,8 +501,8 @@ async fn run_kernel(
     rx
 }
 
-async fn on_kernel(slab: NounSlab, hot_state: Vec<HotEntry>, cli: Cli, init_call: Option<impl FnOnce() + Send + 'static>) -> Result<NounSlab> {
-    let effects = run_kernel(iter(once(SendSlab(slab))), hot_state, cli, init_call).await;
+async fn on_kernel(slab: NounSlab, hot_state: Vec<HotEntry>, cli: Cli) -> Result<NounSlab> {
+    let effects = run_kernel(iter(once(SendSlab(slab))), hot_state, cli).await;
     let effects_slab = effects.recv_async().await.unwrap().0;
 
     for effect in effects_slab.to_vec() {

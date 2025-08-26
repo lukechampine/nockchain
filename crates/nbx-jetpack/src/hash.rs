@@ -6,7 +6,7 @@ use nockvm_macros::tas;
 use crate::log::*;
 
 #[cfg(feature = "gpu")]
-use super::gpu::{self, Submittable};
+use super::gpu;
 use super::three::{hash_10, hash_varlen_padded};
 use zkvm_jetpack::form::mary::MarySlice;
 use zkvm_jetpack::form::math::tip5::DIGEST_LENGTH;
@@ -14,6 +14,7 @@ use zkvm_jetpack::form::{Belt, Element, Felt, Melt};
 use zkvm_jetpack::hand::structs::HoonList;
 use zkvm_jetpack::jets::utils::jet_err;
 use zkvm_jetpack::noun::noun_ext::NounExt;
+use crate::engine::Engine;
 
 // 64MB in melts
 const MAX_CHUNK_SIZE: usize = 0x4000000 / core::mem::size_of::<Melt>();
@@ -128,19 +129,18 @@ pub struct ReduceChunkSlice<'a> {
 impl<'a> ReduceChunkSlice<'a> {
     #[tracing::instrument(skip_all)]
     fn reduce(self, inp_start: usize, inp: &[Melt]) {
-        // TODO: multithread/GPU this.
-        use rayon::prelude::*;
+        use crate::parallel::prelude::*;
         struct MeltSlice(*mut Melt);
         unsafe impl Send for MeltSlice {}
         unsafe impl Sync for MeltSlice {}
         let out_ptr = MeltSlice(self.out.as_mut_ptr());
         let out_len = self.out.len() as u32;
         let out_off = self.out_start;
-        self.ops_fixed.into_iter().for_each(|op| {
+        self.ops_fixed.into_par_iter().for_each(|op| {
             let out = &out_ptr;
             op.reduce_fixed(inp_start, inp, out.0, out_len, out_off);
         });
-        self.ops_variable.into_iter().for_each(|op| {
+        self.ops_variable.into_par_iter().for_each(|op| {
             let out = &out_ptr;
             op.reduce(inp_start, inp, out.0, out_len, out_off);
         });
@@ -302,10 +302,10 @@ impl ReduceStage {
     fn reduce<'a, I: Iterator<Item = &'a [Melt]>>(mut self, inps: I) -> Vec<Vec<Melt>> {
         let pairs = self.split_chunks(inps);
 
-        use rayon::prelude::*;
+        use crate::parallel::prelude::*;
 
         pairs
-            .into_iter()
+            .into_par_iter()
             .for_each(|(_, inp_at, input, _, chunk)| chunk.reduce(inp_at, input));
 
         self.chunks.into_iter().map(|v| v.out).collect()
@@ -540,85 +540,6 @@ impl HashEngine {
         (self.stages, self.out_stages)
     }
 
-    #[tracing::instrument(skip_all)]
-    pub fn reduce_cpu(mut self) -> Vec<NounDigest> {
-        let mut out_len = 0;
-        let out_pos = self
-            .stages
-            .iter()
-            .take(self.out_stages)
-            .map(|v| {
-                let sum = v.chunks.iter().map(|v| v.out.len()).sum::<usize>();
-                assert!(sum % DIGEST_LENGTH == 0);
-                let r = out_len;
-                out_len += sum / DIGEST_LENGTH;
-                r
-            })
-            .collect::<Vec<_>>();
-        let mut out = vec![NounDigest::default(); out_len];
-        assert!(out_len <= MAX_CHUNK_SIZE);
-
-        let mut cur = vec![];
-        //let mut cnt = 0;
-        while let Some(stage) = self.stages.pop() {
-            let cur_stage = self.stages.len();
-            //println!("Layer {cnt}: {} {}", stage.ops.len(), stage.out.len());
-            //cnt += 1;
-            //let t = std::time::Instant::now();
-            cur = stage.reduce(cur[..].iter().map(|v: &Vec<_>| v.as_ref()));
-
-            if cur_stage < self.out_stages {
-                let stage_len = cur.iter().map(|v| v.len() / DIGEST_LENGTH).sum::<usize>();
-                out[out_pos[cur_stage]..(out_pos[cur_stage] + stage_len)]
-                    .iter_mut()
-                    .zip(cur.iter().flat_map(|v| {
-                        v.chunks(DIGEST_LENGTH)
-                            .map(|v| NounDigest::try_from(v).unwrap())
-                    }))
-                    .for_each(|(a, b)| *a = b);
-            }
-            //println!("{:.02}s", t.elapsed().as_secs_f64())
-        }
-        out
-    }
-
-    pub fn reduce(self) -> Vec<NounDigest> {
-        if self.stages.is_empty() {
-            return vec![];
-        }
-
-        // If the GPU is not enabled, return the CPU result directly
-        #[cfg(not(feature = "gpu"))]
-        return self.reduce_cpu();
-
-        #[cfg(feature = "gpu")]
-        {
-            // If the GPU is enabled but should not be used, return the CPU result directly
-            if !gpu::should_use_gpu() {
-                return self.reduce_cpu();
-            }
-
-            // If the GPU result is not validated, return the GPU result directly
-            #[cfg(not(feature = "validate-gpu"))]
-            return Submittable::gpu_process(self);
-
-            #[cfg(feature = "validate-gpu")]
-            {
-                let cpu_result = self.clone().reduce_cpu();
-                let gpu_result = Submittable::gpu_process(self);
-
-                // Emit warnings if the CPU and GPU results are different
-                if cpu_result != gpu_result {
-                    warn!("The result of the CPU and GPU are different for the `hash` operation")
-                }
-
-                // Even if the result is computed using a GPU for validation, always return the CPU
-                //  result as it is considered more reliable.
-                cpu_result
-            }
-        }
-    }
-
     pub fn push_mary(&mut self, stage: usize, ma: MarySlice) -> usize {
         if self.stages.len() <= stage {
             assert_eq!(self.stages.len(), stage);
@@ -848,4 +769,60 @@ pub fn leaf_sequence_impl<T: FromAtom>(mut t: Noun) -> core::result::Result<Vec<
     }
 
     Ok(ret)
+}
+
+impl Engine for HashEngine {
+    type Output = Vec<NounDigest>;
+
+    #[tracing::instrument(skip_all)]
+    fn reduce_cpu(self) -> Self::Output {
+        if self.stages.is_empty() {
+            return vec![];
+        }
+
+        let mut out_len = 0;
+        let out_pos = self
+            .stages
+            .iter()
+            .take(self.out_stages)
+            .map(|v| {
+                let sum = v.chunks.iter().map(|v| v.out.len()).sum::<usize>();
+                assert!(sum % DIGEST_LENGTH == 0);
+                let r = out_len;
+                out_len += sum / DIGEST_LENGTH;
+                r
+            })
+            .collect::<Vec<_>>();
+        let mut out = vec![NounDigest::default(); out_len];
+        assert!(out_len <= MAX_CHUNK_SIZE);
+
+        let mut cur = vec![];
+
+        // Process stages in reverse order without mutating self.stages
+        for (cur_stage, stage) in self.stages.into_iter().enumerate().rev() {
+            cur = stage.reduce(cur[..].iter().map(|v: &Vec<_>| v.as_ref()));
+
+            if cur_stage < self.out_stages {
+                let stage_len = cur.iter().map(|v| v.len() / DIGEST_LENGTH).sum::<usize>();
+                out[out_pos[cur_stage]..(out_pos[cur_stage] + stage_len)]
+                    .iter_mut()
+                    .zip(cur.iter().flat_map(|v| {
+                        v.chunks(DIGEST_LENGTH)
+                            .map(|v| NounDigest::try_from(v).unwrap())
+                    }))
+                    .for_each(|(a, b)| *a = b);
+            }
+        }
+        out
+    }
+
+    #[cfg(feature = "gpu")]
+    #[tracing::instrument(skip_all)]
+    fn reduce_gpu(self, gpu: gpu::GpuHandle) -> Self::Output {
+        if self.stages.is_empty() {
+            return vec![];
+        }
+
+        gpu::Submittable::gpu_process(self, gpu)
+    }
 }

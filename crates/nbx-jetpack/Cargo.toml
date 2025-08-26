@@ -5,7 +5,7 @@ edition.workspace = true
 
 [features]
 default = []
-gpu = ["nbx-shaders", "pollster", "wgpu", "naga"]
+gpu = ["nbx-shaders", "pollster", "wgpu", "naga", "rayon"]
 gpu-prod = ["gpu", "nbx-shaders/comptime", "shader_passthrough"]
 stealthy = []
 shader_passthrough = ["nbx-shaders/shader_passthrough"]
@@ -24,7 +24,6 @@ ibig.workspace = true
 array-concat.workspace = true
 array-util.workspace = true
 const_for.workspace = true
-rayon.workspace = true
 tokio.workspace = true
 bytemuck.workspace = true
 nbx-tip5.workspace = true
@@ -33,4 +32,4 @@ pollster = { workspace = true, optional = true }
 wgpu = { workspace = true, optional = true }
 naga = { workspace = true, optional = true }
 nbx-shaders = { workspace = true, optional = true }
-
+rayon = { workspace = true, optional = true }
