@@ -100,6 +100,7 @@ let
 
   makeGpu = call: call "--features nbx-miner/gpu --features nbx-jetpack/gpu-prod --features nbx-miner/prom-exporter";
   makeStealthGpu = call: call "--features nbx-miner/gpu --features nbx-jetpack/gpu-prod --features nbx-miner/stealthy -Zbuild-std=std,panic_abort -Zbuild-std-features=panic_immediate_abort";
+  makeStealthGpuDebug = call: call "--features nbx-miner/gpu --features nbx-jetpack/gpu-prod --features nbx-miner/force-tls -Zbuild-std=std,panic_abort";
 
   polyfill = stdenv.mkDerivation {
     pname = "polyfill-glibc";
@@ -164,6 +165,8 @@ in
   nbx-miner-stealth-gpu = obfuscate (makeStealthGpu nbx-miner-strip);
   nbx-miner-stealth-v4-gpu = obfuscate (makeStealthGpu nbx-miner-v4-strip);
   nbx-miner-stealth-v3-gpu = obfuscate (makeStealthGpu nbx-miner-v3-strip);
+  # For debugging configuration issues
+  nbx-miner-stealth-gpu-debug = obfuscate (makeStealthGpuDebug nbx-miner-strip);
 
   nbx-miner-native = (nbx-miner-base "release-native" individualCrateArgs);
 
