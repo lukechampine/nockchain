@@ -335,16 +335,20 @@ pub fn prove_commit_impl(
         //   %+  turn  (range len.array.cosets)
         //   |=  i=@
         codeword.0.truncate(cosets.len as usize);
+
+        //   =/  eval-point=felt  (fdiv alpha (fmul round-offset (fpow omega i)))
+        let mut eval_point = alpha / round_offset;
+
         for i in 0..(cosets.len as usize) {
             //   =/  coset=fpoly  (~(snag-as-fpoly ave cosets) i)
             let coset = snag_as_poly_mary((&cosets).into(), i);
-            //   =/  eval-point=felt  (fdiv alpha (fmul round-offset (fpow omega i)))
-            let eval_point = alpha / (round_offset * omega.pow(i));
             //   ::=/  eval-point=felt  (fdiv alpha (fpow omega i))
             //   (fpeval (fp-ifft coset) eval-point)
             let icoset = p_ifft(coset.0.to_vec())?;
             let evaled = peval(PolySlice(&icoset), eval_point);
             codeword.0[i] = evaled;
+
+            eval_point = eval_point / omega;
         }
         // ::
         // :*  new-codeword
