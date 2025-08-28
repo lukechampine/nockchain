@@ -1,3 +1,6 @@
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
 use nbx_tip5::melt::Melt;
 use zkvm_jetpack::form::math::poly::*;
 use zkvm_jetpack::form::poly::Poly;
@@ -39,13 +42,15 @@ impl<E: ElementEx> SubstituteMulStage<E> {
 #[derive(Clone)]
 pub struct SubstituteIter<'a, E: ElementEx> {
     pub muls: Vec<SubstituteMulStage<E>>,
+    pub zero_traces: Arc<[bool]>,
     pub traces: PolySlice<'a, E>,
 }
 
 impl<'a, E: ElementEx> SubstituteIter<'a, E> {
-    fn new(traces: PolySlice<'a, E>) -> Self {
+    fn new(traces: PolySlice<'a, E>, zero_traces: Arc<[bool]>) -> Self {
         Self {
             muls: vec![],
+            zero_traces,
             traces,
         }
     }
@@ -58,7 +63,7 @@ impl<E: ElementEx> SubstituteIter<'_, E> {
         let r = self
             .muls
             .into_par_iter()
-            .filter_map(|m| {
+            .map(|m| {
                 let operations = m
                     .coms
                     .into_iter()
@@ -78,13 +83,7 @@ impl<E: ElementEx> SubstituteIter<'_, E> {
                     }))
                     .collect::<Vec<_>>();
 
-                // If any of multiplications consists of just zeros, the result of all multiplications
-                //  will be zero. So there is no point in getting started with any of them.
-                if operations.iter().any(|(o, _)| o.iter().all(|a| a.is_zero())) {
-                    return None;
-                }
-
-                Some(operations.into_iter().fold(
+                operations.into_iter().fold(
                     PolyVec(vec![m.scal; out_len]),
                     |mut acc, (o, exp)| {
                         debug_assert_eq!(o.len(), acc.0.len());
@@ -94,11 +93,11 @@ impl<E: ElementEx> SubstituteIter<'_, E> {
                         let a = acc.0.split_at_mut(acc_len).0;
                         let b = o.split_at(acc_len).0;
                         for _ in 0..exp {
-                            p_hadamard_inplace_same(a, b);
+                            p_hadamard_inplace(a, b);
                         }
                         acc
                     },
-                ))
+                )
             })
             .reduce(
                 || PolyVec(vec![E::zero(); out_len]),
@@ -145,6 +144,7 @@ impl<E: ElementEx> SubstituteStage<'_, E> {
 pub struct SubstituteEngine<'a, E: ElementEx> {
     stages: Vec<SubstituteStage<'a, E>>,
     poly_len: usize,
+    zero_trace_cache: BTreeMap<(usize, usize), Arc<[bool]>>,
 }
 
 impl Engine for SubstituteEngine<'_, Melt> {
@@ -174,6 +174,7 @@ impl<'a, E: ElementEx> SubstituteEngine<'a, E> {
         Self {
             stages: vec![],
             poly_len,
+            zero_trace_cache: BTreeMap::new(),
         }
     }
 
@@ -212,7 +213,11 @@ impl<'a, E: ElementEx> SubstituteEngine<'a, E> {
         }
         let stage = &mut self.stages[stage];
         let ret = stage.iters.len();
-        stage.iters.push(SubstituteIter::new(traces));
+        let zero_traces = self.zero_trace_cache.entry((traces.0.as_ptr() as usize, traces.0.len())).or_insert_with(|| {
+            let zt = traces.0.chunks(self.poly_len).map(|c| c.iter().all(|v| v.is_zero())).collect::<Vec<_>>();
+            Arc::from(&*zt)
+        }).clone();
+        stage.iters.push(SubstituteIter::new(traces, zero_traces));
 
         let fits_in_last = stage
             .out
@@ -240,6 +245,11 @@ impl<'a, E: ElementEx> SubstituteEngine<'a, E> {
         }
         let stage = &mut self.stages[stage];
         let iter = &mut stage.iters[iter];
+
+        // If the mul stage hits any zero-trace, we can filter it out
+        if mul.vars.iter().any(|v| iter.zero_traces.get(v.chunk as usize) == Some(&true)) {
+            return;
+        }
 
         // Use the observation the combination of `vars` & `coms` is not unique such that multiple
         // multiplications can be combined if they are of the following form;
