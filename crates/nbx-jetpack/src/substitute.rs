@@ -94,7 +94,7 @@ impl<E: ElementEx> SubstituteIter<'_, E> {
                         let a = acc.0.split_at_mut(acc_len).0;
                         let b = o.split_at(acc_len).0;
                         for _ in 0..exp {
-                            p_hadamard_inplace(a, b);
+                            p_hadamard_inplace_same(a, b);
                         }
                         acc
                     },

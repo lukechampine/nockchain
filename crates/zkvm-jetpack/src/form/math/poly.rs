@@ -340,6 +340,81 @@ pub fn p_hadamard_inplace<T: ElementEx, O: Copy + Into<T>>(a: &mut [T], b: &[O])
         });
 }
 
+#[inline]
+pub fn p_hadamard_inplace_same<T: ElementEx>(a: &mut [T], b: &[T]) {
+    debug_assert_eq!(a.len(), b.len());
+
+    unsafe {
+        let len = a.len();
+        let mut i = 0;
+        let a_ptr = a.as_mut_ptr();
+        let b_ptr = b.as_ptr();
+
+        while i + 16 <= len {
+            if i + 128 <= len {
+                #[cfg(target_arch = "aarch64")]
+                std::arch::asm!(
+                    "prfm pldl1keep, [{0}]",
+                    "prfm pldl1strm, [{1}]",
+                    in(reg) a_ptr.add(i + 128),
+                    in(reg) b_ptr.add(i + 128),
+                    options(nostack, readonly)
+                );
+
+                #[cfg(target_arch = "x86_64")]
+                std::arch::asm!(
+                    "prefetcht0 ({0})",
+                    "prefetcht2 ({1})",
+                    in(reg) a_ptr.add(i + 128),
+                    in(reg) b_ptr.add(i + 128),
+                    options(nostack, readonly)
+                );
+            }
+
+            let b0 = *b.get_unchecked(i);
+            let b1 = *b.get_unchecked(i + 1);
+            let b2 = *b.get_unchecked(i + 2);
+            let b3 = *b.get_unchecked(i + 3);
+            let b4 = *b.get_unchecked(i + 4);
+            let b5 = *b.get_unchecked(i + 5);
+            let b6 = *b.get_unchecked(i + 6);
+            let b7 = *b.get_unchecked(i + 7);
+            let b8 = *b.get_unchecked(i + 8);
+            let b9 = *b.get_unchecked(i + 9);
+            let b10 = *b.get_unchecked(i + 10);
+            let b11 = *b.get_unchecked(i + 11);
+            let b12 = *b.get_unchecked(i + 12);
+            let b13 = *b.get_unchecked(i + 13);
+            let b14 = *b.get_unchecked(i + 14);
+            let b15 = *b.get_unchecked(i + 15);
+
+            *a.get_unchecked_mut(i) = *a.get_unchecked(i) * b0;
+            *a.get_unchecked_mut(i + 1) = *a.get_unchecked(i + 1) * b1;
+            *a.get_unchecked_mut(i + 2) = *a.get_unchecked(i + 2) * b2;
+            *a.get_unchecked_mut(i + 3) = *a.get_unchecked(i + 3) * b3;
+            *a.get_unchecked_mut(i + 4) = *a.get_unchecked(i + 4) * b4;
+            *a.get_unchecked_mut(i + 5) = *a.get_unchecked(i + 5) * b5;
+            *a.get_unchecked_mut(i + 6) = *a.get_unchecked(i + 6) * b6;
+            *a.get_unchecked_mut(i + 7) = *a.get_unchecked(i + 7) * b7;
+            *a.get_unchecked_mut(i + 8) = *a.get_unchecked(i + 8) * b8;
+            *a.get_unchecked_mut(i + 9) = *a.get_unchecked(i + 9) * b9;
+            *a.get_unchecked_mut(i + 10) = *a.get_unchecked(i + 10) * b10;
+            *a.get_unchecked_mut(i + 11) = *a.get_unchecked(i + 11) * b11;
+            *a.get_unchecked_mut(i + 12) = *a.get_unchecked(i + 12) * b12;
+            *a.get_unchecked_mut(i + 13) = *a.get_unchecked(i + 13) * b13;
+            *a.get_unchecked_mut(i + 14) = *a.get_unchecked(i + 14) * b14;
+            *a.get_unchecked_mut(i + 15) = *a.get_unchecked(i + 15) * b15;
+
+            i += 16;
+        }
+
+        while i < len {
+            *a.get_unchecked_mut(i) = *a.get_unchecked(i) * *b.get_unchecked(i);
+            i += 1;
+        }
+    }
+}
+
 #[inline(always)]
 pub fn p_hadamard<T: ElementEx>(a: &[T], b: &[T], res: &mut [T]) {
     assert_eq!(
