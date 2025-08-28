@@ -390,7 +390,7 @@ impl Proof {
         // read-index
         let mut engine = HashEngine::default();
         let i = obj.clone().hash_proof_data(&mut engine);
-        self.hashes.push(engine.reduce()[i]);
+        self.hashes.push(engine.reduce_cpu()[i]);
         self.objects.push(obj);
         self.version = 0;
     }
@@ -470,7 +470,7 @@ pub fn absorb_proof_objects_impl(objs: &[ProofData], hashes: &[NounDigest]) -> T
     for h in objs {
         h.clone().hash_proof_data(&mut engine);
     }
-    let lis_objects = engine.reduce();
+    let lis_objects = engine.reduce_cpu();
     // =/  big-lis=(list noun-digest:tip5)
     //   (turn `(list hashable:tip5)`(weld +.lis-digests +.lis-objects) hash-hashable:tip5)
     let big_lis = hashes.iter().copied().chain(lis_objects);

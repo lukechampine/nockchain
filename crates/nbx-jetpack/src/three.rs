@@ -175,7 +175,7 @@ pub fn hash_noun_varlen(stack: &mut NockStack, sam: Noun) -> Result {
     // ^-  noun-digest
     let mut engine = HashEngine::default();
     engine.push_noun(0, sam)?;
-    let output = engine.reduce()[0]
+    let output = engine.reduce_cpu()[0]
         .map(Belt::from)
         .map(|v| Atom::new(stack, v.0).as_noun());
     Ok(T(stack, &output))
