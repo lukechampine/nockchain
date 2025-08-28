@@ -1,7 +1,12 @@
+#[cfg(feature = "client")]
 pub mod client;
 pub mod proto;
 pub mod server;
 pub mod shared;
+pub mod proxy;
+#[cfg(feature = "client")]
+pub mod poker;
+pub mod client_base;
 
 #[cfg(feature = "stealthy")]
 pub mod metrics {

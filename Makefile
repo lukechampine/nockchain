@@ -64,7 +64,7 @@ build-trivial: ensure-dirs
 	echo '%trivial' > hoon/trivial.hoon
 	hoonc --arbitrary hoon/trivial.hoon
 
-HOON_TARGETS=assets/dumb.jam assets/wal.jam assets/miner.jam assets/jojo.jam
+HOON_TARGETS=assets/dumb.jam assets/wal.jam assets/miner.jam assets/jojo.jam assets/verifier.jam
 
 .PHONY: nuke-hoonc-data
 nuke-hoonc-data:
@@ -117,6 +117,11 @@ assets/miner.jam: ensure-dirs hoon/apps/dumbnet/miner.hoon $(HOON_SRCS)
 	rm -f assets/miner.jam
 	hoonc hoon/apps/dumbnet/miner.hoon hoon
 	mv out.jam assets/miner.jam
+
+assets/verifier.jam: update-hoonc hoon/apps/verifier/verifier.hoon $(HOON_SRCS)
+	$(call show_env_vars)
+	RUST_LOG=trace hoonc hoon/apps/verifier/verifier.hoon hoon
+	mv out.jam assets/verifier.jam
 
 assets/jojo.jam: update-hoonc hoon/apps/jojo.hoon $(HOON_SRCS)
 	$(call show_env_vars)

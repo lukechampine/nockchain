@@ -105,7 +105,7 @@ pub struct MiningConfig {
     #[command(flatten)]
     pub server: nbx_miner::server::MiningConfig,
     #[command(flatten)]
-    pub client: nbx_miner::client::ClientConfig,
+    pub client: nbx_miner::client_base::ClientConfig,
 }
 
 impl MiningConfig {

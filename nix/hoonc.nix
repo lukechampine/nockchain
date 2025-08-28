@@ -1,36 +1,18 @@
-{ lib, stdenv, base, craneLib, commonArgs, ... }:
+{ pkgs, lib, stdenv, base, craneLib, ... }:
 let
-  keepList = [
-    "crates/nockapp"
-    "crates/nockvm"
-    "crates/hoonc"
-    "Cargo.lock"
-    "Cargo.toml"
-  ];
+  src = pkgs.runCommand "workspace" {} ''
+    mkdir -p $out/crates
+    cp ${../Cargo-hoonc.toml} $out/Cargo.toml
+    cp ${../Cargo.lock} $out/Cargo.lock
+    cp -a ${../crates/nockapp} $out/crates/nockapp
+    cp -a ${../crates/nockvm} $out/crates/nockvm
+    cp -a ${../crates/hoonc} $out/crates/hoonc
+  '';
 
-  # src = craneLib.cleanCargoSource ./.;
-  src = base.filteredRoot ../. (path: type:
-    if builtins.elem path keepList then
-      true
-    else if type == "directory" && lib.strings.hasInfix "crates" path then
-      true
-    else if lib.strings.hasSuffix "src/lib.rs" path then
-      true
-    else if lib.strings.hasSuffix "src/main.rs" path then
-      true
-    else
-      builtins.any (k: lib.strings.hasInfix "${k}" path) keepList
-  );
-
-  hooncCommonArgs = commonArgs // {
-    pname = "hoonc-deps";
-  };
-  cargoArtifacts = craneLib.buildDepsOnly hooncCommonArgs;
-
-  individualCrateArgs = hooncCommonArgs // {
-    inherit cargoArtifacts;
+  individualCrateArgs = {
+    pname = "hoonc";
+    inherit src;
     inherit (craneLib.crateNameFromCargoToml { inherit src; }) version;
-    # NB: we disable tests since we'll run them all via cargo-nextest
     doCheck = false;
   };
 

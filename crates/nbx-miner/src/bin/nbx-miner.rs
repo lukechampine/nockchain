@@ -1,5 +1,5 @@
 use clap::Parser;
-use nbx_miner::client::ClientConfig;
+use nbx_miner::client_base::ClientConfig;
 use nockapp::kernel::boot::{self, Cli as NockappCli};
 
 // When enabled, use jemalloc for more stable memory allocation

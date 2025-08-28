@@ -4180,6 +4180,7 @@ dependencies = [
  "flume",
  "futures",
  "gdt-cpus",
+ "ibig",
  "kernels",
  "metrics",
  "metrics-exporter-prometheus",
@@ -4197,8 +4198,10 @@ dependencies = [
  "tikv-jemallocator",
  "tokio",
  "tokio-rustls",
+ "tokio-stream",
  "tracing",
  "tracing-test",
+ "x509-parser 0.16.0",
  "zkvm-jetpack",
 ]
 
@@ -6778,6 +6781,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

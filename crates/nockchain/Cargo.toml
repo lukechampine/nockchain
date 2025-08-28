@@ -49,7 +49,7 @@ tracy-client = { workspace = true, optional = true }
 
 zkvm-jetpack.workspace = true
 nbx-jetpack.workspace = true
-nbx-miner.workspace = true
+nbx-miner = { workspace = true, features = ["client"] }
 metrics-exporter-prometheus.workspace = true
 metrics-util.workspace = true
 

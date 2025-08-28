@@ -2,8 +2,9 @@ use std::collections::BTreeMap;
 use std::future::Future;
 use std::io::Cursor;
 use std::net::{Ipv4Addr, SocketAddr};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::pin::Pin;
+use std::time::Instant;
 
 use nockapp::noun::slab::{slab_equality, NounSlab};
 use nockapp::wire::Wire;
@@ -17,6 +18,9 @@ use tokio_rustls::client;
 use tokio_rustls::server;
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 use nbx_jetpack::log::*;
+use x509_parser::oid_registry::OID_X509_COMMON_NAME;
+use x509_parser::prelude::*;
+use zkvm_jetpack::form::Belt;
 
 #[derive(Debug)]
 pub struct MiningData {
@@ -25,6 +29,7 @@ pub struct MiningData {
     pub target: NounSlab,
     pub pow_len: u64,
     pub block_height: u64,
+    pub fixed_nonce_atoms: Vec<Belt>,
 }
 
 impl PartialEq for MiningData {
@@ -51,8 +56,8 @@ pub struct MiningResult {
     pub attempt_millis: u32,
     pub gpu_enqueue_millis: u32,
     pub gpu_submit_millis: u32,
-    pub gpu_process_millis: u32,
-    pub is_block: bool,
+    pub gpu_wait_millis: u32,
+    pub target_hit: bool,
     pub poke: Option<NounSlab>,
     pub effect: Option<NounSlab>,
 }
@@ -218,13 +223,37 @@ pub async fn tls_accept(
 pub async fn tls_accept_wrap(
     tcp: impl Future<Output = std::io::Result<(TcpStream, SocketAddr)>>,
     tls: Option<TlsServerConfig>
-) -> std::io::Result<(Pin<Box<dyn 'static + AsyncReadWrite + Send>>, SocketAddr)> {
+) -> std::io::Result<(Pin<Box<dyn 'static + AsyncReadWrite + Send>>, SocketAddr, Option<Arc<str>>)> {
     let (tcp, addr) = tcp.await?;
     trace!("Accepted {addr}");
     if let Some(tls) = tls {
         let tls = tls_accept(tcp, tls).await?;
-        Ok((Box::pin(tls), addr))
+        let tls_name = tls.get_ref().1.peer_certificates().and_then(|v| {
+            let c = v.first()?;
+            let (_rem, x509) = X509Certificate::from_der(c.as_ref()).ok()?;
+            let cn = x509.subject()
+                .iter_attributes()
+                .find(|attr| attr.attr_type() == &OID_X509_COMMON_NAME)
+                .and_then(|attr| attr.as_str().ok())?;
+            Some(cn.into())
+        });
+        Ok((Box::pin(tls), addr, tls_name))
     } else {
-        Ok((Box::pin(tcp), addr))
+        Ok((Box::pin(tcp), addr, None))
+    }
+}
+
+pub struct TimeWriter(Arc<OnceLock<Instant>>);
+
+impl Drop for TimeWriter {
+    fn drop(&mut self) {
+        let _ = self.0.set(Instant::now());
+    }
+}
+
+impl TimeWriter {
+    pub fn new() -> (Self, Arc<OnceLock<Instant>>) {
+        let arc: Arc<OnceLock<Instant>> = Arc::default();
+        (Self(arc.clone()), arc)
     }
 }

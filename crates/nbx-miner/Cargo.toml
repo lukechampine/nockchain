@@ -12,9 +12,20 @@ gpu = ["nbx-jetpack/gpu-prod"]
 stealthy = ["force-tls", "nbx-jetpack/stealthy"]
 force-tls = []
 prom-exporter = ["metrics-exporter-prometheus", "metrics-util"]
+client = ["kernels/miner"]
+verifier = ["kernels/verifier"]
+force-preverify = ["verifier"]
+
+[[bin]]
+name = "nbx-proxy"
+required-features = ["verifier"]
+
+[[bin]]
+name = "nbx-miner"
+required-features = ["client"]
 
 [dependencies]
-kernels = { workspace = true, features = ["miner"] }
+kernels = { workspace = true, features = [] }
 nockapp.workspace = true
 nockvm.workspace = true
 nockvm_macros.workspace = true
@@ -38,9 +49,12 @@ strum.workspace = true
 rustls.workspace = true
 rustls-pemfile.workspace = true
 tokio-rustls.workspace = true
+tokio-stream = { workspace = true, features = ["sync"] }
+x509-parser.workspace = true
 metrics.workspace = true
 metrics-exporter-prometheus = { workspace = true, optional = true }
 metrics-util = { workspace = true, optional = true }
+ibig.workspace = true
 
 zkvm-jetpack.workspace = true
 nbx-jetpack.workspace = true

@@ -1,7 +1,7 @@
 { stdenv, pkgs, lib, craneLib, rustToolchainFor, ... }:
 let
   base = pkgs.callPackage ./base.nix { inherit pkgs lib; };
-  hoonc = pkgs.callPackage ./hoonc.nix { inherit stdenv lib base craneLib commonArgs; };
+  hoonc = pkgs.callPackage ./hoonc.nix { inherit stdenv lib base craneLib; };
   jam-pkg = pkgs.callPackage ./jam.nix { inherit base hoonc; };
 
   rustToolchain = rustToolchainFor pkgs;
@@ -75,9 +75,18 @@ let
   ica // {
     pname = "nbx-miner";
     CARGO_PROFILE = profile;
-    cargoExtraArgs = "-p nbx-miner --features nbx-miner/jemalloc ${extraArgs}";
+    cargoExtraArgs = "-p nbx-miner --bin nbx-miner --features nbx-miner/jemalloc,nbx-miner/client ${extraArgs}";
     buildInputs = [ hoonc.hoonc ];
     preBuild = "mkdir -p assets && cp ${jam-pkg.miner-jam.out} './assets/miner.jam'";
+  });
+
+  nbx-proxy-base = profile: extraArgs: ica: craneLib.buildPackage (
+  ica // {
+    pname = "nbx-miner";
+    CARGO_PROFILE = profile;
+    cargoExtraArgs = "-p nbx-miner --bin nbx-proxy --features nbx-miner/jemalloc,nbx-miner/verifier,nbx-miner/force-preverify ${extraArgs}";
+    buildInputs = [ hoonc.hoonc ];
+    preBuild = "mkdir -p assets && cp ${jam-pkg.verifier-jam.out} './assets/verifier.jam'";
   });
 
   profile-v = v: if lib.strings.hasInfix "x86_64-" pkgs.system then "release-v${v}" else throw "release-v${v} is only supported on x86_64 targets!";
@@ -169,6 +178,8 @@ in
   nbx-miner-stealth-gpu-debug = obfuscate (makeStealthGpuDebug nbx-miner-strip);
 
   nbx-miner-native = (nbx-miner-base "release-native" individualCrateArgs);
+
+  nbx-proxy = (nbx-proxy-base "release" "" individualCrateArgs);
 
   polyfill-glibc = polyfill;
 }
