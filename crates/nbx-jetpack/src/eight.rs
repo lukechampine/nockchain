@@ -501,7 +501,7 @@ fn process_composition_constraints<'a>(
     // ::  mp-substitute-ultra returns a list because the %comp
     // ::  constraint type can contain multiple mp-mega constraints.
     // ::
-    let mut acc = PolyVec(vec![Melt::zero()]);
+    let mut acc = vec![Melt::zero(); 2 * (fri_deg_bound as usize + 1)];
     let mut idx = 0;
 
     for ((degs, _), comps) in constraints.iter().zip(comp_cnts) {
@@ -520,9 +520,9 @@ fn process_composition_constraints<'a>(
             // ::  in the array.
             // ::
             // =/  alpha  (~(snag bop weights) (mul 2 idx))
-            let alpha = weights.0[2 * idx];
+            let alpha = Melt::from(weights.0[2 * idx]);
             // =/  beta   (~(snag bop weights) (add 1 (mul 2 idx)))
-            let beta = weights.0[1 + 2 * idx];
+            let beta = Melt::from(weights.0[1 + 2 * idx]);
             // ::
             // ::  adjust degree up to fri-deg-bound.
             // ::  if fri-deg-bound is D-1 then we construct:
@@ -533,24 +533,21 @@ fn process_composition_constraints<'a>(
             // %+  bpadd  acc
             // %+  bpadd
             //   (bpscal beta comp-coeff)
-            let mut beta_vec = comp_coeff.clone();
-            pscal_inplace(beta, &mut beta_vec);
             // %-  %~  weld  bop
             //     (init-bpoly (reap (sub fri-deg-bound.dp deg) 0))
-            let mut alpha_vec = vec![Melt::zero(); (fri_deg_bound - *deg) as usize];
-            alpha_vec.extend(comp_coeff.clone());
-            // (bpscal alpha comp-coeff)
-            pscal_inplace(alpha, &mut alpha_vec);
-            padd_in_place(&mut alpha_vec, &beta_vec);
-            let acc_len = acc.len();
-            acc.0
-                .resize(core::cmp::max(acc_len, alpha_vec.len()), Melt::zero());
-            padd_in_place(&mut acc.0, &alpha_vec);
+            let alpha_offset = (fri_deg_bound - *deg) as usize;
+
+            for (acc, &coeff) in acc.iter_mut().zip(&comp_coeff) {
+                *acc += coeff * beta;
+            }
+            for (acc, &coeff) in acc[alpha_offset..].iter_mut().zip(&comp_coeff) {
+                *acc += coeff * alpha;
+            }
             idx += 1;
         }
     }
 
-    Ok(PolyVec(pcan(acc.0)))
+    Ok(PolyVec(pcan(acc)))
 }
 
 type ProcessedDeg = Vec<(Vec<u64>, Noun)>;
