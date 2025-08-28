@@ -517,8 +517,7 @@ pub fn build_merk_heap_impl<T: ElementEx>(
     });
 
     engine.set_out_stages(height);
-    let mut res = engine
-        .reduce();
+    let mut res = engine.reduce_cpu();
 
     assert_eq!(res.len(), size as usize);
 
