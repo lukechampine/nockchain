@@ -1,13 +1,13 @@
 use nbx_tip5::melt::Melt;
-
 use zkvm_jetpack::form::math::poly::*;
 use zkvm_jetpack::form::poly::Poly;
 use zkvm_jetpack::form::{ElementEx, PolySlice, PolyVec};
-use crate::parallel::prelude::*;
-use crate::engine::Engine;
-use crate::log::*;
+
 #[cfg(feature = "gpu")]
 use super::gpu;
+use crate::engine::Engine;
+use crate::log::*;
+use crate::parallel::prelude::*;
 
 // 64MB in melts/belts
 pub const MAX_CHUNK_SIZE: usize = 0x4000000 / core::mem::size_of::<u64>();
@@ -55,13 +55,12 @@ impl<E: ElementEx> SubstituteIter<'_, E> {
     fn reduce(self, inp: &[impl AsRef<[E]> + Send + Sync], out: &mut [E]) {
         let out_len = out.len();
         let inp_chunks = MAX_CHUNK_SIZE / out_len;
-        let r = self.muls
+        let r = self
+            .muls
             .into_par_iter()
-            .map(|m| {
-                let acc = PolyVec(vec![m.scal; out_len]);
-
-                // NOTE: never parallel iter here, because it is slow
-                m.coms
+            .filter_map(|m| {
+                let operations = m
+                    .coms
                     .into_iter()
                     .map(|SubstituteOp { chunk, exp }| {
                         (
@@ -77,7 +76,17 @@ impl<E: ElementEx> SubstituteIter<'_, E> {
                         let var = &var[..out_len];
                         (var, exp as u64)
                     }))
-                    .fold(acc, |mut acc, (o, exp)| {
+                    .collect::<Vec<_>>();
+
+                // If any of multiplications consists of just zeros, the result of all multiplications
+                //  will be zero. So there is no point in getting started with any of them.
+                if operations.iter().any(|(o, _)| o.iter().all(|a| a.is_zero())) {
+                    return None;
+                }
+
+                Some(operations.into_iter().fold(
+                    PolyVec(vec![m.scal; out_len]),
+                    |mut acc, (o, exp)| {
                         debug_assert_eq!(o.len(), acc.0.len());
                         debug_assert!(o.len() % 16 == 0);
                         debug_assert!(acc.0.len() % 16 == 0);
@@ -88,7 +97,8 @@ impl<E: ElementEx> SubstituteIter<'_, E> {
                             p_hadamard_inplace(a, b);
                         }
                         acc
-                    })
+                    },
+                ))
             })
             .reduce(
                 || PolyVec(vec![E::zero(); out_len]),
@@ -119,13 +129,13 @@ impl<E: ElementEx> Default for SubstituteStage<'_, E> {
 impl<E: ElementEx> SubstituteStage<'_, E> {
     #[tracing::instrument(skip_all)]
     fn reduce(mut self, poly_len: usize, inp: &[impl AsRef<[E]> + Send + Sync]) -> Vec<Vec<E>> {
-        let t = self.iters
+        let t = self
+            .iters
             .into_iter()
             .zip(self.out.iter_mut().flat_map(|m| m.chunks_mut(poly_len)))
             .collect::<Vec<_>>();
 
-        t.into_par_iter()
-            .for_each(|(i, o)| i.reduce(inp, o));
+        t.into_par_iter().for_each(|(i, o)| i.reduce(inp, o));
 
         self.out
     }
