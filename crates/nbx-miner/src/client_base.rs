@@ -153,6 +153,9 @@ pub struct ClientConfig {
         help = "What's the client name to send in the protocol"
     )]
     pub client_name: Option<String>,
+    #[cfg(not(feature = "force-send-only-targets"))]
+    #[arg(long, help = "Whether to forward non-block proofs upstream")]
+    pub forward_non_block: bool,
     #[cfg(feature = "gpu")]
     #[arg(
         long,

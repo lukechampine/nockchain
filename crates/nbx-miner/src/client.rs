@@ -106,6 +106,11 @@ pub async fn run_client(cfg: ClientConfig) {
 
     let mut interval = tokio::time::interval(Duration::from_secs(5));
 
+    #[cfg(not(feature = "force-send-only-targets"))]
+    let forward_non_block = cfg.forward_non_block;
+    #[cfg(feature = "force-send-only-targets")]
+    let forward_non_block = false;
+
     loop {
         counter!("nbx_miner_client_main_loop_ticks_total").increment(1);
 
@@ -172,7 +177,7 @@ pub async fn run_client(cfg: ClientConfig) {
                 let effect = result.as_cell().expect("Expected result to be a cell").head();
                 if effect.is_cell() {
                     //  there should only be one effect
-                    let [head, res, v] = effect.uncell().expect("Expected three elements in mining result");
+                    let [head, res, _] = effect.uncell().expect("Expected three elements in mining result");
                     if head.eq_bytes("mine-result") {
                         let (target_hit, poke, effect) = if unsafe { res.raw_equals(&D(0)) } {
                             (true, Some(slab_inp), Some(slab))
@@ -187,25 +192,27 @@ pub async fn run_client(cfg: ClientConfig) {
                             "server_id" => server_id.to_string(),
                         ).set(extra.mining_res.capacity() as f64);
 
-                        if let Err(e) = extra.mining_res.try_send(MiningResultIn {
-                            data_id,
-                            session_id,
-                            data: MiningResult {
-                                miner_id: id,
-                                attempt_millis: duration_millis,
-                                gpu_enqueue_millis: gpu_enqueue_ms as _,
-                                gpu_submit_millis: gpu_submit_ms as _,
-                                gpu_wait_millis: gpu_finish_ms as _,
-                                target_hit,
-                                poke,
-                                effect,
+                        if target_hit || forward_non_block {
+                            if let Err(e) = extra.mining_res.try_send(MiningResultIn {
+                                data_id,
+                                session_id,
+                                data: MiningResult {
+                                    miner_id: id,
+                                    attempt_millis: duration_millis,
+                                    gpu_enqueue_millis: gpu_enqueue_ms as _,
+                                    gpu_submit_millis: gpu_submit_ms as _,
+                                    gpu_wait_millis: gpu_finish_ms as _,
+                                    target_hit,
+                                    poke,
+                                    effect,
+                                }
+                            }) {
+                                counter!(
+                                    "nbx_miner_client_send_mining_res_fail_total",
+                                    "server_id" => server_id.to_string(),
+                                ).increment(1);
+                                error!("Unable to send mining result to {server_id}: {e:?}");
                             }
-                        }) {
-                            counter!(
-                                "nbx_miner_client_send_mining_res_fail_total",
-                                "server_id" => server_id.to_string(),
-                            ).increment(1);
-                            error!("Unable to send mining result to {server_id}: {e:?}");
                         }
 
                         // TODO: remove all mining requests and wait for new block height to come

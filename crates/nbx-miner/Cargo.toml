@@ -15,6 +15,7 @@ prom-exporter = ["metrics-exporter-prometheus", "metrics-util"]
 client = ["kernels/miner"]
 verifier = ["kernels/verifier"]
 force-preverify = ["verifier"]
+force-send-only-targets = []
 
 [[bin]]
 name = "nbx-proxy"

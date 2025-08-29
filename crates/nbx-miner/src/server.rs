@@ -366,7 +366,7 @@ pub async fn mining_server<F: FnMut(MiningResult, usize, Arc<str>, Arc<MiningDat
                 let run_cnt_res = run_cnt;
                 run_cnt += 1;
 
-                debug!("Target hit? {}", data.target_hit);
+                trace!("Target hit? {}", data.target_hit);
 
                 if data.target_hit {
                     let Some((poke, effect_slab)) = data.poke.as_ref().zip(data.effect.as_ref()) else {
@@ -479,7 +479,7 @@ pub async fn mining_server<F: FnMut(MiningResult, usize, Arc<str>, Arc<MiningDat
                         continue;
                     };
                 } else {
-                    debug!("didn't find block, starting new attempt. client={} miner={}", client_id, data.miner_id);
+                    trace!("didn't find block, starting new attempt. client={} miner={}", client_id, data.miner_id);
                     let Some((poke, effect)) = data.poke.zip(data.effect) else {
                         continue;
                     };
