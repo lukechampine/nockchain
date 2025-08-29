@@ -20,7 +20,7 @@ use crate::shared;
 
 pub const PROTOCOL: u32 = 5;
 pub const NAME_MAX_LENGTH: usize = 16;
-pub const RECENTLY_EXPIRED_DURATION: Duration = Duration::from_secs(10);
+pub const RECENTLY_EXPIRED_DURATION: Duration = Duration::from_secs(20);
 
 pub fn name_valid(client_name: &str) -> bool {
     client_name.len() <= NAME_MAX_LENGTH && client_name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')

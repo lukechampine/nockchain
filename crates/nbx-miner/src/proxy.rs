@@ -104,8 +104,9 @@ fn to_bn(mut v: UBig) -> NounSlab {
     slab
 }
 
-const ROLLING_TIMING_CNT: usize = 10;
-const DIFF_ADJUSTMENT_PRC: u64 = 33;
+const ROLLING_TIMING_CNT: usize = 20;
+const DIFF_ADJUSTMENT_PRC: u64 = 20;
+
 struct DifficultyTracker {
     // Current difficulty multiplied by 10
     current_diff10: u64,
