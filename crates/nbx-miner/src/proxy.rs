@@ -192,7 +192,7 @@ pub async fn run_proxy(cfg: ProxyConfig) {
     }));
 
     // Any pokes that passed server's verification steps.
-    let process_target = |mut data: MiningResult, _, in_data: Arc<MiningData>, poke_slab: NounSlab| {
+    let process_target = |mut data: MiningResult, _, cn: Arc<str>, in_data: Arc<MiningData>, poke_slab: NounSlab| {
         let data_info = server_id_map.lock().unwrap().get(&Arc::as_ptr(&in_data)).map(|(_, v)| (v.clone(), server_extras[v.1].mining_res.clone()));
         let diff_tracker = diff_tracker.clone();
         async move {
@@ -216,6 +216,7 @@ pub async fn run_proxy(cfg: ProxyConfig) {
 
             counter!(
                 "nbx_miner_proxy_accumulated_work",
+                "client_cn" => cn,
                 "server_id" => server_id.to_string(),
             ).increment(proxy_diff);
 
@@ -329,6 +330,9 @@ pub async fn run_proxy(cfg: ProxyConfig) {
                     }
 
                     let mut guard = diff_tracker.lock().unwrap();
+                    gauge!(
+                        "nbx_miner_proxy_difficulty",
+                    ).set((guard.current_diff10 / 10) as f64);
                     // Update 50% over target interval to not interfere with proof based updates
                     // that much.
                     if guard.last_updated.elapsed() >= guard.target_interval * 3 / 2 {

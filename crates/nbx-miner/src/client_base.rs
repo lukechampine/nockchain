@@ -16,7 +16,7 @@ use crate::metrics::gauge;
 use crate::proto::{self,MiningAckOut, MiningDataOut, MiningResultIn};
 use crate::shared::{tls_connect_wrap, TlsClientConfig};
 
-pub(crate) struct ServerExtras {
+pub struct ServerExtras {
     pub mining_res: mpsc::Sender<MiningResultIn>,
     pub live: Arc<AtomicBool>,
 }

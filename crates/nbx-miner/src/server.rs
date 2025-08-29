@@ -5,7 +5,7 @@ use std::sync::{Arc, OnceLock};
 use std::pin::pin;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use clap::Args;
+use clap::{Args, ValueEnum};
 #[cfg(feature = "verifier")]
 use kernels::verifier::KERNEL;
 #[cfg(feature = "verifier")]
@@ -54,6 +54,8 @@ pub struct MiningConfig {
     miner_bind_tls: bool,
     #[cfg(all(feature = "verifier", not(feature = "force-preverify")))]
     miner_preverify: bool,
+    #[arg(long, help = "Which mining attempts to save", default_value = "none")]
+    miner_save_attempts: SaveMineAttempts,
 }
 
 impl Default for MiningConfig {
@@ -64,6 +66,7 @@ impl Default for MiningConfig {
             miner_bind_tls: false,
             #[cfg(all(feature = "verifier", not(feature = "force-preverify")))]
             miner_preverify: cfg!(feature = "force-preverify"),
+            miner_save_attempts: Default::default(),
         }
     }
 }
@@ -88,17 +91,17 @@ pub async fn bind(cfg: &MiningConfig) -> Result<TcpListener> {
     Ok(listener)
 }
 
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]
 enum SaveMineAttempts {
     #[default]
     None,
     All,
-    Blocks,
+    TargetHit,
 }
 
 impl SaveMineAttempts {
     fn should_save_lucky(self) -> bool {
-        matches!(self, Self::All | Self::Blocks)
+        matches!(self, Self::All | Self::TargetHit)
     }
 
     fn should_save_unlucky(self) -> bool {
@@ -118,15 +121,15 @@ async fn save_mine_attempt(inp: &NounSlab, res: &NounSlab, run_id: &str, run_cnt
 }
 
 #[derive(Default)]
-pub(crate) struct Clients {
-    handles: BTreeMap<usize, AbortHandle>,
+pub(crate) struct Clients<M> {
+    handles: BTreeMap<usize, (AbortHandle, M)>,
     ids: HashMap<Id, usize>,
 }
 
-impl Clients {
+impl<M> Clients<M> {
     pub fn abort(&mut self, client: usize) {
         debug!("Aborting client_id={client}");
-        self.handles.get(&client).unwrap().abort();
+        self.handles.get(&client).unwrap().0.abort();
     }
 
     pub fn remove(&mut self, id: Id) -> Option<usize> {
@@ -135,9 +138,13 @@ impl Clients {
         Some(client)
     }
 
-    pub fn add(&mut self, client: usize, handle: AbortHandle) {
+    pub fn add(&mut self, client: usize, handle: AbortHandle, metadata: M) {
         self.ids.insert(handle.id(), client);
-        self.handles.insert(client, handle);
+        self.handles.insert(client, (handle, metadata));
+    }
+
+    pub fn lookup(&self, client: usize) -> Option<&M> {
+        self.handles.get(&client).map(|(_, v)| v)
     }
 }
 
@@ -148,8 +155,8 @@ pub async fn mining_driver(
 ) -> Result {
     let (reqs_out, reqs_in) = mpsc::channel(1);
 
-    let process_target = |data: MiningResult, client_id: usize, _, poke_slab: NounSlab| {
-        info!("Found block! client={} miner={}", client_id, data.miner_id);
+    let process_target = |data: MiningResult, client_id: usize, cn: Arc<str>, _, poke_slab: NounSlab| {
+        info!("Found block! client={} cn={cn} miner={}", client_id, data.miner_id);
         let fut = handle.poke(MiningWire::Mined.to_wire(), poke_slab);
         async move {
             fut.await.map(|_| ())
@@ -239,7 +246,7 @@ pub async fn mining_driver(
     Ok(())
 }
 
-pub async fn mining_server<F: FnMut(MiningResult, usize, Arc<MiningData>, NounSlab) -> Fut, Fut: Future<Output = Result>>(
+pub async fn mining_server<F: FnMut(MiningResult, usize, Arc<str>, Arc<MiningData>, NounSlab) -> Fut, Fut: Future<Output = Result>>(
     cfg: MiningConfig,
     listener: TcpListener,
     mut reqs_in: mpsc::Receiver<(Arc<MiningData>, Arc<OnceLock<Instant>>)>,
@@ -289,7 +296,7 @@ pub async fn mining_server<F: FnMut(MiningResult, usize, Arc<MiningData>, NounSl
     };
     client_set.spawn(accept_loop);
 
-    let save_mine_attempts = SaveMineAttempts::Blocks;
+    let save_mine_attempts = cfg.miner_save_attempts;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("time went backwards");
@@ -330,9 +337,9 @@ pub async fn mining_server<F: FnMut(MiningResult, usize, Arc<MiningData>, NounSl
                 debug!("Accepted client_id={client_cnt} with cn={cn:?} on {a}");
                 replay_mining_data.retain(|(_, v)| v.get().is_none());
                 let cmd = futures::stream::iter(replay_mining_data.clone()).chain(BroadcastStream::new(mining_data_tx.subscribe()).filter_map(|v| async move { v.ok() }));
-                let srv = server(s, cmd, client_cnt, cn, tx.clone());
+                let srv = server(s, cmd, client_cnt, cn.clone(), tx.clone());
                 let srv = client_set.spawn(srv);
-                clients.add(client_cnt, srv);
+                clients.add(client_cnt, srv, cn);
                 client_cnt += 1;
             },
             v = client_set.join_next_with_id() => {
@@ -350,6 +357,11 @@ pub async fn mining_server<F: FnMut(MiningResult, usize, Arc<MiningData>, NounSl
             }
             data = rx.recv() => {
                 let MiningResultOut { data, client_id, in_data, .. } = data.expect("Result senders died");
+
+                let Some(cn) = clients.lookup(client_id).cloned() else {
+                    error!("Unable to lookup client, client_id={client_id}");
+                    continue;
+                };
 
                 let run_cnt_res = run_cnt;
                 run_cnt += 1;
@@ -461,7 +473,7 @@ pub async fn mining_server<F: FnMut(MiningResult, usize, Arc<MiningData>, NounSl
                         }
                     }
 
-                    if process_target(data, client_id, in_data, poke_slab).await.is_err() {
+                    if process_target(data, client_id, cn, in_data, poke_slab).await.is_err() {
                         error!("Mined PoW was not accepted. client_id={client_id}");
                         clients.abort(client_id);
                         continue;

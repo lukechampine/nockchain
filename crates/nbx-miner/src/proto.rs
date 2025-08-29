@@ -19,11 +19,11 @@ use crate::metrics::{counter, gauge, histogram};
 use crate::shared;
 
 pub const PROTOCOL: u32 = 5;
-pub const CLIENT_NAME_MAX_LENGTH: usize = 16;
+pub const NAME_MAX_LENGTH: usize = 16;
 pub const RECENTLY_EXPIRED_DURATION: Duration = Duration::from_secs(10);
 
-pub fn client_name_valid(client_name: &str) -> bool {
-    client_name.len() <= CLIENT_NAME_MAX_LENGTH && client_name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+pub fn name_valid(client_name: &str) -> bool {
+    client_name.len() <= NAME_MAX_LENGTH && client_name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 #[derive(Encode, Decode, Clone, Debug)]
@@ -107,7 +107,7 @@ fn cue(d: Vec<u8>) -> NounSlab {
     slab
 }
 
-async fn binsend(mut stream: impl AsyncWrite + Unpin, target_name: Arc<str>, msg_type: &'static str, d: impl Encode) -> io::Result<()> {
+async fn binsend(mut stream: impl AsyncWrite + Unpin, target_cn: Arc<str>, target_name: Arc<str>, msg_type: &'static str, d: impl Encode) -> io::Result<()> {
     let t = Instant::now();
     let d = bincode::encode_to_vec(d, bincode::config::standard())
         .map_err(|_| io::ErrorKind::InvalidData)?;
@@ -116,13 +116,14 @@ async fn binsend(mut stream: impl AsyncWrite + Unpin, target_name: Arc<str>, msg
     stream.flush().await?;
     histogram!(
         "nbx_miner_binsend_seconds",
+        "target_cn" => target_cn,
         "target_name" => target_name,
         "msg_type" => msg_type,
     ).record(t.elapsed().as_secs_f64());
     Ok(())
 }
 
-async fn binrecv<T: Decode<()>>(mut stream: impl AsyncRead + Unpin, target_name: Arc<str>, msg_type: &'static str) -> io::Result<T> {
+async fn binrecv<T: Decode<()>>(mut stream: impl AsyncRead + Unpin, target_cn: Arc<str>, target_name: Arc<str>, msg_type: &'static str) -> io::Result<T> {
     let len = stream.read_u32_le().await?;
 
     let t = Instant::now();
@@ -139,6 +140,7 @@ async fn binrecv<T: Decode<()>>(mut stream: impl AsyncRead + Unpin, target_name:
 
     histogram!(
         "nbx_miner_binrecv_seconds",
+        "target_cn" => target_cn,
         "target_name" => target_name,
         "msg_type" => msg_type,
     ).record(t.elapsed().as_secs_f64());
@@ -163,11 +165,13 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
 
     let server_name: Arc<str> = server_name.into();
     let server_id_str: Arc<str> = Arc::from(&*server_id.to_string());
+    let server_cn: Arc<str> = "".into();
 
     // Initial handshake
     let nonce = random::<u32>();
     binsend(
         &mut write,
+        server_cn.clone(),
         server_name.clone(),
         "hello",
         Hello {
@@ -176,7 +180,7 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
         },
     )
     .await?;
-    let resp: Hello = binrecv(&mut read, server_name.clone(), "hello").await?;
+    let resp: Hello = binrecv(&mut read, server_cn.clone(), server_name.clone(), "hello").await?;
     if resp.protocol != PROTOCOL {
         return Err(io::ErrorKind::Unsupported.into());
     }
@@ -186,6 +190,7 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
 
     binsend(
         &mut write,
+        server_cn.clone(),
         server_name.clone(),
         "client_name",
         client_name
@@ -217,7 +222,7 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
 
     let receiver = async {
         loop {
-            let datas: MiningDatas = binrecv(&mut read, server_name.clone(), "mining_data").await?;
+            let datas: MiningDatas = binrecv(&mut read, server_cn.clone(), server_name.clone(), "mining_data").await?;
             gauge!(
                 "nbx_miner_proto_client_block_height",
                 "server_name" => server_name.clone(),
@@ -251,6 +256,7 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
         write.write_u8(MinerResponse::METADATA as _).await?;
         binsend(
             &mut write,
+            server_cn.clone(),
             server_name.clone(),
             "miner_metadata",
             SetMinerMetadata { miners: metadata }
@@ -293,6 +299,7 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
             write.write_u8(MinerResponse::RESULT as _).await?;
             binsend(
                 &mut write,
+                server_cn.clone(),
                 server_name.clone(),
                 "mining_result",
                 rdata
@@ -319,7 +326,7 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
     stream: S,
     mining_data: impl Stream<Item = (Arc<shared::MiningData>, Arc<OnceLock<Instant>>)>,
     client_id: usize,
-    client_cn: Option<Arc<str>>,
+    client_cn: Arc<str>,
     results_out: mpsc::Sender<MiningResultOut>,
 ) -> io::Result<()> {
     let stream = pin!(stream);
@@ -328,24 +335,23 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
     let (mut read, mut write) = split(stream);
 
     // Initial handshake
-    let mut req: Hello = binrecv(&mut read, "".into(), "hello").await?;
+    let mut req: Hello = binrecv(&mut read, client_cn.clone(), "".into(), "hello").await?;
     if req.protocol != PROTOCOL {
         return Err(io::ErrorKind::Unsupported.into());
     }
     req.nonce += 1;
 
-    let client_cn = client_cn.unwrap_or_default();
-
     binsend(
         &mut write,
         client_cn.clone(),
+        "".into(),
         "hello",
         req
     ).await?;
 
-    let client_name: String = binrecv(&mut read, client_cn.clone(), "client_name").await?;
+    let client_name: String = binrecv(&mut read, client_cn.clone(), "".into(), "client_name").await?;
 
-    if !client_name_valid(&client_name) {
+    if !name_valid(&client_name) {
         return Err(io::ErrorKind::InvalidData.into());
     }
 
@@ -353,7 +359,7 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
 
     debug!("Client ID {client_id} with CN {client_cn} joined with name '{client_name}'");
 
-    let client_name: Arc<str> = Arc::from(&*format!("{client_cn}-{client_name}"));
+    let client_name: Arc<str> = (*client_name).into();
 
     #[derive(Default)]
     struct DataTracker {
@@ -411,6 +417,7 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
             gauge!(
                 "nbx_miner_proto_server_channel_capacity",
                 "channel_name" => "results_out",
+                "client_cn" => client_cn.clone(),
                 "client_name" => client_name.clone(),
                 "client_id" => client_id_str.clone(),
             ).set(results_out.capacity() as f64);
@@ -438,6 +445,7 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
                         gauge!(
                             "nbx_miner_proto_server_block_height",
                             "client_id" => client_id_str.clone(),
+                            "client_cn" => client_cn.clone(),
                             "client_name" => client_name.clone(),
                         ).set(data.block_height as f64);
 
@@ -472,6 +480,7 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
 
             binsend(
                 &mut write,
+                client_cn.clone(),
                 client_name.clone(),
                 "mining_data",
                 set_data
@@ -479,6 +488,7 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
             counter!(
                 "nbx_miner_proto_server_set_data_count",
                 "client_id" => client_id_str.clone(),
+                "client_cn" => client_cn.clone(),
                 "client_name" => client_name.clone(),
             ).increment(1);
         }
@@ -497,10 +507,10 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
             match cmd {
                 MinerResponse::METADATA => {
                     // TODO: remove, or change to fixed metadata
-                    let _: SetMinerMetadata = binrecv(&mut read, client_name.clone(), "miner_metadata").await?;
+                    let _: SetMinerMetadata = binrecv(&mut read, client_cn.clone(), client_name.clone(), "miner_metadata").await?;
                 }
                 MinerResponse::RESULT => {
-                    let res: MiningResult = binrecv(&mut read, client_name.clone(), "mining_result").await?;
+                    let res: MiningResult = binrecv(&mut read, client_cn.clone(), client_name.clone(), "mining_result").await?;
 
                     let mut guard = tracker.lock().await;
                     let Some(data) = guard.valid_data(res.data_id) else {
@@ -508,6 +518,7 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
                         counter!(
                             "nbx_miner_proto_server_data_id_outdated_or_invalid_count",
                             "client_id" => client_id_str.clone(),
+                            "client_cn" => client_cn.clone(),
                             "client_name" => client_name.clone(),
                         ).increment(1);
                         counter!("nbx_miner_proto_global_server_data_id_outdated_or_invalid_count").increment(1);
@@ -518,6 +529,7 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
                     counter!(
                         "nbx_miner_proto_server_data_id_valid_count",
                         "client_id" => client_id_str.clone(),
+                        "client_cn" => client_cn.clone(),
                         "client_name" => client_name.clone(),
                     ).increment(1);
                     counter!(
@@ -529,6 +541,7 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
                     histogram!(
                         "nbx_miner_proto_server_attempt_seconds",
                         "client_id" => client_id_str.clone(),
+                        "client_cn" => client_cn.clone(),
                         "client_name" => client_name.clone(),
                     ).record((res.attempt_millis as f64) / 1000.0);
 
@@ -536,18 +549,21 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
                         histogram!(
                             "nbx_miner_proto_server_gpu_submit_seconds",
                             "client_id" => client_id_str.clone(),
+                            "client_cn" => client_cn.clone(),
                             "client_name" => client_name.clone(),
                         ).record((res.gpu_submit_millis as f64) / 1000.0);
 
                         histogram!(
                             "nbx_miner_proto_server_gpu_enqueue_seconds",
                             "client_id" => client_id_str.clone(),
+                            "client_cn" => client_cn.clone(),
                             "client_name" => client_name.clone(),
                         ).record((res.gpu_enqueue_millis as f64) / 1000.0);
 
                         histogram!(
                             "nbx_miner_proto_server_gpu_wait_seconds",
                             "client_id" => client_id_str.clone(),
+                            "client_cn" => client_cn.clone(),
                             "client_name" => client_name.clone(),
                         ).record((res.gpu_wait_millis as f64) / 1000.0);
                     }

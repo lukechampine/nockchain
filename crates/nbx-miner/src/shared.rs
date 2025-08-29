@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::future::Future;
-use std::io::Cursor;
+use std::io::{self, Cursor};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::{Arc, OnceLock};
 use std::pin::Pin;
@@ -21,6 +21,8 @@ use nbx_jetpack::log::*;
 use x509_parser::oid_registry::OID_X509_COMMON_NAME;
 use x509_parser::prelude::*;
 use zkvm_jetpack::form::Belt;
+
+use crate::proto::{name_valid, NAME_MAX_LENGTH};
 
 #[derive(Debug)]
 pub struct MiningData {
@@ -223,23 +225,30 @@ pub async fn tls_accept(
 pub async fn tls_accept_wrap(
     tcp: impl Future<Output = std::io::Result<(TcpStream, SocketAddr)>>,
     tls: Option<TlsServerConfig>
-) -> std::io::Result<(Pin<Box<dyn 'static + AsyncReadWrite + Send>>, SocketAddr, Option<Arc<str>>)> {
+) -> std::io::Result<(Pin<Box<dyn 'static + AsyncReadWrite + Send>>, SocketAddr, Arc<str>)> {
     let (tcp, addr) = tcp.await?;
     trace!("Accepted {addr}");
     if let Some(tls) = tls {
         let tls = tls_accept(tcp, tls).await?;
-        let tls_name = tls.get_ref().1.peer_certificates().and_then(|v| {
+        let Some(tls_name) = tls.get_ref().1.peer_certificates().and_then(|v| {
             let c = v.first()?;
             let (_rem, x509) = X509Certificate::from_der(c.as_ref()).ok()?;
             let cn = x509.subject()
                 .iter_attributes()
                 .find(|attr| attr.attr_type() == &OID_X509_COMMON_NAME)
                 .and_then(|attr| attr.as_str().ok())?;
-            Some(cn.into())
-        });
+            if !name_valid(cn) {
+                error!("cn={cn} with too long of a name");
+                None
+            } else {
+                Some(cn.into())
+            }
+        }) else {
+            return Err(io::ErrorKind::InvalidData.into());
+        };
         Ok((Box::pin(tls), addr, tls_name))
     } else {
-        Ok((Box::pin(tcp), addr, None))
+        Ok((Box::pin(tcp), addr, "__notls".into()))
     }
 }
 
