@@ -214,6 +214,7 @@ pub async fn run_proxy(cfg: ProxyConfig) {
                 diff_tracker.lock().unwrap().measure_and_update(proxy_diff);
             }
 
+            counter!("nbx_miner_proxy_global_accumulated_work").increment(proxy_diff);
             counter!(
                 "nbx_miner_proxy_accumulated_work",
                 "client_cn" => cn,
