@@ -48,7 +48,7 @@ impl<M: Send + 'static> Poker<M> {
             };
 
             let attempts_counter = counter!(
-                "nbx_miner_poker_attempts_count",
+                "nbx_miner_client_attempts_count",
                 "poker_id" => self.id.to_string(),
             );
             attempts_counter.increment(1);
@@ -77,7 +77,7 @@ impl<M: Send + 'static> Poker<M> {
             };
 
             let attempt_hist = histogram!(
-                "nbx_miner_poker_attempt_seconds",
+                "nbx_miner_client_attempt_seconds",
                 "poker_id" => self.id.to_string(),
             );
             attempt_hist.record((results.duration_millis as f64) / 1000.0);
