@@ -108,8 +108,8 @@ let
   nbx-miner-v3-strip = extraArgs: (nbx-miner-base profile-v3-strip extraArgs individualCrateArgsImmediateAbort);
 
   makeGpu = call: call "--features nbx-miner/gpu --features nbx-jetpack/gpu-prod --features nbx-miner/prom-exporter";
-  makeStealthGpu = call: call "--features nbx-miner/gpu --features nbx-jetpack/gpu-prod --features nbx-miner/stealthy,nbx-miner/force-send-only-targets -Zbuild-std=std,panic_abort -Zbuild-std-features=panic_immediate_abort";
-  makeStealthGpuDebug = call: call "--features nbx-miner/gpu --features nbx-jetpack/gpu-prod --features nbx-miner/force-tls,nbx-miner/force-send-only-targets -Zbuild-std=std,panic_abort";
+  makeStealthGpu = call: call "--features nbx-miner/gpu --features nbx-jetpack/gpu-prod --features nbx-miner/stealthy -Zbuild-std=std,panic_abort -Zbuild-std-features=panic_immediate_abort";
+  makeStealthGpuDebug = call: call "--features nbx-miner/gpu --features nbx-jetpack/gpu-prod --features nbx-miner/force-tls -Zbuild-std=std,panic_abort";
 
   polyfill = stdenv.mkDerivation {
     pname = "polyfill-glibc";
