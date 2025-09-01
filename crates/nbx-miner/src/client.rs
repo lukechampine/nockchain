@@ -22,7 +22,7 @@ use crate::client_base::{client_loops, ClientConfig, ServerExtras};
 use crate::metrics::{counter, gauge, histogram};
 use crate::poker::{PokerAttemptRes, PokerHandle};
 use crate::proto::{MiningAckOut, MiningDataOut, MiningResultIn};
-use crate::shared::{MiningData, MiningResult, MiningWire, TargetMetrics};
+use crate::shared::{digest_to_target, MiningData, MiningResult, MiningWire, TargetMetrics};
 
 struct MiningRequest {
     data: MiningData,
@@ -199,11 +199,7 @@ pub async fn run_client(cfg: ClientConfig) {
                             (false, None, None, v)
                         };
 
-                        let dig = dig.as_atom().expect("Expected an atom, not a cell");
-                        #[cfg(target_endian = "little")]
-                        let dig = UBig::from_le_bytes(&dig.as_ne_bytes());
-                        #[cfg(target_endian = "big")]
-                        let dig = UBig::from_be_bytes(&dig.as_ne_bytes());
+                        let dig = digest_to_target(dig);
 
                         if target_hit {
                             hit_metrics.measure(dig);
