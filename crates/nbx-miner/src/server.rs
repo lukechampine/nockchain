@@ -8,6 +8,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use clap::{Args, ValueEnum};
 #[cfg(feature = "verifier")]
 use kernels::verifier::KERNEL;
+use metrics::counter;
 #[cfg(feature = "verifier")]
 use nockapp::{
     kernel::form::SerfThread,
@@ -120,6 +121,33 @@ async fn save_mine_attempt(inp: &NounSlab, res: &NounSlab, run_id: &str, run_cnt
     let _ = tokio::fs::write(dir.join("effect.jam"), out_jam).await;
 }
 
+pub(crate) enum AbortReason {
+    NounValidation(&'static str),
+    ValidatorFailure(&'static str),
+    ProofValidation(String),
+    ProofRejected
+}
+
+impl AbortReason {
+    pub fn log(self, client_id: usize) {
+        match self {
+            Self::NounValidation(v) => error!("abort::noun_validation: {v}. client_id={client_id}"),
+            Self::ValidatorFailure(v) => error!("abort::validation_failure: {v}. client_id={client_id}"),
+            Self::ProofValidation(v) => error!("abort::proof_validation: validator rejected the proof, why={v}. client_id={client_id}"),
+            Self::ProofRejected => error!("abort::proof_rejected: Mined PoW was not accepted. client_id={client_id}"),
+        }
+    }
+
+    pub fn emit_metrics(&self) {
+        match self {
+            Self::NounValidation(_) => counter!("nbx_miner_server_abort_count", "mode" => "noun_validation").increment(1),
+            Self::ValidatorFailure(_) => counter!("nbx_miner_server_abort_count", "mode" => "validator_failure").increment(1),
+            Self::ProofValidation(_) => counter!("nbx_miner_server_abort_count", "mode" => "proof_validation").increment(1),
+            Self::ProofRejected => counter!("nbx_miner_server_abort_count", "mode" => "proof_rejected").increment(1),
+        }
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct Clients<M> {
     handles: BTreeMap<usize, (AbortHandle, M)>,
@@ -127,8 +155,10 @@ pub(crate) struct Clients<M> {
 }
 
 impl<M> Clients<M> {
-    pub fn abort(&mut self, client: usize) {
+    pub fn abort(&mut self, client: usize, reason: AbortReason) {
         debug!("Aborting client_id={client}");
+        reason.emit_metrics();
+        reason.log(client);
         self.handles.get(&client).unwrap().0.abort();
     }
 
@@ -375,13 +405,11 @@ pub async fn mining_server<F: FnMut(MiningResult, usize, Arc<str>, Arc<MiningDat
                     };
                     let effect = unsafe { effect_slab.root() };
                     let Ok(effect) = effect.as_cell().map(|v| v.head()) else {
-                        error!("Expected exactly one effect, client_id={client_id}");
-                        clients.abort(client_id);
+                        clients.abort(client_id, AbortReason::NounValidation("Expected exactly one effect"));
                         continue;
                     };
                     let Ok([head, res, tail]) = effect.uncell() else {
-                        error!("Expected three elements in mining result, client_id={client_id}");
-                        clients.abort(client_id);
+                        clients.abort(client_id, AbortReason::NounValidation("Expected three elements in mining result"));
                         continue;
                     };
                     if head.eq_bytes("mine-result") {
@@ -397,23 +425,20 @@ pub async fn mining_server<F: FnMut(MiningResult, usize, Arc<str>, Arc<MiningDat
                         save_mine_attempt(&poke, &effect_slab, &run_id, run_cnt_res).await;
                     }
                     let Ok([_, poke]) = tail.uncell() else {
-                        error!("Expected two elements in tail. client_id={client_id}");
-                        clients.abort(client_id);
+                        clients.abort(client_id, AbortReason::NounValidation("Expected two elements in tail"));
                         continue;
                     };
                     let mut poke_slab = NounSlab::new();
                     poke_slab.copy_into(poke);
 
                     let Ok([_, _, _, _, _, nonce]) = poke.uncell() else {
-                        error!("Expected 6 elements in the poke result.");
-                        clients.abort(client_id);
+                        clients.abort(client_id, AbortReason::NounValidation("Expected 6 elements in the poke result"));
                         continue;
                     };
 
                     // Verify that the start of the nonce contains the fixed belts
                     let Ok(nonce_noun) = nonce.uncell::<5>() else {
-                        error!("Nonce has invalid number of elements");
-                        clients.abort(client_id);
+                        clients.abort(client_id, AbortReason::NounValidation("Nonce has invalid number of elements"));
                         continue;
                     };
                     let mut nonce = [Belt(0); 5];
@@ -427,12 +452,12 @@ pub async fn mining_server<F: FnMut(MiningResult, usize, Arc<str>, Arc<MiningDat
                         cnt += 1;
                     }
                     if cnt != 5 {
-                        clients.abort(client_id);
+                        clients.abort(client_id, AbortReason::NounValidation("Nonce has invalid element"));
                         continue;
                     }
                     if nonce.iter().zip(in_data.fixed_nonce_atoms.iter()).any(|(a, b)| a != b) {
                         error!("Mined nonce {nonce:?} does not start with fixed belts {:?}", in_data.fixed_nonce_atoms);
-                        clients.abort(client_id);
+                        clients.abort(client_id, AbortReason::NounValidation("Mined nonce does not start with fixed belts"));
                         continue;
                     }
 
@@ -444,29 +469,26 @@ pub async fn mining_server<F: FnMut(MiningResult, usize, Arc<str>, Arc<MiningDat
                         verif_slab.copy_into(verif_poke);
                         match verifier.poke(MiningWire::Mined.to_wire(), verif_slab).await {
                             Err(e) => {
-                                error!("Unable to poke verifier poke {e:?}");
-                                clients.abort(client_id);
+                                error!("Unable to poke verifier {e:?}");
+                                clients.abort(client_id, AbortReason::ValidatorFailure("Unable to poke verifier"));
                                 continue;
                             }
                             Ok(r) => {
                                 let result = unsafe { r.root() };
                                 let Ok(result) = result.as_cell() else {
-                                    error!("Expected result to be a cell");
-                                    clients.abort(client_id);
+                                    clients.abort(client_id, AbortReason::ValidatorFailure("Expected result to be a cell"));
                                     continue;
                                 };
                                 let effect = result.head();
                                 let Ok([outcome, why]) = effect.uncell() else {
-                                    error!("Expected effect to be a tuple");
-                                    clients.abort(client_id);
+                                    clients.abort(client_id, AbortReason::ValidatorFailure("Expected effect to be a tuple"));
                                     continue;
                                 };
 
                                 if !outcome.eq_bytes("good") {
                                     let why = why.as_atom().ok();
                                     let why = why.as_ref().map(|v| v.as_ne_bytes()).and_then(|v| std::str::from_utf8(v).ok()).unwrap_or("");
-                                    error!("Verifier did not return good result. Why: {why}");
-                                    clients.abort(client_id);
+                                    clients.abort(client_id, AbortReason::ProofValidation(why.to_string()));
                                     continue;
                                 }
                             }
@@ -474,8 +496,7 @@ pub async fn mining_server<F: FnMut(MiningResult, usize, Arc<str>, Arc<MiningDat
                     }
 
                     if process_target(data, client_id, cn, in_data, poke_slab).await.is_err() {
-                        error!("Mined PoW was not accepted. client_id={client_id}");
-                        clients.abort(client_id);
+                        clients.abort(client_id, AbortReason::ProofRejected);
                         continue;
                     };
                 } else {

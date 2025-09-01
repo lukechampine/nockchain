@@ -10,9 +10,7 @@ use crate::client_base::client_loops;
 use crate::metrics::{counter, gauge, histogram};
 use crate::server::{mining_server, MiningConfig};
 use nockapp::noun::slab::NounSlab;
-use nockapp::{NockAppError, Noun};
-use nockvm_macros::tas;
-use nockvm::noun::{D, T};
+use nockapp::NockAppError;
 use rustls::crypto::ring::default_provider;
 use tokio::sync::mpsc;
 use nbx_jetpack::log::*;
@@ -20,7 +18,7 @@ use zkvm_jetpack::form::{Belt, PRIME};
 use zkvm_jetpack::noun::noun_ext::NounExt as OtherNounExt;
 
 use crate::proto::{MiningAckOut, MiningDataOut, MiningResultIn, RECENTLY_EXPIRED_DURATION};
-use crate::shared::{MiningData, MiningResult, TimeWriter};
+use crate::shared::{difficulty_to_target, parse_bn, target_to_difficulty, to_bn, MiningData, MiningResult, TargetMetrics, TimeWriter};
 
 #[derive(Clone, Debug, Args)]
 pub struct ProxyConfig {
@@ -46,62 +44,6 @@ pub struct ProxyConfig {
     pub target_share_seconds: u64,
     #[arg(long, help = "Minimum difficulty for the proxy", default_value = "1")]
     pub min_share_difficulty: u64,
-}
-
-fn max_target() -> UBig {
-    let p = UBig::from(PRIME);
-    let p1: UBig = p.clone() - 1;
-    let mut max_target = p1.clone();
-    for i in 1..=4 {
-        max_target += p1.clone() * p.pow(i);
-    }
-    max_target
-}
-
-fn target_to_difficulty(target: UBig) -> UBig {
-    max_target() / target
-}
-
-fn difficulty_to_target(diff: u64) -> UBig {
-    max_target() / diff
-}
-
-fn parse_bn(mut n: Noun) -> UBig {
-    let mut cnt = 0;
-    let mut val = UBig::default();
-
-    while let Ok(c) = n.as_cell() {
-        let Ok(h) = c.head().as_atom().and_then(|v| v.as_direct()) else {
-            // TODO: throw error?
-            break;
-        };
-        let v = h.data();
-        // skip the %bn tag
-        if cnt > 0 {
-            let v = UBig::from(v);
-            let v2 = v.clone() << (32 * (cnt - 1));
-            val += v2;
-        }
-        cnt += 1;
-        n = c.tail();
-    }
-
-    val
-}
-
-fn to_bn(mut v: UBig) -> NounSlab {
-    let mut ints = vec![D(tas!(b"bn"))];
-    let zero = UBig::from(0u32);
-    while v != zero {
-        let int = u32::try_from(&v & !0u32).unwrap();
-        ints.push(D(int as u64));
-        v >>= 32;
-    }
-    ints.push(D(0));
-    let mut slab = NounSlab::new();
-    let bn = T(&mut slab, &ints);
-    slab.copy_into(bn);
-    slab
 }
 
 const ROLLING_TIMING_CNT: usize = 20;
@@ -192,10 +134,23 @@ pub async fn run_proxy(cfg: ProxyConfig) {
         last_updated,
     }));
 
+    let hit_metrics = TargetMetrics::new(Duration::from_secs(10), "hit", "10s")
+        .with_previous(TargetMetrics::new(Duration::from_secs(60), "hit", "1m")
+        .with_previous(TargetMetrics::new(Duration::from_secs(600), "hit", "10m")
+        .with_previous(TargetMetrics::new(Duration::from_secs(3600), "hit", "60m"))));
+    let miss_metrics = TargetMetrics::new(Duration::from_secs(10), "miss", "10s")
+        .with_previous(TargetMetrics::new(Duration::from_secs(60), "miss", "1m")
+        .with_previous(TargetMetrics::new(Duration::from_secs(600), "miss", "10m")
+        .with_previous(TargetMetrics::new(Duration::from_secs(3600), "miss", "60m"))));
+    let hit_metrics = Arc::new(SyncMutex::new(hit_metrics));
+    let miss_metrics = Arc::new(SyncMutex::new(miss_metrics));
+
     // Any pokes that passed server's verification steps.
     let process_target = |mut data: MiningResult, _, cn: Arc<str>, in_data: Arc<MiningData>, poke_slab: NounSlab| {
         let data_info = server_id_map.lock().unwrap().get(&Arc::as_ptr(&in_data)).map(|(_, v)| (v.clone(), server_extras[v.1].mining_res.clone()));
         let diff_tracker = diff_tracker.clone();
+        let hit_metrics = hit_metrics.clone();
+        let miss_metrics = miss_metrics.clone();
         async move {
             let Some(((data_id, server_id, session_id, parent_target), mining_res)) = data_info else {
                 debug!("Unable to grab data info (data expired?)");
@@ -234,11 +189,14 @@ pub async fn run_proxy(cfg: ProxyConfig) {
             // whether we hit the parent target.
             data.target_hit = dig <= parent_target;
             if !data.target_hit {
+                miss_metrics.lock().unwrap().measure(dig);
                 if !forward_non_block {
                     return Ok(());
                 }
                 data.poke = None;
                 data.effect = None;
+            } else {
+                hit_metrics.lock().unwrap().measure(dig);
             }
 
             gauge!(
@@ -403,6 +361,9 @@ pub async fn run_proxy(cfg: ProxyConfig) {
                     gauge!(
                         "nbx_miner_proxy_datas_at_tip",
                     ).set(tip_cnt as f64);
+
+                    hit_metrics.lock().unwrap().measure_down();
+                    miss_metrics.lock().unwrap().measure_down();
                 }
             }
         }

@@ -1,11 +1,12 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::future::Future;
 use std::io::{self, Cursor};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::{Arc, OnceLock};
 use std::pin::Pin;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
+use ibig::UBig;
 use nockapp::noun::slab::{slab_equality, NounSlab};
 use nockapp::wire::Wire;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
@@ -20,7 +21,9 @@ use tokio_rustls::{TlsAcceptor, TlsConnector};
 use nbx_jetpack::log::*;
 use x509_parser::oid_registry::OID_X509_COMMON_NAME;
 use x509_parser::prelude::*;
-use zkvm_jetpack::form::Belt;
+use zkvm_jetpack::form::{Belt, PRIME};
+use nockvm_macros::tas;
+use nockvm::noun::{D, T, Noun};
 
 use crate::proto::{name_valid, NAME_MAX_LENGTH};
 
@@ -264,5 +267,124 @@ impl TimeWriter {
     pub fn new() -> (Self, Arc<OnceLock<Instant>>) {
         let arc: Arc<OnceLock<Instant>> = Arc::default();
         (Self(arc.clone()), arc)
+    }
+}
+
+pub fn max_target() -> UBig {
+    let p = UBig::from(PRIME);
+    let p1: UBig = p.clone() - 1;
+    let mut max_target = p1.clone();
+    for i in 1..=4 {
+        max_target += p1.clone() * p.pow(i);
+    }
+    max_target
+}
+
+pub fn target_to_difficulty(target: UBig) -> UBig {
+    max_target() / target
+}
+
+pub fn difficulty_to_target(diff: u64) -> UBig {
+    max_target() / diff
+}
+
+pub fn parse_bn(mut n: Noun) -> UBig {
+    let mut cnt = 0;
+    let mut val = UBig::default();
+
+    while let Ok(c) = n.as_cell() {
+        let Ok(h) = c.head().as_atom().and_then(|v| v.as_direct()) else {
+            // TODO: throw error?
+            break;
+        };
+        let v = h.data();
+        // skip the %bn tag
+        if cnt > 0 {
+            let v = UBig::from(v);
+            let v2 = v.clone() << (32 * (cnt - 1));
+            val += v2;
+        }
+        cnt += 1;
+        n = c.tail();
+    }
+
+    val
+}
+
+pub fn to_bn(mut v: UBig) -> NounSlab {
+    let mut ints = vec![D(tas!(b"bn"))];
+    let zero = UBig::from(0u32);
+    while v != zero {
+        let int = u32::try_from(&v & !0u32).unwrap();
+        ints.push(D(int as u64));
+        v >>= 32;
+    }
+    ints.push(D(0));
+    let mut slab = NounSlab::new();
+    let bn = T(&mut slab, &ints);
+    slab.copy_into(bn);
+    slab
+}
+
+pub struct TargetMetrics {
+    previous: Option<Box<Self>>,
+    measurements: VecDeque<(Instant, UBig)>,
+    interval: Duration,
+    last_commit: Instant,
+    mode: &'static str,
+    level: &'static str,
+}
+
+impl TargetMetrics {
+    pub fn new(interval: Duration, mode: &'static str, level: &'static str) -> Self {
+        Self {
+            previous: None,
+            measurements: Default::default(),
+            last_commit: Instant::now(),
+            interval,
+            mode,
+            level,
+        }
+    }
+
+    pub fn with_previous(self, previous: impl Into<Box<Self>>) -> Self {
+        Self {
+            previous: Some(previous.into()),
+            ..self
+        }
+    }
+
+    pub fn emit(&self) {
+        let Some(min) = self.get_min() else { return };
+        let diff = target_to_difficulty(min.clone());
+        crate::metrics::gauge!("nbx_miner_observed_digest_hit_difficulty", "mode" => self.mode, "level" => self.level).set(diff.to_f64());
+    }
+
+    pub fn get_min(&self) -> Option<&UBig> {
+        self.measurements.iter().map(|(_, v)| v).min()
+    }
+
+    pub fn measure_down(&mut self) {
+        self.emit();
+        let now = Instant::now();
+        let Some(min) = self.get_min().cloned() else { return; };
+        let delta = now.duration_since(self.last_commit);
+        if delta >= self.interval {
+            if delta >= 2 * self.interval {
+                self.last_commit = now;
+            } else {
+                self.last_commit += self.interval;
+            };
+            if let Some(p) = self.previous.as_mut().map(|v| v.as_mut()) {
+                p.measure(min);
+            }
+        }
+    }
+
+    pub fn measure(&mut self, target: UBig) {
+        let now = Instant::now();
+        self.measurements.retain(|(v, _)| now.duration_since(*v) <= self.interval);
+        self.measurements.push_back((now, target));
+        self.measure_down();
     }
 }

@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
+use ibig::UBig;
 use rand::distributions::WeightedIndex;
 use rand::prelude::Distribution;
 use nbx_jetpack::instruments::ReadInstruments;
@@ -21,7 +22,7 @@ use crate::client_base::{client_loops, ClientConfig, ServerExtras};
 use crate::metrics::{counter, gauge, histogram};
 use crate::poker::{PokerAttemptRes, PokerHandle};
 use crate::proto::{MiningAckOut, MiningDataOut, MiningResultIn};
-use crate::shared::{MiningData, MiningResult, MiningWire};
+use crate::shared::{MiningData, MiningResult, MiningWire, TargetMetrics};
 
 struct MiningRequest {
     data: MiningData,
@@ -111,6 +112,15 @@ pub async fn run_client(cfg: ClientConfig) {
     #[cfg(feature = "force-send-only-targets")]
     let forward_non_block = false;
 
+    let mut hit_metrics = TargetMetrics::new(Duration::from_secs(10), "hit", "10s")
+        .with_previous(TargetMetrics::new(Duration::from_secs(60), "hit", "1m")
+        .with_previous(TargetMetrics::new(Duration::from_secs(600), "hit", "10m")
+        .with_previous(TargetMetrics::new(Duration::from_secs(3600), "hit", "60m"))));
+    let mut miss_metrics = TargetMetrics::new(Duration::from_secs(10), "miss", "10s")
+        .with_previous(TargetMetrics::new(Duration::from_secs(60), "miss", "1m")
+        .with_previous(TargetMetrics::new(Duration::from_secs(600), "miss", "10m")
+        .with_previous(TargetMetrics::new(Duration::from_secs(3600), "miss", "60m"))));
+
     loop {
         counter!("nbx_miner_client_main_loop_ticks_total").increment(1);
 
@@ -164,6 +174,9 @@ pub async fn run_client(cfg: ClientConfig) {
                 gauge!(
                     "nbx_miner_client_servers_at_tip",
                 ).set(tip_cnt as f64);
+
+                hit_metrics.measure_down();
+                miss_metrics.measure_down();
             }
             r = mining_attempts.recv() => {
                 counter!("nbx_miner_client_main_loop_mining_attempts_total").increment(1);
@@ -177,13 +190,26 @@ pub async fn run_client(cfg: ClientConfig) {
                 let effect = result.as_cell().expect("Expected result to be a cell").head();
                 if effect.is_cell() {
                     //  there should only be one effect
-                    let [head, res, _] = effect.uncell().expect("Expected three elements in mining result");
+                    let [head, res, v] = effect.uncell().expect("Expected three elements in mining result");
                     if head.eq_bytes("mine-result") {
-                        let (target_hit, poke, effect) = if unsafe { res.raw_equals(&D(0)) } {
-                            (true, Some(slab_inp), Some(slab))
+                        let (target_hit, poke, effect, dig) = if unsafe { res.raw_equals(&D(0)) } {
+                            let [dig, _] = v.uncell().unwrap();
+                            (true, Some(slab_inp), Some(slab), dig)
                         } else {
-                            (false, None, None)
+                            (false, None, None, v)
                         };
+
+                        let dig = dig.as_atom().expect("Expected an atom, not a cell");
+                        #[cfg(target_endian = "little")]
+                        let dig = UBig::from_le_bytes(&dig.as_ne_bytes());
+                        #[cfg(target_endian = "big")]
+                        let dig = UBig::from_be_bytes(&dig.as_ne_bytes());
+
+                        if target_hit {
+                            hit_metrics.measure(dig);
+                        } else {
+                            miss_metrics.measure(dig);
+                        }
 
                         let extra = &server_extras[server_id];
 
