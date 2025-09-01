@@ -60,23 +60,23 @@ pub mod log {
 pub mod log {
     #[macro_export]
     macro_rules! error {
-        ($($tt:tt)*) => ()
+        ($($tt:tt)*) => (())
     }
     #[macro_export]
     macro_rules! warn {
-        ($($tt:tt)*) => ()
+        ($($tt:tt)*) => (())
     }
     #[macro_export]
     macro_rules! debug {
-        ($($tt:tt)*) => ()
+        ($($tt:tt)*) => (())
     }
     #[macro_export]
     macro_rules! info {
-        ($($tt:tt)*) => ()
+        ($($tt:tt)*) => (())
     }
     #[macro_export]
     macro_rules! trace {
-        ($($tt:tt)*) => ()
+        ($($tt:tt)*) => (())
     }
     pub use super::{error, warn, debug, info, trace};
 }
