@@ -367,8 +367,7 @@ impl TargetMetrics {
     }
 
     pub fn emit(&self) {
-        let min = self.get_min().cloned().unwrap_or_default();
-        let diff = target_to_difficulty(min.clone());
+        let diff = self.get_min().cloned().map(target_to_difficulty).unwrap_or_default();
         crate::metrics::gauge!("nbx_miner_observed_digest_hit_difficulty", "mode" => self.mode, "level" => self.level).set(diff.to_f64());
     }
 
@@ -380,7 +379,7 @@ impl TargetMetrics {
         self.emit();
         let now = Instant::now();
         self.measurements.retain(|(v, _)| now.duration_since(*v) <= self.interval);
-        let min = self.get_min().cloned().unwrap_or_default();
+        let min = self.get_min().cloned();
         let delta = now.duration_since(self.last_commit);
         if delta >= self.interval {
             if delta >= 2 * self.interval {
@@ -389,7 +388,11 @@ impl TargetMetrics {
                 self.last_commit += self.interval;
             };
             if let Some(p) = self.previous.as_mut().map(|v| v.as_mut()) {
-                p.measure(min);
+                if let Some(min) = min {
+                    p.measure(min);
+                } else {
+                    p.measure_down();
+                }
             }
         }
     }
