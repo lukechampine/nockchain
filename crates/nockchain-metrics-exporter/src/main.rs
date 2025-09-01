@@ -7,7 +7,6 @@ use nockapp::kernel::boot::{default_boot_cli, init_default_tracing};
 use nockvm_macros::tas;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -17,7 +16,6 @@ use clap::Parser;
 use metrics::gauge;
 use nockapp::{NockAppError, NockAppExit, Noun};
 use nockvm::noun::{IndirectAtom, D, T};
-use tokio::net::UnixStream;
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 use tracing::{debug, error, info, trace};
 
@@ -236,7 +234,7 @@ impl Drop for Exporter {
 }
 
 impl Exporter {
-    pub async fn new(nockchain_socket: impl AsRef<Path>, id: String) -> Result<Self, NockAppError> {
+    pub async fn new(nockchain_socket: &String, id: String) -> Result<Self, NockAppError> {
         let (io_sender, io_receiver) = mpsc::channel(1);
         let (tx, rx) = broadcast::channel(1);
         let effect_sender = Arc::new(tx);
@@ -253,29 +251,7 @@ impl Exporter {
         let (npc_handler, npc) = NpcHandler::new(io_receiver, handle.effect_sender.clone());
         let npc_handler = tokio::spawn(npc_handler.serve());
 
-        let socket_path = nockchain_socket;
-
-        let stream = UnixStream::connect(socket_path.as_ref())
-            .await
-            .map_err(|e| {
-                eprintln!(
-                    "Failed to connect to nockchain NPC socket at {:?}: {}\n\
-                 This could mean:\n\
-                 1. Nockchain is not running\n\
-                 2. The socket path is incorrect\n\
-                 3. The socket file exists but is stale (try removing it)\n\
-                 4. Insufficient permissions to access the socket",
-                    socket_path.as_ref(),
-                    e
-                );
-                NockAppError::IoError(e)
-            })?;
-
-        info!(
-            "Connected to nockchain NPC socket at {:?}",
-            socket_path.as_ref()
-        );
-        let npc_client = tokio::spawn(nockapp::npc_client_driver(stream)(handle));
+        let npc_client = tokio::spawn(nockapp_grpc::driver::grpc_listener_driver(nockchain_socket.to_string())(handle));
 
         Ok(Self {
             npc,

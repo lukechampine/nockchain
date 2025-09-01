@@ -57,6 +57,16 @@ pub enum JetErr {
     PuntJam(&'static str), // Jam subject+formula to given paths, and retry with the raw nock
     Fail(Error), // Error; do not retry
 }
+impl std::fmt::Display for JetErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            JetErr::Punt => write!(f, "Punt"),
+            JetErr::Fail(err) => write!(f, "Fail({})", err),
+            JetErr::PuntJam(err) => write!(f, "PuntJam({})", err),
+        }
+    }
+}
+impl std::error::Error for JetErr {}
 
 impl Preserve for JetErr {
     unsafe fn preserve(&mut self, stack: &mut NockStack) {

@@ -3,7 +3,7 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use ibig::UBig;
-use rand::distributions::WeightedIndex;
+use rand::distr::weighted::WeightedIndex;
 use rand::prelude::Distribution;
 use nbx_jetpack::instruments::ReadInstruments;
 use nockapp::nockapp::wire::Wire;
