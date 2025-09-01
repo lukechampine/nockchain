@@ -24,6 +24,7 @@ use x509_parser::prelude::*;
 use zkvm_jetpack::form::{Belt, PRIME};
 use nockvm_macros::tas;
 use nockvm::noun::{D, T, Noun};
+use zkvm_jetpack::noun::noun_ext::NounExt;
 
 use crate::proto::{name_valid, NAME_MAX_LENGTH};
 
@@ -309,6 +310,17 @@ pub fn parse_bn(mut n: Noun) -> UBig {
     }
 
     val
+}
+
+pub fn digest_to_target(v: Noun) -> UBig {
+    let mut mul = UBig::from(1u32);
+    let mut res = UBig::from(0u32);
+    for v in v.uncell::<5>().expect("Expected 5 elements") {
+        let v = v.as_atom().unwrap().as_u64().unwrap();
+        res += (&mul) * v;
+        mul *= PRIME;
+    }
+    res
 }
 
 pub fn to_bn(mut v: UBig) -> NounSlab {
