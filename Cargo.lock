@@ -4135,6 +4135,7 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "tracing-test",
+ "tracy-client",
  "x509-parser",
  "zkvm-jetpack",
 ]
