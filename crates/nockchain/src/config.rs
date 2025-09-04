@@ -42,12 +42,6 @@ pub struct NockchainCli {
     pub nockapp_cli: nockapp::kernel::boot::Cli,
     #[command(flatten)]
     pub miner: MiningConfig,
-    #[arg(
-        long,
-        help = "npc socket path",
-        default_value = ".socket/nockchain_npc.sock"
-    )]
-    pub npc_socket: String,
     #[arg(long, help = "Whether to run as fakenet", default_value_t = false)]
     pub fakenet: bool,
     #[arg(long, short, help = "Initial peer", action = ArgAction::Append)]

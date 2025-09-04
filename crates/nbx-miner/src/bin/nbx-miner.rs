@@ -3,9 +3,14 @@ use nbx_miner::client_base::ClientConfig;
 use nockapp::kernel::boot::{self, Cli as NockappCli};
 
 // When enabled, use jemalloc for more stable memory allocation
-#[cfg(feature = "jemalloc")]
+#[cfg(all(feature = "jemalloc", not(feature = "tracing-heap")))]
 #[global_allocator]
 static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
+#[cfg(feature = "tracing-heap")]
+#[global_allocator]
+static ALLOC: tracy_client::ProfiledAllocator<tikv_jemallocator::Jemalloc> =
+    tracy_client::ProfiledAllocator::new(tikv_jemallocator::Jemalloc, 100);
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "nbx-miner")]

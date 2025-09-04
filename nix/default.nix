@@ -53,6 +53,7 @@ let
     CARGO_PROFILE = profile;
     cargoExtraArgs = "-p nockchain --features nockchain/jemalloc ${extraArgs}";
     buildInputs = [ hoonc.hoonc ];
+    nativeBuildInputs = [ pkgs.protobuf_29 ];
     preBuild = "mkdir -p assets && cp ${jam-pkg.dumb-jam.out} './assets/dumb.jam' && cp ${jam-pkg.miner-jam.out} './assets/miner.jam'";
   });
 
@@ -60,7 +61,7 @@ let
   individualCrateArgs // {
     pname = "nockchain-wallet";
     cargoExtraArgs = "-p nockchain-wallet";
-    nativeBuildInputs = [ hoonc.hoonc ];
+    nativeBuildInputs = [ hoonc.hoonc pkgs.protobuf_29 ];
     preBuild = "mkdir -p assets && cp ${jam-pkg.wallet-jam.out} './assets/wal.jam'";
   });
 
@@ -68,7 +69,7 @@ let
   individualCrateArgs // {
     pname = "nockchain-metrics-exporter";
     cargoExtraArgs = "-p nockchain-metrics-exporter";
-    nativeBuildInputs = [ ];
+    nativeBuildInputs = [ pkgs.protobuf_29 ];
   });
 
   nbx-miner-base = profile: extraArgs: ica: craneLib.buildPackage (

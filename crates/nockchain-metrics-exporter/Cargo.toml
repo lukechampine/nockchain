@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 nockapp = { workspace = true }
 nockvm = { workspace = true }
+nockapp-grpc = { workspace = true, features = ["client"] }
 nockvm_macros = { workspace = true }
 
 bardecoder = { workspace = true }

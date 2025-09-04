@@ -177,8 +177,9 @@ pub fn create_mining_driver(
 
                 if let Some(tx) = init_complete_tx {
                     tx.send(()).map_err(|_| {
-                        warn!("Could not send driver initialization for mining driver.");
-                        NockAppError::OtherError
+                        NockAppError::OtherError(String::from(
+                            "Could not send driver initialization for mining driver.",
+                        ))
                     })?;
                 }
 
@@ -197,8 +198,9 @@ pub fn create_mining_driver(
 
             if let Some(tx) = init_complete_tx {
                 tx.send(()).map_err(|_| {
-                    warn!("Could not send driver initialization for mining driver.");
-                    NockAppError::OtherError
+                    NockAppError::OtherError(String::from(
+                        "Could not send driver initialization for mining driver.",
+                    ))
                 })?;
             }
 

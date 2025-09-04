@@ -8,6 +8,7 @@ edition = "2021"
 [features]
 default = ["jemalloc"]
 jemalloc = ["tikv-jemallocator"]
+tracing-heap = ["tikv-jemallocator", "tracy-client"]
 gpu = ["nbx-jetpack/gpu-prod"]
 stealthy = ["force-tls", "nbx-jetpack/stealthy"]
 force-tls = []
@@ -59,3 +60,4 @@ ibig.workspace = true
 
 zkvm-jetpack.workspace = true
 nbx-jetpack.workspace = true
+tracy-client = { workspace = true, optional = true }

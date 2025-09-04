@@ -17,13 +17,15 @@ use clap::Parser;
 use metrics::gauge;
 use nockapp::{NockAppError, NockAppExit, Noun};
 use nockvm::noun::{IndirectAtom, D, T};
-use tokio::net::UnixStream;
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 use tracing::{debug, error, info, trace};
 
 use nockapp::driver::*;
 use nockapp::noun::slab::NounSlab;
 use nockapp::wire::WireTag;
+use nockapp_grpc::client::NockAppGrpcClient;
+use nockapp_grpc::pb::Wire as GrpcWire;
+use nockapp::Bytes;
 
 fn pull_args<const N: usize>(mut inp: Noun) -> Result<[Noun; N], NockAppError> {
     let mut cnt = 0;
@@ -49,8 +51,8 @@ fn pull_args<const N: usize>(mut inp: Noun) -> Result<[Noun; N], NockAppError> {
 struct MetricsCli {
     #[arg(short, long, default_value = "127.0.0.1:9089")]
     bind: String,
-    #[arg(short, long, help = "path to nockchain.sock")]
-    socket: String,
+    #[arg(short, long, help = "gRPC server address (e.g., http://127.0.0.1:5555)", default_value = "http://127.0.0.1:5555")]
+    grpc_address: String,
     #[arg(
         short,
         long,
@@ -60,131 +62,40 @@ struct MetricsCli {
     refresh_interval: usize,
 }
 
-struct NpcHandler {
-    io_receiver: Receiver<IOAction>,
-    effect_sender: Arc<broadcast::Sender<NounSlab>>,
-    wires: HashMap<u64, oneshot::Sender<NounSlab>>,
-    req_recv: Receiver<(NounSlab, oneshot::Sender<NounSlab>)>,
-    pid: u64,
+struct GrpcHandle {
+    client: NockAppGrpcClient,
+    pid: i32,
 }
 
-impl NpcHandler {
-    pub fn new(
-        io_receiver: Receiver<IOAction>,
-        effect_sender: Arc<broadcast::Sender<NounSlab>>,
-    ) -> (Self, NpcHandle) {
-        let (req_send, req_recv) = channel(4);
+impl GrpcHandle {
+    pub async fn new(address: &str) -> Result<Self, NockAppError> {
+        let client = NockAppGrpcClient::connect(address)
+            .await
+            .map_err(|e| NockAppError::OtherError(format!("Failed to connect to gRPC server: {}", e)))?;
 
-        (
-            Self {
-                io_receiver,
-                effect_sender,
-                wires: Default::default(),
-                req_recv,
-                pid: 0,
-            },
-            NpcHandle(req_send),
-        )
+        Ok(Self { client, pid: 0 })
     }
 
-    async fn handle_req(
-        &mut self,
-        mut slab: NounSlab,
-        tx: oneshot::Sender<NounSlab>,
-    ) -> Result<(), NockAppError> {
-        let pid = self.pid;
-        self.pid += 1;
-        let io = *unsafe { slab.root() };
-        let eff = T(&mut slab, &[D(tas!(b"npc")), D(pid), io]);
-        slab.set_root(eff);
-        if self.effect_sender.send(slab).is_err() {
-            return Err(NockAppError::UnexpectedResult);
-        }
-        self.wires.insert(pid, tx);
-        Ok(())
+    pub async fn ping(&mut self) -> Result<bool, NockAppError> {
+        self.client
+            .ping()
+            .await
+            .map_err(|e| NockAppError::OtherError(format!("gRPC ping failed: {}", e)))
     }
 
-    async fn handle_io(&mut self, io: IOAction) -> Result<(), NockAppError> {
-        let IOAction::Poke {
-            wire,
-            mut poke,
-            ack_channel,
-            timeout: _,
-        } = io
-        else {
-            error!("Invalid action");
-            return Err(NockAppError::UnexpectedResult);
-        };
+    pub async fn peek(&mut self, path: &[&str]) -> Result<NounSlab, NockAppError> {
+        let path_strings: Vec<String> = path.iter().map(|s| s.to_string()).collect();
 
-        if wire.source != "npc" {
-            error!("Invalid wire source: {}", wire.source);
-            let _ = ack_channel.send(PokeResult::Nack);
-            return Err(NockAppError::UnexpectedResult);
-        }
+        let jam_bytes = self.client
+            .peek(self.pid, path_strings)
+            .await
+            .map_err(|e| NockAppError::OtherError(format!("gRPC peek failed: {}", e)))?;
 
-        let &[_, WireTag::Direct(pid)] = &wire.tags[..] else {
-            error!("Invalid wire tags: {:?}", wire.tags);
-            let _ = ack_channel.send(PokeResult::Nack);
-            return Err(NockAppError::UnexpectedResult);
-        };
-
-        let root = unsafe { poke.root() };
-        let [_, _, v] = pull_args(*root)?;
-        poke.set_root(v);
-
-        let Some(tx) = self.wires.remove(&pid) else {
-            error!("Wire not found by pid: {pid}");
-            let _ = ack_channel.send(PokeResult::Nack);
-            return Err(NockAppError::UnexpectedResult);
-        };
-
-        let _ = ack_channel.send(PokeResult::Ack);
-        let _ = tx.send(poke);
-
-        Ok(())
-    }
-
-    pub async fn serve(mut self) {
-        loop {
-            tokio::select! {
-                req = self.req_recv.recv() => {
-                    let Some((slab, tx)) = req else { break };
-                    if self.handle_req(slab, tx).await.is_err() {
-                        break;
-                    }
-                },
-                io = self.io_receiver.recv() => {
-                    let Some(io) = io else { break };
-                    let _ = self.handle_io(io).await;
-                }
-            }
-        }
-    }
-}
-
-struct NpcHandle(Sender<(NounSlab, oneshot::Sender<NounSlab>)>);
-
-impl NpcHandle {
-    pub async fn peek(&self, path: &[&str]) -> Result<NounSlab, NockAppError> {
         let mut slab = NounSlab::new();
-        let mut req = vec![D(tas!(b"peek"))];
-        req.extend(path.iter().map(|p| {
-            unsafe { IndirectAtom::new_raw_bytes_ref(&mut slab, str::as_bytes(p)) }.as_noun()
-        }));
-        req.push(D(0));
-        let req = T(&mut slab, &req);
-        slab.set_root(req);
+        let noun = slab.cue_into(Bytes::from(jam_bytes))?;
+        slab.set_root(noun);
 
-        let (tx, rx) = oneshot::channel();
-        if self.0.send((slab, tx)).await.is_err() {
-            error!("Unable to send poke");
-            return Err(NockAppError::UnexpectedResult);
-        }
-        let ret = rx.await?;
-
-        let eff = unsafe { ret.root() };
-
-        Ok(ret)
+        Ok(slab)
     }
 }
 
@@ -222,78 +133,29 @@ fn parse_bn(mut n: Noun) -> UBig {
 }
 
 struct Exporter {
-    npc: NpcHandle,
-    npc_handler: tokio::task::JoinHandle<()>,
-    npc_client: tokio::task::JoinHandle<Result<(), NockAppError>>,
+    grpc_handle: GrpcHandle,
     id: String,
 }
 
-impl Drop for Exporter {
-    fn drop(&mut self) {
-        self.npc_handler.abort();
-        self.npc_client.abort();
-    }
-}
-
 impl Exporter {
-    pub async fn new(nockchain_socket: impl AsRef<Path>, id: String) -> Result<Self, NockAppError> {
-        let (io_sender, io_receiver) = mpsc::channel(1);
-        let (tx, rx) = broadcast::channel(1);
-        let effect_sender = Arc::new(tx);
-        let effect_receiver = Mutex::new(rx);
-
-        let handle = NockAppHandle {
-            io_sender,
-            effect_sender,
-            effect_receiver,
-            metrics: None,
-            exit: NockAppExit::new().0,
-        };
-
-        let (npc_handler, npc) = NpcHandler::new(io_receiver, handle.effect_sender.clone());
-        let npc_handler = tokio::spawn(npc_handler.serve());
-
-        let socket_path = nockchain_socket;
-
-        let stream = UnixStream::connect(socket_path.as_ref())
-            .await
-            .map_err(|e| {
-                eprintln!(
-                    "Failed to connect to nockchain NPC socket at {:?}: {}\n\
-                 This could mean:\n\
-                 1. Nockchain is not running\n\
-                 2. The socket path is incorrect\n\
-                 3. The socket file exists but is stale (try removing it)\n\
-                 4. Insufficient permissions to access the socket",
-                    socket_path.as_ref(),
-                    e
-                );
-                NockAppError::IoError(e)
-            })?;
-
-        info!(
-            "Connected to nockchain NPC socket at {:?}",
-            socket_path.as_ref()
-        );
-        let npc_client = tokio::spawn(nockapp::npc_client_driver(stream)(handle));
+    pub async fn new(grpc_address: &str, id: String) -> Result<Self, NockAppError> {
+        let grpc_handle = GrpcHandle::new(grpc_address).await?;
 
         Ok(Self {
-            npc,
-            npc_handler,
-            npc_client,
+            grpc_handle,
             id,
         })
     }
 
-    pub async fn update(&self) -> Result<(), NockAppError> {
-        let poke = match timeout(Duration::from_secs(10), self.npc.peek(&["heavy-summary"])).await {
+    pub async fn update(&mut self) -> Result<(), NockAppError> {
+        let poke = match timeout(Duration::from_secs(10), self.grpc_handle.peek(&["heavy-summary"])).await {
             Ok(Ok(p)) => p,
             Err(_) => {
-                error!("Timeout sending poke");
+                error!("Timeout sending gRPC peek");
                 return Err(NockAppError::Timeout);
             }
-            _ => {
-                error!("Unable to send poke");
+            Ok(Err(e)) => {
+                error!("Unable to send gRPC peek: {:?}", e);
                 return Err(NockAppError::UnexpectedResult);
             }
         };
@@ -328,19 +190,19 @@ impl Exporter {
 }
 
 struct RetryExporter {
-    socket_path: String,
+    grpc_address: String,
     exporter: Option<Exporter>,
     retry_instant: Instant,
     id: String,
 }
 
 impl RetryExporter {
-    pub fn new(socket_path: String) -> Self {
+    pub fn new(grpc_address: String) -> Self {
         // TODO: pull miner ID out
-        let id = socket_path.clone();
+        let id = grpc_address.clone();
 
         Self {
-            socket_path,
+            grpc_address,
             exporter: None,
             retry_instant: Instant::now(),
             id,
@@ -351,30 +213,34 @@ impl RetryExporter {
         self.exporter = None;
     }
 
-    pub async fn acquire(&mut self) -> Option<&Exporter> {
-        if let Some(exporter) = self.exporter.take() {
-            if exporter.npc_client.is_finished() || exporter.npc_handler.is_finished() {
-                debug!(
-                    "Nockchain at {} has died. Reconnecting...",
-                    self.socket_path
-                );
-                core::mem::drop(exporter);
-                self.exporter = None;
-            } else {
+    pub async fn acquire(&mut self) -> Option<&mut Exporter> {
+        if let Some(mut exporter) = self.exporter.take() {
+            if let Ok(Ok(true)) = timeout(Duration::from_secs(5), exporter.grpc_handle.ping()).await {
                 self.exporter = Some(exporter);
+                return self.exporter.as_mut();
+            }
+            
+            debug!(
+                "Nockchain at {} has died. Reconnecting...",
+                self.grpc_address
+            );
+            core::mem::drop(exporter);
+            self.exporter = None;
+        }
+
+        if self.retry_instant <= Instant::now() {
+            match Exporter::new(&self.grpc_address, self.id.clone()).await {
+                Ok(exporter) => {
+                    self.exporter = Some(exporter);
+                }
+                Err(e) => {
+                    trace!("Unable to connect to gRPC server: {:?}. Retrying...", e);
+                    self.retry_instant = Instant::now() + Duration::from_secs(5);
+                }
             }
         }
 
-        if self.exporter.is_none() && self.retry_instant <= Instant::now() {
-            if let Ok(exporter) = Exporter::new(&self.socket_path, self.id.clone()).await {
-                self.exporter = Some(exporter);
-            } else {
-                trace!("Unable to collect to node. Retrying...");
-                self.retry_instant = Instant::now() + Duration::from_secs(5);
-            }
-        }
-
-        self.exporter.as_ref()
+        self.exporter.as_mut()
     }
 }
 
@@ -397,7 +263,7 @@ async fn main() -> Result<(), NockAppError> {
         return Err(NockAppError::UnexpectedResult);
     }
 
-    let mut exporter = RetryExporter::new(cli.socket);
+    let mut exporter = RetryExporter::new(cli.grpc_address);
     let mut interval = interval(Duration::from_secs(cli.refresh_interval as u64));
     interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut error_cnt = 0;

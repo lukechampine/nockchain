@@ -1,3 +1,4 @@
+#[allow(unused_parens)]
 // generated with mds-codegen
 pub const fn generated(input: &[u32; 16]) -> [u64; 16] {
     // layer 0
