@@ -118,7 +118,7 @@ quickcheck_macros = "1.0"
 quote = "1.0.37"
 rand = { version = "0.9.2", features = ["std"] }
 ratatui = "0.29.0"
-rayon = "1.8.0"
+rayon = "1.11.0"
 rcgen = "0.14.3"
 reqwest = { version = "0.12", default-features = false, features = [
   "rustls-tls",
@@ -222,3 +222,6 @@ debug = 1
 opt-level = 3
 codegen-units = 1
 debug = 1
+
+[patch.crates-io]
+rayon-core = { git = "https://github.com/ricohageman/rayon.git", rev = "6105cea31c87c6954442d312dc3a4d592b04d0e9" }

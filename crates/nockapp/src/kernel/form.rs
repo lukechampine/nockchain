@@ -368,17 +368,40 @@ impl<C> SerfThread<C> {
     }
 }
 
+fn wait_for_action<C: SerfCheckpoint>(
+    action_receiver: &mut mpsc::Receiver<SerfAction<C>>
+) -> Option<SerfAction<C>> {
+    if rayon::current_thread_index().is_none() {
+        // This thread is not scheduled on the rayon thread pool, block until the action is received.
+        return action_receiver.blocking_recv();
+    }
+
+    loop {
+        match action_receiver.try_recv() {
+            Ok(received_action) => {
+                return Some(received_action);
+            }
+            Err(mpsc::error::TryRecvError::Empty) => {
+                // Only yield in rayon if we're actually in a rayon thread
+                // This is a no-op in std threads
+                rayon::yield_now();
+            }
+            Err(mpsc::error::TryRecvError::Disconnected) => {
+               return None;
+            }
+        }
+    }
+}
+
 fn serf_loop<C: SerfCheckpoint>(
     mut serf: Serf,
     mut action_receiver: mpsc::Receiver<SerfAction<C>>,
     inhibit: Arc<AtomicBool>,
 ) {
     loop {
-        // Only yield in rayon if we're actually in a rayon thread
-        // This is a no-op in std threads
-        rayon::yield_now();
         let start = std::time::Instant::now();
-        let Some(action) = action_receiver.blocking_recv() else {
+
+        let Some(action) = wait_for_action(&mut action_receiver) else {
             break;
         };
         let recv_elapsed = start.elapsed();

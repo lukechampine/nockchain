@@ -11,7 +11,7 @@ use crate::two::{
     con_mon, fdegree, fpadd, fpscal, fpsub, id_fpoly, pinv_mod_x_to, zero_fpoly, zeroextend_slice,
 };
 use crate::utils::{scag_vec, xeb};
-use crate::parallel::prelude::*;
+use rayon::prelude::*;
 
 #[derive(Clone)]
 pub struct WeightedDivConst {

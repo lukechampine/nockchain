@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use rayon::prelude::*;
 
 use nbx_tip5::melt::Melt;
 use zkvm_jetpack::form::math::poly::*;
@@ -10,7 +11,6 @@ use zkvm_jetpack::form::{ElementEx, PolySlice, PolyVec};
 use super::gpu;
 use crate::engine::Engine;
 use crate::log::*;
-use crate::parallel::prelude::*;
 
 // 64MB in melts/belts
 pub const MAX_CHUNK_SIZE: usize = 0x4000000 / core::mem::size_of::<u64>();
@@ -63,6 +63,7 @@ impl<E: ElementEx> SubstituteIter<'_, E> {
         let r = self
             .muls
             .into_par_iter()
+            .with_min_len(128)
             .map(|m| {
                 let operations = m
                     .coms

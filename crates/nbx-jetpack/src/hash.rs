@@ -129,21 +129,27 @@ pub struct ReduceChunkSlice<'a> {
 impl<'a> ReduceChunkSlice<'a> {
     #[tracing::instrument(skip_all)]
     fn reduce(self, inp_start: usize, inp: &[Melt]) {
-        use crate::parallel::prelude::*;
+        use rayon::prelude::*;
         struct MeltSlice(*mut Melt);
         unsafe impl Send for MeltSlice {}
         unsafe impl Sync for MeltSlice {}
         let out_ptr = MeltSlice(self.out.as_mut_ptr());
         let out_len = self.out.len() as u32;
         let out_off = self.out_start;
-        self.ops_fixed.into_par_iter().for_each(|op| {
-            let out = &out_ptr;
-            op.reduce_fixed(inp_start, inp, out.0, out_len, out_off);
-        });
-        self.ops_variable.into_par_iter().for_each(|op| {
-            let out = &out_ptr;
-            op.reduce(inp_start, inp, out.0, out_len, out_off);
-        });
+        self.ops_fixed
+            .into_par_iter()
+            .with_min_len(1024)
+            .for_each(|op| {
+                let out = &out_ptr;
+                op.reduce_fixed(inp_start, inp, out.0, out_len, out_off);
+            });
+        self.ops_variable
+            .into_par_iter()
+            .with_min_len(1024)
+            .for_each(|op| {
+                let out = &out_ptr;
+                op.reduce(inp_start, inp, out.0, out_len, out_off);
+            });
     }
 
     pub fn min_source(&self) -> Option<usize> {
@@ -302,10 +308,8 @@ impl ReduceStage {
     fn reduce<'a, I: Iterator<Item = &'a [Melt]>>(mut self, inps: I) -> Vec<Vec<Melt>> {
         let pairs = self.split_chunks(inps);
 
-        use crate::parallel::prelude::*;
-
         pairs
-            .into_par_iter()
+            .into_iter()
             .for_each(|(_, inp_at, input, _, chunk)| chunk.reduce(inp_at, input));
 
         self.chunks.into_iter().map(|v| v.out).collect()

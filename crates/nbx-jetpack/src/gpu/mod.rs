@@ -408,7 +408,7 @@ fn get_engine() -> HashEngine {
 }
 
 pub fn gpu_test() -> Result<(), Box<dyn std::error::Error>> {
-    use crate::parallel::prelude::*;
+    use rayon::prelude::*;
 
     println!("Reducing");
 
@@ -459,7 +459,7 @@ pub fn gpu_test() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 pub fn gpu_sub_test(engine: SubstituteEngine<Melt>) -> Result<(), Box<dyn std::error::Error>> {
-    use crate::parallel::prelude::*;
+    use rayon::prelude::*;
 
     println!("Substituting on poly size {}", engine.poly_len());
 
