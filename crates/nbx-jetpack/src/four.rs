@@ -60,10 +60,14 @@ impl<T: Element> TryFrom<Noun> for ProofPath<T> {
     fn try_from(value: Noun) -> std::result::Result<Self, Self::Error> {
         let [leaf, path_hl] = value.uncell()?;
         let leaf = PolyVec::try_from(leaf)?;
-        let mut path = vec![];
-        for p in HoonList::try_from(path_hl).ok().into_iter().flatten() {
-            path.push(digest(p)?);
-        }
+
+        let path = HoonList::try_from(path_hl)
+            .ok()
+            .into_iter()
+            .flatten()
+            .map(digest)
+            .collect::<std::result::Result<_, _>>()?;
+
         Ok(Self { leaf, path })
     }
 }
@@ -427,19 +431,23 @@ impl TryFrom<Noun> for Proof {
     fn try_from(value: Noun) -> std::result::Result<Self, Self::Error> {
         let [v, objects_in, hashes_in, read_index] = value.uncell()?;
 
-        let mut objects = vec![];
-        for o in HoonList::try_from(objects_in).ok().into_iter().flatten() {
-            objects.push(ProofData::try_from(o)?);
-        }
+        let objects = HoonList::try_from(objects_in)
+            .ok()
+            .into_iter()
+            .flatten()
+            .map(ProofData::try_from)
+            .collect::<std::result::Result<Vec<_>, _>>()?;
 
-        let mut hashes = vec![];
-        for h in HoonList::try_from(hashes_in).ok().into_iter().flatten() {
-            let h: [Noun; 5] = h.uncell()?;
-            hashes.push(
-                h.map(|v| v.as_atom().unwrap().as_u64().unwrap())
-                    .map(Melt::from_u64),
-            );
-        }
+        let hashes = HoonList::try_from(hashes_in)
+            .ok()
+            .into_iter()
+            .flatten()
+            .map(|h| -> std::result::Result<[Melt; 5], JetErr> {
+                let h: [Noun; 5] = h.uncell()?;
+                Ok(h.map(|v| v.as_atom().unwrap().as_u64().unwrap())
+                    .map(Melt::from_u64))
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()?;
 
         let read_index = read_index.as_atom()?.as_u64()?;
 

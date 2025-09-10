@@ -1147,11 +1147,14 @@ pub fn lift_to_fpoly(stack: &mut NockStack, sam: Noun) -> Result {
     // ^-  fpoly
     // ?>  (levy poly based)
     // (init-fpoly (turn poly lift))
-    let mut felts = vec![];
-
-    for b in HoonList::try_from(sam).ok().into_iter().flatten() {
-        felts.push(Felt::lift(Belt(b.as_atom()?.as_u64()?)));
-    }
+    let felts = HoonList::try_from(sam)
+        .ok()
+        .into_iter()
+        .flatten()
+        .map(|b| -> std::result::Result<Felt, JetErr> {
+            Ok(Felt::lift(Belt(b.as_atom()?.as_u64()?)))
+        })
+        .collect::<std::result::Result<Vec<_>, _>>()?;
 
     let (ret, slc) = new_handle_mut_slice(stack, Some(felts.len()));
     slc.copy_from_slice(&felts);

@@ -357,7 +357,7 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
 
     // Substitution moved out from process_degree_constraints to have everything done in one go.
     let mut engine = SubstituteEngine::new(max_height);
-    let mut comp_cnts = vec![];
+    let mut comp_cnts = Vec::with_capacity(1024);
     let tworow_trace_polys = tworow_trace_polys
         .iter()
         .map(|v| PolyVec(v.0.to_vec()))
@@ -762,13 +762,17 @@ pub fn compute_codeword_commitments_sam(stack: &mut NockStack, sam: Noun) -> Res
     //         total-cols=@
     //     ==
     let [table_marys, fri_domain_len, total_cols] = sam.uncell()?;
-    let mut table_marys_vec = vec![];
-    for m in HoonList::try_from(table_marys).ok().into_iter().flatten() {
-        let Ok(ma) = MarySlice::try_from(m) else {
-            return jet_err();
-        };
-        table_marys_vec.push(ma);
-    }
+    let table_marys_vec = HoonList::try_from(table_marys)
+        .ok()
+        .into_iter()
+        .flatten()
+        .map(MarySlice::try_from)
+        .collect::<std::result::Result<Vec<_>, _>>();
+
+    let Ok(table_marys_vec) = table_marys_vec else {
+        return jet_err();
+    };
+
     let fri_domain_len = fri_domain_len.as_atom()?.as_u64()? as u32;
     let total_cols = total_cols.as_atom()?.as_u64()?;
     // ^-  codeword-commitments
@@ -799,13 +803,17 @@ pub fn compute_lde_sam(stack: &mut NockStack, sam: Noun) -> Result {
     //         num-cols=@
     //     ==
     let [table_polys, fri_domain_len, num_cols] = sam.uncell()?;
-    let mut table_polys_vec = vec![];
-    for poly in HoonList::try_from(table_polys).ok().into_iter().flatten() {
-        let Ok(poly) = MarySlice::try_from(poly) else {
-            return jet_err();
-        };
-        table_polys_vec.push(poly);
-    }
+    let table_polys_vec = HoonList::try_from(table_polys)
+        .ok()
+        .into_iter()
+        .flatten()
+        .map(MarySlice::try_from)
+        .collect::<std::result::Result<Vec<_>, _>>();
+
+    let Ok(table_polys_vec) = table_polys_vec else {
+        return jet_err();
+    };
+
     let fri_domain_len = fri_domain_len.as_atom()?.as_u64()?;
     let num_cols = num_cols.as_atom()?.as_u64()?;
     let (h, mut ma) = new_handle_mut_mary(stack, fri_domain_len as _, num_cols as _);
