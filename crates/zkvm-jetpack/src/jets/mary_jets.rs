@@ -6,7 +6,7 @@ use nockvm::jets::math::util::add;
 use nockvm::jets::util::{bite_to_word, chop, slot};
 use nockvm::jets::JetErr;
 use nockvm::mem::NockStack;
-use nockvm::noun::{Atom, IndirectAtom, Noun, D, NO, T, YES};
+use nockvm::noun::{Atom, Error, IndirectAtom, Noun, D, NO, T, YES};
 use nockvm_macros::tas;
 use tracing::{debug, error};
 
@@ -401,19 +401,20 @@ pub fn mary_to_list_fields(
     let res_rip = rip(stack, 6, ma_step, ma_array_dat.as_atom()?)?;
     let res_snip = snip(stack, res_rip)?;
 
-    let mut res_turn: Vec<Noun> = Vec::new();
-    for elem in HoonList::try_from(res_snip)?.into_iter() {
-        //%+  add  elem
-        //let x = elem +
-        let res_wutcol = if ma_step == 1 {
-            D(0)
-        } else {
-            lsh(stack, 6, ma_step, D(1).as_atom()?)?
-        };
+    let res_turn = HoonList::try_from(res_snip)?
+        .into_iter()
+        .map(|elem| {
+            //%+  add  elem
+            //let x = elem +
+            let res_wutcol = if ma_step == 1 {
+                D(0)
+            } else {
+                lsh(stack, 6, ma_step, D(1).as_atom()?)?
+            };
 
-        let res_add = add(stack, elem.as_atom()?, res_wutcol.as_atom()?);
-        res_turn.push(res_add.as_noun());
-    }
+            Ok(add(stack, elem.as_atom()?, res_wutcol.as_atom()?).as_noun())
+        })
+        .collect::<Result<Vec<Noun>, JetErr>>()?;
 
     Ok(vecnoun_to_hoon_list(stack, res_turn.as_slice()))
 }
