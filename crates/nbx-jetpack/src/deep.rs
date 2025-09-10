@@ -5,10 +5,10 @@ use nbx_tip5::base::binv;
 use zkvm_jetpack::form::math::poly::{
     p_fft_twiddles, p_hadamard_inplace, p_ntt_twiddled, p_ntt_twiddles, pscal_inplace,
 };
-use zkvm_jetpack::form::{Belt, ElementEx, FPolySlice, FPolyVec, Felt, PolySlice, PolyVec};
+use zkvm_jetpack::form::{Belt, ElementEx, FPolySlice, FPolyVec, Felt, PolyVec};
 use crate::new_fpoly;
 use crate::two::{
-    con_mon, fdegree, fpadd, fpscal, fpsub, id_fpoly, pinv_mod_x_to, zero_fpoly, zeroextend_slice,
+    con_mon, fdegree, fpadd, fpsub, id_fpoly, pinv_mod_x_to, zero_fpoly, zeroextend_slice,
 };
 use crate::utils::{scag_vec, xeb};
 use rayon::prelude::*;
@@ -149,12 +149,24 @@ impl DivisorBatch {
             self.polys[0].0.len()
         );
 
-        let mut weighted_numerator = zero_fpoly();
+        // Pre-compute the maximum polynomial length to avoid reallocations
+        let max_len = self.polys.iter().map(|p| p.0.len()).max().unwrap();
 
-        for ((poly, opening), weight) in self.polys.iter().zip(self.openings).zip(self.weights) {
-            let numerator = fpsub(poly.into(), PolySlice(&[opening]));
-            let weighted_term = fpscal(weight, numerator);
-            weighted_numerator = fpadd(weighted_numerator, (&weighted_term).into());
+        // Pre-allocate the weighted numerator with the correct size
+        let mut weighted_numerator = PolyVec(vec![Felt::zero(); max_len]);
+
+        for (&opening, &weight) in self.openings.iter().zip(&self.weights) {
+            if opening.is_zero() {
+                continue;
+            }
+
+            weighted_numerator.0[0] = weighted_numerator.0[0] - (opening * weight);
+        }
+
+        for (poly, weight) in self.polys.iter().zip(self.weights) {
+            for (&coeff, weighted_elem) in poly.0.iter().zip(weighted_numerator.0.iter_mut()) {
+                *weighted_elem += coeff * weight;
+            }
         }
 
         let (lead, mut rf) = fpdiv_lead_rf(weighted_numerator, &div_const);
