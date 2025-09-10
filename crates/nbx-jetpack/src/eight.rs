@@ -353,6 +353,7 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
     // =/  boundary-zerofier  (init-bpoly ~[(bneg 1) 1])          ::  f(X)=X-1
     let boundary_zerofier = [Elem::from_u64(bneg(1)), Elem::one()];
     let boundary_zerofier = PolySlice(&boundary_zerofier);
+    let mut boundary_acc: Option<Vec<_>> = None;
 
     // Substitution moved out from process_degree_constraints to have everything done in one go.
     let mut engine = SubstituteEngine::new(max_height);
@@ -394,7 +395,7 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
     // ::
     // %+  roll  (range len.omicrons)
     // |=  [i=@ acc=_zero-bpoly]
-    let mut acc = PolyVec(vec![Elem::zero()]);
+    let mut acc = PolyVec(vec![Elem::zero(); poly_len]);
     for i in 0..omicrons.len() {
         // =/  height=@  (snag i heights)
         let height = heights[i];
@@ -423,6 +424,7 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
         let row_zerofier = ppow(&[Elem::zero(), Elem::one()], height as _);
         let row_zerofier = psub_(&row_zerofier, &[Elem::one()]);
         let row_zerofier = PolySlice(&row_zerofier);
+        let mut row_acc: Option<Vec<_>> = None;
 
         // ::  note: the transition zerofier = row-zerofier/last-row
         // ::  here, we are computing composition-constraints/transition-zerofier
@@ -458,17 +460,42 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
                 PolySlice(cur_weights),
                 fri_deg_bound,
             )?;
+
             // %-  bpdiv
             // :_  boundary-zerofier
-            //#[cfg(not(target_feature = "avx2"))]
-            let dividend: PolyVec<Elem> = PolyVec(dividend.0.to_vec()).into();
-            let res = pdiv(&processed_constraints.0, &dividend.0);
             // ;:  bpadd
             //   acc
-            acc.0
-                .resize(core::cmp::max(acc.0.len(), res.len()), Elem::zero());
-            padd_in_place(&mut acc.0, &res);
+
+            match o {
+                0 => {
+                    match boundary_acc.as_mut() {
+                        Some(acc) => padd_in_place(acc, &processed_constraints.0),
+                        None => boundary_acc = Some(processed_constraints.0),
+                    }
+                },
+                1 | 4 => {
+                    match row_acc.as_mut() {
+                        Some(acc) => padd_in_place(acc, &processed_constraints.0),
+                        None => row_acc = Some(processed_constraints.0),
+                    }
+                },
+                _ => {
+                    let dividend: PolyVec<Elem> = PolyVec(dividend.0.to_vec()).into();
+                    let result = pdiv(&processed_constraints.0, &dividend.0);
+                    padd_in_place(&mut acc.0, &result);
+                }
+            }
         }
+
+        if let Some(row_acc) = row_acc {
+            let row_result = pdiv(&row_acc, row_zerofier.0);
+            padd_in_place(&mut acc.0, &row_result);
+        }
+    }
+
+    if let Some(boundary_acc) = boundary_acc {
+        let row_result = pdiv(&boundary_acc, boundary_zerofier.0);
+        padd_in_place(&mut acc.0, &row_result);
     }
 
     let acc: BPolyVec = acc.into();
