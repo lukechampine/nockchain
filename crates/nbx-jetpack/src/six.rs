@@ -2,7 +2,7 @@ use std::iter::once;
 
 use zkvm_jetpack::form::mary::Mary;
 use zkvm_jetpack::form::math::poly::*;
-use zkvm_jetpack::form::{poly::Poly, Belt};
+use zkvm_jetpack::form::{poly::Poly, Belt, ElementEx};
 use zkvm_jetpack::form::{FPolySlice, FPolyVec, Felt, PolySlice, PolyVec};
 use zkvm_jetpack::hand::handle::{finalize_mary, new_handle_mut_mary};
 use zkvm_jetpack::noun::noun_ext::NounExt;
@@ -12,7 +12,7 @@ use nockvm::mem::NockStack;
 use nockvm::noun::{Atom, Noun, Slots, D, T};
 
 use num_traits::Pow;
-
+use nbx_tip5::base::binv;
 use zkvm_jetpack::jets::utils::jet_err;
 
 use super::one::*;
@@ -287,7 +287,16 @@ pub fn prove_commit_impl(
     // |=  [round=@ codeword=_codeword codewords=(list codeword-data) omega=_(lift omega) round-offset=_(lift offset) stream=_stream]
     let mut codeword: FPolyVec = PolyVec(codeword.0.into());
     let mut codewords: Vec<CodewordData> = vec![];
-    let mut omega = Felt::lift(fri.omega);
+
+    // Keep track of omega's inverse instead of omega as multiplication is faster than division
+    let mut omega_inv = Felt::one() / Felt::lift(fri.omega);
+
+    // Determine the twiddles as all p_ntt calls have the same size.
+    let inv_len = Felt::from_u64(binv(fri.folding_deg as _));
+    let or = Belt(fri.folding_deg as _).ordered_root()?;
+    let root = Felt::from_u64(binv(or.0));
+    let twiddles = p_ntt_twiddles(fri.folding_deg as _, &root);
+
     let mut round_offset = Felt::lift(fri.offset);
     for round in 0..fri.num_rounds() {
         // =/  num  (div len.codeword folding-deg)
@@ -298,7 +307,7 @@ pub fn prove_commit_impl(
         let mut cosets = Mary {
             step: 3 * (fri.folding_deg as u32),
             len: num as u32,
-            dat: vec![],
+            dat: Vec::with_capacity(num * fri.folding_deg as usize * 3),
         };
         //   %-  zing-fpolys
         //   %+  turn  (range num)
@@ -344,11 +353,13 @@ pub fn prove_commit_impl(
             let coset = snag_as_poly_mary((&cosets).into(), i);
             //   ::=/  eval-point=felt  (fdiv alpha (fpow omega i))
             //   (fpeval (fp-ifft coset) eval-point)
-            let icoset = p_ifft(coset.0.to_vec())?;
+            let mut icoset = coset.0.to_vec();
+            p_ntt_twiddled_inplace(&mut icoset, &twiddles);
+            pscal_inplace(inv_len, &mut icoset);
             let evaled = peval(PolySlice(&icoset), eval_point);
             codeword.0[i] = evaled;
 
-            eval_point = eval_point / omega;
+            eval_point = eval_point * omega_inv;
         }
         // ::
         // :*  new-codeword
@@ -361,7 +372,7 @@ pub fn prove_commit_impl(
             codeword: cosets,
             merk: Some(merk),
         });
-        omega = omega.pow(fri.folding_deg as usize);
+        omega_inv = omega_inv.pow(fri.folding_deg as usize);
         round_offset = round_offset.pow(fri.folding_deg as usize);
     }
 
