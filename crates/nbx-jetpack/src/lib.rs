@@ -10,45 +10,43 @@ use nockvm::noun::*;
 mod eight;
 mod five;
 mod four;
+mod hoon;
 mod one;
-mod prover_memory;
 mod prover_compute;
+mod prover_memory;
+mod seven;
 mod six;
 mod three;
 mod two;
-mod seven;
 mod utils;
 mod zoon;
-mod hoon;
 
+pub mod codewords;
+pub mod deep;
 #[cfg(feature = "gpu")]
 pub mod gpu;
-pub mod substitute;
 mod hash;
-pub mod deep;
-pub mod codewords;
+pub mod substitute;
 
-pub mod instruments;
 pub mod engine;
+pub mod instruments;
 
+pub use eight::compute_table_polys;
 use eight::*;
 use five::*;
 use four::*;
+use hoon::*;
+pub use one::snag_as_poly_mary;
 use one::*;
-use prover_memory::{*, build_v0_v1 as memory_build_v0_v1, build_v2 as memory_build_v2};
-use prover_compute::{*, build as compute_build};
+use prover_compute::{build as compute_build, *};
+use prover_memory::{build_v0_v1 as memory_build_v0_v1, build_v2 as memory_build_v2, *};
+use seven::*;
 use six::*;
 use three::*;
 use two::*;
-use zoon::*;
-use seven::*;
-use hoon::*;
-
-pub use one::snag_as_poly_mary;
-pub use two::{mp_substitute_ultra_impl, new_fpoly, bpoly_to_fpoly};
-pub use eight::compute_table_polys;
-
+pub use two::{bpoly_to_fpoly, mp_substitute_ultra_impl, new_fpoly};
 use zkvm_jetpack::jets::utils::jet_err;
+use zoon::*;
 
 #[cfg(not(feature = "stealthy"))]
 pub mod log {
@@ -59,25 +57,35 @@ pub mod log {
 pub mod log {
     #[macro_export]
     macro_rules! error {
-        ($($tt:tt)*) => (())
+        ($($tt:tt)*) => {
+            ()
+        };
     }
     #[macro_export]
     macro_rules! warn {
-        ($($tt:tt)*) => (())
+        ($($tt:tt)*) => {
+            ()
+        };
     }
     #[macro_export]
     macro_rules! debug {
-        ($($tt:tt)*) => (())
+        ($($tt:tt)*) => {
+            ()
+        };
     }
     #[macro_export]
     macro_rules! info {
-        ($($tt:tt)*) => (())
+        ($($tt:tt)*) => {
+            ()
+        };
     }
     #[macro_export]
     macro_rules! trace {
-        ($($tt:tt)*) => (())
+        ($($tt:tt)*) => {
+            ()
+        };
     }
-    pub use super::{error, warn, debug, info, trace};
+    pub use super::{debug, error, info, trace, warn};
 }
 
 macro_rules! jam_err {
@@ -1004,41 +1012,37 @@ pub const NBX_MEMORY_V2_JETS: &[HotEntry] = &[
     ),
 ];
 
-pub const NBX_COMPUTE_V0_V1_JETS: &[HotEntry] = &[
-    (
-        &[
-            K_138,
-            Left(b"one"),
-            Left(b"two"),
-            Left(b"tri"),
-            Left(b"qua"),
-            Left(b"pen"),
-            Left(b"compute-table-v0-v1"),
-            Left(b"funcs"),
-            Left(b"build"),
-        ],
-        1,
-        compute_build_jet,
-    ),
-];
+pub const NBX_COMPUTE_V0_V1_JETS: &[HotEntry] = &[(
+    &[
+        K_138,
+        Left(b"one"),
+        Left(b"two"),
+        Left(b"tri"),
+        Left(b"qua"),
+        Left(b"pen"),
+        Left(b"compute-table-v0-v1"),
+        Left(b"funcs"),
+        Left(b"build"),
+    ],
+    1,
+    compute_build_jet,
+)];
 
-pub const NBX_COMPUTE_V2_JETS: &[HotEntry] = &[
-    (
-        &[
-            K_138,
-            Left(b"one"),
-            Left(b"two"),
-            Left(b"tri"),
-            Left(b"qua"),
-            Left(b"pen"),
-            Left(b"compute-table-v2"),
-            Left(b"funcs"),
-            Left(b"build"),
-        ],
-        1,
-        compute_build_jet,
-    ),
-];
+pub const NBX_COMPUTE_V2_JETS: &[HotEntry] = &[(
+    &[
+        K_138,
+        Left(b"one"),
+        Left(b"two"),
+        Left(b"tri"),
+        Left(b"qua"),
+        Left(b"pen"),
+        Left(b"compute-table-v2"),
+        Left(b"funcs"),
+        Left(b"build"),
+    ],
+    1,
+    compute_build_jet,
+)];
 
 pub const NBX_ZOON_JETS: &[HotEntry] = &[(
     &[
@@ -1056,6 +1060,7 @@ pub const NBX_ZOON_JETS: &[HotEntry] = &[(
     zby_key_jet,
 )];
 
+#[rustfmt::skip]
 pub const NBX_HOON_JETS: &[HotEntry] = &[(
     &[
         K_138,
@@ -1067,6 +1072,7 @@ pub const NBX_HOON_JETS: &[HotEntry] = &[(
     sort_jet,
 )];
 
+#[rustfmt::skip]
 pub fn nbx_jets() -> impl Iterator<Item = HotEntry> {
     [
         NBX_ONE_JETS,

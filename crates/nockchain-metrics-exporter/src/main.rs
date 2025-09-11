@@ -1,31 +1,29 @@
 #![allow(clippy::doc_overindented_list_items)]
 
-use ibig::UBig;
-use metrics_exporter_prometheus::PrometheusBuilder;
-use metrics_util::MetricKindMask;
-use nockapp::kernel::boot::{default_boot_cli, init_default_tracing};
-use nockvm_macros::tas;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::time::{interval, timeout, MissedTickBehavior};
 
 use clap::Parser;
+use ibig::UBig;
 use metrics::gauge;
-use nockapp::{NockAppError, NockAppExit, Noun};
-use nockvm::noun::{IndirectAtom, D, T};
-use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
-use tracing::{debug, error, info, trace};
-
+use metrics_exporter_prometheus::PrometheusBuilder;
+use metrics_util::MetricKindMask;
 use nockapp::driver::*;
+use nockapp::kernel::boot::{default_boot_cli, init_default_tracing};
 use nockapp::noun::slab::NounSlab;
 use nockapp::wire::WireTag;
+use nockapp::{Bytes, NockAppError, NockAppExit, Noun};
 use nockapp_grpc::client::NockAppGrpcClient;
 use nockapp_grpc::pb::Wire as GrpcWire;
-use nockapp::Bytes;
+use nockvm::noun::{IndirectAtom, D, T};
+use nockvm_macros::tas;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
+use tokio::time::{interval, timeout, MissedTickBehavior};
+use tracing::{debug, error, info, trace};
 
 fn pull_args<const N: usize>(mut inp: Noun) -> Result<[Noun; N], NockAppError> {
     let mut cnt = 0;
@@ -51,7 +49,12 @@ fn pull_args<const N: usize>(mut inp: Noun) -> Result<[Noun; N], NockAppError> {
 struct MetricsCli {
     #[arg(short, long, default_value = "127.0.0.1:9089")]
     bind: String,
-    #[arg(short, long, help = "gRPC server address (e.g., http://127.0.0.1:5555)", default_value = "http://127.0.0.1:5555")]
+    #[arg(
+        short,
+        long,
+        help = "gRPC server address (e.g., http://127.0.0.1:5555)",
+        default_value = "http://127.0.0.1:5555"
+    )]
     grpc_address: String,
     #[arg(
         short,
@@ -69,9 +72,9 @@ struct GrpcHandle {
 
 impl GrpcHandle {
     pub async fn new(address: &str) -> Result<Self, NockAppError> {
-        let client = NockAppGrpcClient::connect(address)
-            .await
-            .map_err(|e| NockAppError::OtherError(format!("Failed to connect to gRPC server: {}", e)))?;
+        let client = NockAppGrpcClient::connect(address).await.map_err(|e| {
+            NockAppError::OtherError(format!("Failed to connect to gRPC server: {}", e))
+        })?;
 
         Ok(Self { client, pid: 0 })
     }
@@ -86,7 +89,8 @@ impl GrpcHandle {
     pub async fn peek(&mut self, path: &[&str]) -> Result<NounSlab, NockAppError> {
         let path_strings: Vec<String> = path.iter().map(|s| s.to_string()).collect();
 
-        let jam_bytes = self.client
+        let jam_bytes = self
+            .client
             .peek(self.pid, path_strings)
             .await
             .map_err(|e| NockAppError::OtherError(format!("gRPC peek failed: {}", e)))?;
@@ -141,14 +145,16 @@ impl Exporter {
     pub async fn new(grpc_address: &str, id: String) -> Result<Self, NockAppError> {
         let grpc_handle = GrpcHandle::new(grpc_address).await?;
 
-        Ok(Self {
-            grpc_handle,
-            id,
-        })
+        Ok(Self { grpc_handle, id })
     }
 
     pub async fn update(&mut self) -> Result<(), NockAppError> {
-        let poke = match timeout(Duration::from_secs(10), self.grpc_handle.peek(&["heavy-summary"])).await {
+        let poke = match timeout(
+            Duration::from_secs(10),
+            self.grpc_handle.peek(&["heavy-summary"]),
+        )
+        .await
+        {
             Ok(Ok(p)) => p,
             Err(_) => {
                 error!("Timeout sending gRPC peek");
@@ -215,11 +221,12 @@ impl RetryExporter {
 
     pub async fn acquire(&mut self) -> Option<&mut Exporter> {
         if let Some(mut exporter) = self.exporter.take() {
-            if let Ok(Ok(true)) = timeout(Duration::from_secs(5), exporter.grpc_handle.ping()).await {
+            if let Ok(Ok(true)) = timeout(Duration::from_secs(5), exporter.grpc_handle.ping()).await
+            {
                 self.exporter = Some(exporter);
                 return self.exporter.as_mut();
             }
-            
+
             debug!(
                 "Nockchain at {} has died. Reconnecting...",
                 self.grpc_address

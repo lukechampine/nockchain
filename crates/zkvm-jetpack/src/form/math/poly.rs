@@ -1,12 +1,12 @@
-use const_for::const_for;
 use std::any::{Any, TypeId};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use crate::form::{Belt, ElementEx, FieldError, Poly, PolySlice};
+use const_for::const_for;
 
 use super::binv;
+use crate::form::{Belt, ElementEx, FieldError, Poly, PolySlice};
 
 #[inline]
 const fn bitreverse(mut n: u32, l: u32) -> u32 {
@@ -166,23 +166,13 @@ pub fn p_ntt_twiddled_inplace<T: ElementEx>(x: &mut [T], twiddles: &[impl AsRef<
     }
 
     if x.len() == 65536 && last_non_zero_index < 1024 {
-        p_ntt_twiddled_inplace_sparse(
-            x,
-            twiddles,
-            log_2_of_n,
-            last_non_zero_index,
-            &BIT_REVERSE,
-        );
+        p_ntt_twiddled_inplace_sparse(x, twiddles, log_2_of_n, last_non_zero_index, &BIT_REVERSE);
         return;
     }
 
     if x.len() == 4096 && last_non_zero_index < 512 {
         p_ntt_twiddled_inplace_sparse(
-            x,
-            twiddles,
-            log_2_of_n,
-            last_non_zero_index,
-            &BIT_REVERSE_4096,
+            x, twiddles, log_2_of_n, last_non_zero_index, &BIT_REVERSE_4096,
         );
         return;
     }
@@ -191,7 +181,11 @@ pub fn p_ntt_twiddled_inplace<T: ElementEx>(x: &mut [T], twiddles: &[impl AsRef<
 }
 
 #[inline(always)]
-fn p_ntt_twiddled_inplace_dense<T: ElementEx>(x: &mut [T], twiddles: &[impl AsRef<[T]>], log_2_of_n: u32) {
+fn p_ntt_twiddled_inplace_dense<T: ElementEx>(
+    x: &mut [T],
+    twiddles: &[impl AsRef<[T]>],
+    log_2_of_n: u32,
+) {
     for stage_idx in 0..log_2_of_n {
         let twiddles = twiddles[stage_idx as usize].as_ref();
         assert!(twiddles.len().is_power_of_two());
@@ -237,7 +231,11 @@ fn p_ntt_twiddled_inplace_sparse<T: ElementEx>(
         let twiddles_stage = twiddles[stage_idx as usize].as_ref();
         for uv in x.chunks_exact_mut(2 * twiddles_stage.len()) {
             let (u, v) = uv.split_at_mut(twiddles_stage.len());
-            for (w, (u_mut, v_mut)) in twiddles_stage.iter().copied().zip(u.iter_mut().zip(v.iter_mut())) {
+            for (w, (u_mut, v_mut)) in twiddles_stage
+                .iter()
+                .copied()
+                .zip(u.iter_mut().zip(v.iter_mut()))
+            {
                 let u_val = *u_mut;
                 let v_val = *v_mut * w;
                 *u_mut = u_val + v_val;
@@ -406,42 +404,47 @@ pub fn p_hadamard_inplace<T: ElementEx, O: Copy + Into<T>>(a: &mut [T], b: &[O])
         a.len(),
         b.len()
     );
-        const CHUNK_SIZE: usize = 16;
-        const PREFETCH_CHUNKS: usize = 4;
-        let num_chunks = a.len() / CHUNK_SIZE;
-        let mut a_chunks = a.array_chunks_mut::<CHUNK_SIZE>();
-        let mut b_chunks = b.array_chunks::<CHUNK_SIZE>();
+    const CHUNK_SIZE: usize = 16;
+    const PREFETCH_CHUNKS: usize = 4;
+    let num_chunks = a.len() / CHUNK_SIZE;
+    let mut a_chunks = a.array_chunks_mut::<CHUNK_SIZE>();
+    let mut b_chunks = b.array_chunks::<CHUNK_SIZE>();
 
-        for (i, (a, b)) in (&mut a_chunks).zip(&mut b_chunks).enumerate() {
-            if i + PREFETCH_CHUNKS < num_chunks {
-                unsafe {
-                    #[cfg(target_arch = "aarch64")]
-                    std::arch::asm!(
-                        "prfm pldl1keep, [{0}]",
-                        "prfm pldl1strm, [{1}]",
-                        in(reg) a.as_ptr().add(CHUNK_SIZE * PREFETCH_CHUNKS),
-                        in(reg) b.as_ptr().add(CHUNK_SIZE * PREFETCH_CHUNKS),
-                        options(nostack, readonly)
-                    );
+    for (i, (a, b)) in (&mut a_chunks).zip(&mut b_chunks).enumerate() {
+        if i + PREFETCH_CHUNKS < num_chunks {
+            unsafe {
+                #[cfg(target_arch = "aarch64")]
+                std::arch::asm!(
+                    "prfm pldl1keep, [{0}]",
+                    "prfm pldl1strm, [{1}]",
+                    in(reg) a.as_ptr().add(CHUNK_SIZE * PREFETCH_CHUNKS),
+                    in(reg) b.as_ptr().add(CHUNK_SIZE * PREFETCH_CHUNKS),
+                    options(nostack, readonly)
+                );
 
-                    #[cfg(target_arch = "x86_64")]
-                    {
-                        std::arch::x86_64::_mm_prefetch::<{ std::arch::x86_64::_MM_HINT_ET0 }>(a.as_ptr().add(CHUNK_SIZE * PREFETCH_CHUNKS) as *const _);
-                        std::arch::x86_64::_mm_prefetch::<{ std::arch::x86_64::_MM_HINT_ET0 }>(a.as_ptr().add(CHUNK_SIZE * PREFETCH_CHUNKS + CHUNK_SIZE / 2) as *const _);
-                        std::arch::x86_64::_mm_prefetch::<{ std::arch::x86_64::_MM_HINT_T0 }>(b.as_ptr().add(CHUNK_SIZE * PREFETCH_CHUNKS) as *const _);
-                        std::arch::x86_64::_mm_prefetch::<{ std::arch::x86_64::_MM_HINT_T0 }>(b.as_ptr().add(CHUNK_SIZE * PREFETCH_CHUNKS + CHUNK_SIZE / 2) as *const _);
-                    }
+                #[cfg(target_arch = "x86_64")]
+                #[rustfmt::skip]
+                {
+                    std::arch::x86_64::_mm_prefetch::<{ std::arch::x86_64::_MM_HINT_ET0 }>(a.as_ptr().add(CHUNK_SIZE * PREFETCH_CHUNKS) as *const _);
+                    std::arch::x86_64::_mm_prefetch::<{ std::arch::x86_64::_MM_HINT_ET0 }>(a.as_ptr().add(CHUNK_SIZE * PREFETCH_CHUNKS + CHUNK_SIZE / 2) as *const _);
+                    std::arch::x86_64::_mm_prefetch::<{ std::arch::x86_64::_MM_HINT_T0 }>(b.as_ptr().add(CHUNK_SIZE * PREFETCH_CHUNKS) as *const _);
+                    std::arch::x86_64::_mm_prefetch::<{ std::arch::x86_64::_MM_HINT_T0 }>(b.as_ptr().add(CHUNK_SIZE * PREFETCH_CHUNKS + CHUNK_SIZE / 2) as *const _);
                 }
             }
-
-            for (a, b) in a.iter_mut().zip(b) {
-                *a *= (*b).into();
-            }
         }
 
-        for (a, b) in a_chunks.into_remainder().iter_mut().zip(b_chunks.remainder()) {
+        for (a, b) in a.iter_mut().zip(b) {
             *a *= (*b).into();
         }
+    }
+
+    for (a, b) in a_chunks
+        .into_remainder()
+        .iter_mut()
+        .zip(b_chunks.remainder())
+    {
+        *a *= (*b).into();
+    }
 }
 
 #[inline(always)]
@@ -585,7 +588,6 @@ pub fn pcan<T: ElementEx>(mut p: Vec<T>) -> Vec<T> {
     p
 }
 
-
 // TODO: make res return itself as Vec
 #[inline(always)]
 pub fn pdvr<T: ElementEx>(a: &[T], b: &[T], q: &mut [T], res: &mut [T]) {
@@ -642,12 +644,7 @@ pub fn pdvr_vec<T: ElementEx>(a: &[T], b: &[T]) -> (Vec<T>, Vec<T>) {
     let mut q = vec![T::zero(); len_q as usize];
     let mut r = vec![T::zero(); len_r as usize];
 
-    pdvr(
-        a,
-        b,
-        q.as_mut_slice(),
-        r.as_mut_slice(),
-    );
+    pdvr(a, b, q.as_mut_slice(), r.as_mut_slice());
 
     (q, r)
 }

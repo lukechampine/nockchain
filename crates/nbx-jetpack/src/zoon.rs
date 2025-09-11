@@ -1,8 +1,8 @@
-use zkvm_jetpack::noun::noun_ext::NounExt;
 use nockvm::interpreter::Context;
 use nockvm::jets::Result;
 use nockvm::mem::NockStack;
 use nockvm::noun::{Noun, Slots, T};
+use zkvm_jetpack::noun::noun_ext::NounExt;
 
 fn zby_key_impl(stack: &mut NockStack, map: Noun) -> Result {
     if map.is_atom() {
@@ -12,7 +12,9 @@ fn zby_key_impl(stack: &mut NockStack, map: Noun) -> Result {
     let [n, l, r] = map.uncell()?;
     let [k, _] = n.uncell()?;
 
+    #[rustfmt::skip]
     let l = if l.is_cell() { zby_key_impl(stack, l)? } else { l };
+    #[rustfmt::skip]
     let r = if r.is_cell() { zby_key_impl(stack, r)? } else { r };
 
     Ok(T(stack, &[k, l, r]))

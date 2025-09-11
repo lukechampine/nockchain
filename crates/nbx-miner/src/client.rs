@@ -3,18 +3,18 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use ibig::UBig;
-use rand::distr::weighted::WeightedIndex;
-use rand::prelude::Distribution;
 use nbx_jetpack::instruments::ReadInstruments;
+use nbx_jetpack::log::*;
 use nockapp::nockapp::wire::Wire;
 use nockapp::noun::slab::{NockJammer, NounSlab};
 use nockapp::noun::NounExt;
 use nockchain_libp2p_io::tip5_util::tip5_hash_to_base58;
 use nockvm::noun::{Atom, D, T};
+use rand::distr::weighted::WeightedIndex;
+use rand::prelude::Distribution;
 use rand::Rng;
 use rustls::crypto::ring::default_provider;
 use tokio::sync::mpsc;
-use nbx_jetpack::log::*;
 use zkvm_jetpack::form::{Belt, PRIME};
 use zkvm_jetpack::noun::noun_ext::NounExt as OtherNounExt;
 
@@ -51,11 +51,13 @@ pub async fn run_client(cfg: ClientConfig) {
         let mut builder = nbx_jetpack::gpu::GpuRegistry::builder();
 
         for gpu in &cfg.gpus {
-            builder = builder.add_gpu(
-                gpu.name_filter.as_deref(),
-                gpu.gpu_index,
-                nbx_jetpack::gpu::DEFAULT_GPU_QUEUE_SIZE,
-            ).unwrap();
+            builder = builder
+                .add_gpu(
+                    gpu.name_filter.as_deref(),
+                    gpu.gpu_index,
+                    nbx_jetpack::gpu::DEFAULT_GPU_QUEUE_SIZE,
+                )
+                .unwrap();
         }
 
         builder.build().unwrap();
@@ -69,7 +71,6 @@ pub async fn run_client(cfg: ClientConfig) {
         .map(|v| v.logical_core_ids(num_threads as _));
 
     let client_name = cfg.client_name.unwrap_or_default();
-
 
     let (mining_attempt_results, mut mining_attempts) = mpsc::channel(num_threads as usize);
 
@@ -101,7 +102,9 @@ pub async fn run_client(cfg: ClientConfig) {
     let (mining_tx, mut mining_rx) = mpsc::channel(cfg.miner_connect.len());
     let (ack_tx, mut ack_rx) = mpsc::channel(cfg.miner_connect.len());
 
-    let (_client_tasks, server_extras) = client_loops(cfg.miner_connect, tls, &client_name, mining_tx, ack_tx, miner_metadata);
+    let (_client_tasks, server_extras) = client_loops(
+        cfg.miner_connect, tls, &client_name, mining_tx, ack_tx, miner_metadata,
+    );
 
     let mut requests = BTreeMap::new();
 
@@ -112,10 +115,13 @@ pub async fn run_client(cfg: ClientConfig) {
     #[cfg(feature = "force-send-only-targets")]
     let forward_non_block = false;
 
+    #[rustfmt::skip]
     let mut hit_metrics = TargetMetrics::new(Duration::from_secs(10), "hit", "10s")
         .with_previous(TargetMetrics::new(Duration::from_secs(60), "hit", "1m")
         .with_previous(TargetMetrics::new(Duration::from_secs(600), "hit", "10m")
         .with_previous(TargetMetrics::new(Duration::from_secs(3600), "hit", "60m"))));
+
+    #[rustfmt::skip]
     let mut miss_metrics = TargetMetrics::new(Duration::from_secs(10), "miss", "10s")
         .with_previous(TargetMetrics::new(Duration::from_secs(60), "miss", "1m")
         .with_previous(TargetMetrics::new(Duration::from_secs(600), "miss", "10m")
@@ -268,22 +274,23 @@ fn start_mining_attempt(
     server_extras: &[ServerExtras],
     requests: &mut BTreeMap<(usize, u32), MiningRequest>,
 ) {
-    let max_height = requests.values().map(|v| v.data.block_height).max().unwrap_or(0);
-    gauge!(
-        "nbx_miner_client_block_height",
-    ).set(max_height as f64);
+    let max_height = requests
+        .values()
+        .map(|v| v.data.block_height)
+        .max()
+        .unwrap_or(0);
+    gauge!("nbx_miner_client_block_height",).set(max_height as f64);
 
     let mut live_cnt = 0;
 
     let mut filtered = requests
         .iter_mut()
-        .filter(|((sid, _), _)| if server_extras[*sid].live.load(Ordering::SeqCst) { live_cnt += 1; true } else { false })
+        .filter(|((sid, _), _)| server_extras[*sid].live.load(Ordering::SeqCst))
+        .inspect(|_| live_cnt += 1)
         .filter(|(_, v)| v.data.block_height == max_height)
         .collect::<Vec<_>>();
 
-    gauge!(
-        "nbx_miner_client_live_servers",
-    ).set(live_cnt as f64);
+    gauge!("nbx_miner_client_live_servers",).set(live_cnt as f64);
 
     if filtered.is_empty() {
         return;
@@ -292,8 +299,14 @@ fn start_mining_attempt(
     debug!("live_cnt={live_cnt}, filtered.len()={}", filtered.len());
 
     let lowest_cnt = filtered.iter().map(|v| v.1.hit_cnt).min().unwrap();
-    trace!("lowest_cnt={lowest_cnt}, debug={:?}", filtered.iter().map(|v| v.1.hit_cnt).collect::<Vec<_>>());
-    let weights = filtered.iter().map(|v| 0.5f64.powi((v.1.hit_cnt - lowest_cnt + 1) as i32)).collect::<Vec<_>>();
+    trace!(
+        "lowest_cnt={lowest_cnt}, debug={:?}",
+        filtered.iter().map(|v| v.1.hit_cnt).collect::<Vec<_>>()
+    );
+    let weights = filtered
+        .iter()
+        .map(|v| 0.5f64.powi((v.1.hit_cnt - lowest_cnt + 1) as i32))
+        .collect::<Vec<_>>();
     trace!("weights={weights:?}");
 
     let index = WeightedIndex::new(weights.iter().copied()).unwrap();
@@ -301,7 +314,15 @@ fn start_mining_attempt(
     let mut rng = rand::thread_rng();
     let i = index.sample(&mut rng);
 
-    let ((target_sid, data_id), MiningRequest { data, hit_cnt, session_id, .. }) = filtered.swap_remove(i);
+    let (
+        (target_sid, data_id),
+        MiningRequest {
+            data,
+            hit_cnt,
+            session_id,
+            ..
+        },
+    ) = filtered.swap_remove(i);
 
     *hit_cnt += 1;
 
@@ -310,7 +331,10 @@ fn start_mining_attempt(
     while nonce_atoms.len() < 5 {
         nonce_atoms.push(Belt(rng.gen::<u64>() % PRIME));
     }
-    let nonce_atoms = nonce_atoms.into_iter().map(|v| Atom::new(&mut nonce_slab, v.0).as_noun()).collect::<Vec<_>>();
+    let nonce_atoms = nonce_atoms
+        .into_iter()
+        .map(|v| Atom::new(&mut nonce_slab, v.0).as_noun())
+        .collect::<Vec<_>>();
     let nonce_cell = T(&mut nonce_slab, &nonce_atoms);
     nonce_slab.set_root(nonce_cell);
     let nonce = nonce_slab;

@@ -1,15 +1,14 @@
+use nockvm::jets::{util, JetErr, Result};
+use nockvm::mem::NockStack;
+use nockvm::mug::mug;
+use nockvm::noun::*;
+use nockvm::serialization::jam;
 use zkvm_jetpack::form::mary::MarySlice;
 use zkvm_jetpack::form::Element;
 use zkvm_jetpack::hand::handle::{
     finalize_mary, finalize_poly, new_handle_mut_mary, new_handle_mut_slice,
 };
 use zkvm_jetpack::jets::utils::jet_err;
-use nockvm::jets::util;
-use nockvm::jets::{JetErr, Result};
-use nockvm::mem::NockStack;
-use nockvm::mug::mug;
-use nockvm::noun::*;
-use nockvm::serialization::jam;
 
 pub struct DP(pub Noun);
 

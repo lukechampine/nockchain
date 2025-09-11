@@ -4,13 +4,13 @@ use std::time::Instant;
 use bytemuck::{Pod, Zeroable};
 use nbx_tip5::melt::Melt;
 use tracing::info_span;
-use crate::log::*;
 use wgpu::util::DeviceExt;
 use wgpu::{Buffer, CommandBuffer};
 
-use super::{FromBuffer, Submittable, DebugHandle, GpuHandle};
+use super::{DebugHandle, FromBuffer, GpuHandle, Submittable};
 use crate::gpu::Submission;
 use crate::instruments::local_instruments;
+use crate::log::*;
 use crate::substitute::{SubstituteEngine, MAX_CHUNK_SIZE};
 
 #[derive(Clone, Copy, Pod, Zeroable, Debug)]
@@ -431,11 +431,10 @@ impl<'a> Submittable for SubstituteEngine<'a, Melt> {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
         // Single compute pass
-        let mut compute_pass =
-            encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: None,
-                timestamp_writes: None,
-            });
+        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: None,
+            timestamp_writes: None,
+        });
 
         info_span!("encode_commands").in_scope(|| {
             for (stage_muls, stage_accums) in processed_stages {
@@ -587,7 +586,8 @@ impl<'a> Submittable for SubstituteEngine<'a, Melt> {
             } else {
                 core::mem::drop(debug_capture_guard);
                 None
-            }.into();
+            }
+            .into();
 
             for (download, output) in downloads.iter().zip(prev_ob.iter().flatten()) {
                 encoder.copy_buffer_to_buffer(&output, 0, &download, 0, output.size());

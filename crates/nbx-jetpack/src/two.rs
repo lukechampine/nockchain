@@ -5,23 +5,16 @@ use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::noun::*;
 use nockvm_macros::tas;
-use crate::log::*;
-use zkvm_jetpack::form::math::mary::mary_transpose;
-
-use crate::one::snag_as_poly_mary;
-use crate::three::mary_to_noun;
-
-use super::one::{p_decompose_impl, peval_impl};
-use super::substitute::{SubstituteEngine, SubstituteMulStage, SubstituteOp};
-use super::utils::*;
-use zkvm_jetpack::form::bpoly::{bp_coseword, bpscal_inplace};
+use zkvm_jetpack::form::bpoly::bpscal_inplace;
 use zkvm_jetpack::form::fext::{fadd_, fdiv_, finv_, fmul_, fneg_};
 use zkvm_jetpack::form::mary::{Mary, MarySlice, MarySliceMut};
+use zkvm_jetpack::form::math::mary::mary_transpose;
 use zkvm_jetpack::form::math::poly::{p_ntt, *};
 use zkvm_jetpack::form::mega::{brek, MegaTyp};
 use zkvm_jetpack::form::poly::Poly;
 use zkvm_jetpack::form::{
-    binv, bneg, bpow, BPolySlice, BPolyVec, Belt, Element, ElementEx, FPolySlice, FPolySliceMut, FPolyVec, Felt, MPolyVec, PolySlice, PolyVec
+    binv, bneg, bpow, BPolySlice, BPolyVec, Belt, Element, ElementEx, FPolySlice, FPolySliceMut,
+    FPolyVec, Felt, PolySlice, PolyVec,
 };
 use zkvm_jetpack::hand::handle::{
     finalize_mary, finalize_poly, new_handle_mut_felt, new_handle_mut_mary, new_handle_mut_slice,
@@ -29,6 +22,13 @@ use zkvm_jetpack::hand::handle::{
 use zkvm_jetpack::hand::structs::{HoonList, HoonMapIter};
 use zkvm_jetpack::jets::utils::jet_err;
 use zkvm_jetpack::noun::noun_ext::NounExt;
+
+use super::one::{p_decompose_impl, peval_impl};
+use super::substitute::{SubstituteEngine, SubstituteMulStage, SubstituteOp};
+use super::utils::*;
+use crate::log::*;
+use crate::one::snag_as_poly_mary;
+use crate::three::mary_to_noun;
 
 pub fn new_fpoly<'a>(d: &[Felt]) -> FPolyVec {
     copy_slice(PolySlice(d))
@@ -87,7 +87,9 @@ pub fn bp_shift_by_unity_sam(stack: &mut NockStack, sam: Noun) -> Result {
 
 pub fn interpolate_table_sam(stack: &mut NockStack, sam: Noun) -> Result {
     let [table, domain_len] = sam.uncell()?;
-    let Ok(table) = MarySlice::try_from(table) else { return jet_err() };
+    let Ok(table) = MarySlice::try_from(table) else {
+        return jet_err();
+    };
     let domain_len = domain_len.as_atom()?.as_u64()? as u32;
     let ma = interpolate_table(table, domain_len);
     Ok(mary_to_noun(stack, ma))
@@ -462,7 +464,7 @@ pub fn mp_substitute_ultra(stack: &mut NockStack, inp: Noun) -> Result {
     };
 
     let height = height.as_atom()?.as_u64()?;
-    
+
     let Ok(chals) = BPolySlice::try_from(chals) else {
         return jet_err();
     };
@@ -780,9 +782,7 @@ pub fn mp_substitute_mega(stack: &mut NockStack, inp: Noun) -> Result {
     // println!("chal_map={:?}", mug(stack, chal_map).data());
     // println!("dyns={:?}", mug(stack, dyns).data());
     // println!("com_map={:?}", mug(stack, com_map).data());
-    mp_substitute_mega_impl::<Belt, Belt>(
-        &mut engine, 0, p, trace_evals, chals, dyns, &com_map,
-    )?;
+    mp_substitute_mega_impl::<Belt, Belt>(&mut engine, 0, p, trace_evals, chals, dyns, &com_map)?;
 
     let (mut acc, poly_len) = engine.reduce_cpu();
     assert_eq!(acc.len(), 1);

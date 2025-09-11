@@ -234,7 +234,9 @@ impl Clone for Buffer {
     fn clone_from(&mut self, source: &Buffer) {
         assert!(self.capacity() >= source.len());
         unsafe {
-            self.0.as_mut_ptr().copy_from(source.0.as_ptr(), source.len());
+            self.0
+                .as_mut_ptr()
+                .copy_from(source.0.as_ptr(), source.len());
             self.0.set_len(source.len());
         }
     }

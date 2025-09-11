@@ -1,17 +1,20 @@
+use core::iter::once;
+use std::path::{Path, PathBuf};
+use std::pin::Pin;
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use nockapp::noun::slab::NockJammer;
-use core::iter::once;
 use either::Either;
 use flume::Receiver;
-use futures::Stream;
-use futures::{stream::iter, StreamExt};
+use futures::stream::iter;
+use futures::{Stream, StreamExt};
 use nockapp::kernel::boot::{self, Cli};
 use nockapp::kernel::form::Kernel;
+use nockapp::noun::slab::{NockJammer, NounSlab};
 use nockapp::save::{Checkpoint, SaveableCheckpoint, Saver};
-use nockapp::utils::{create_context, NOCK_STACK_SIZE, NOCK_STACK_SIZE_HUGE};
+use nockapp::utils::{create_context, NOCK_STACK_SIZE};
 use nockapp::wire::Wire;
-use nockapp::{noun::slab::NounSlab, Noun, NounExt};
+use nockapp::{Noun, NounExt};
 use nockvm::interpreter::{Context, Error as IntError, Mote, Slogger};
 use nockvm::jets::cold::{Cold, Nounable};
 use nockvm::jets::hot::URBIT_HOT_STATE;
@@ -24,9 +27,6 @@ use nockvm::serialization::{cue, jam};
 use nockvm::trace::path_to_cord;
 use nockvm::unifying_equality::unifying_equality;
 use nockvm_macros::tas;
-use std::path::{Path, PathBuf};
-use std::pin::Pin;
-use tempfile::tempdir;
 use tokio::fs;
 use tracing::{debug, info};
 use zkvm_jetpack::hot::produce_prover_hot_state;
@@ -119,13 +119,7 @@ async fn with_jam(func: String, path: String, axis: u64, cli: Cli) -> Result<()>
     let func = unsafe { IndirectAtom::new_raw_bytes(&mut slab, func.len(), func.as_ptr()) };
     let poke = T(
         &mut slab,
-        &[
-            D(tas!(b"sam")),
-            D(0),
-            func.as_noun(),
-            D(0),
-            slot(noun, axis).unwrap(),
-        ],
+        &[D(tas!(b"sam")), D(0), func.as_noun(), D(0), slot(noun, axis).unwrap()],
     );
     slab.set_root(poke);
     on_kernel(slab, cli).await
@@ -178,12 +172,13 @@ impl Jettest {
         );
 
         let cold = if let Some(snapshot_dir) = snapshot_dir {
-            let saver: Option<SaveableCheckpoint> = Saver::<NockJammer>::try_load(&PathBuf::from(&snapshot_dir), None)
-                .await
-                .inspect_err(|e| info!("No existing state found {e:?}"))
-                .ok()
-                .and_then(|v| v.1)
-                .inspect(|_| info!("Found existing state - restoring from checkpoint"));
+            let saver: Option<SaveableCheckpoint> =
+                Saver::<NockJammer>::try_load(&PathBuf::from(&snapshot_dir), None)
+                    .await
+                    .inspect_err(|e| info!("No existing state found {e:?}"))
+                    .ok()
+                    .and_then(|v| v.1)
+                    .inspect(|_| info!("Found existing state - restoring from checkpoint"));
 
             let (cold, event_num_raw) = match saver {
                 None => (Cold::new(&mut stack), 0),
@@ -212,7 +207,13 @@ impl Jettest {
             Cold::new(&mut stack)
         };
 
-        let mut context = create_context(stack, &hot_state, cold, cli.trace_opts.clone().into(), vec![]);
+        let mut context = create_context(
+            stack,
+            &hot_state,
+            cold,
+            cli.trace_opts.clone().into(),
+            vec![],
+        );
 
         let mut jet_res = None;
         if jet_run {

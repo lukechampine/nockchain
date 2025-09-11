@@ -1,7 +1,7 @@
 use std::sync::{Arc, OnceLock};
 
-use crate::log::warn;
 use crate::gpu::{Gpu, GpuHandle};
+use crate::log::warn;
 
 pub struct GpuRegistry {
     gpus: Vec<Arc<Gpu>>,

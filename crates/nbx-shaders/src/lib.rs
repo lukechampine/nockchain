@@ -5,11 +5,15 @@ use wgpu::{Device, Label, ShaderModule, ShaderModuleDescriptor, ShaderSource};
 
 #[cfg(any(not(feature = "shader_passthrough"), target_os = "linux"))]
 macro_rules! shader_ext {
-    () => (".spv");
+    () => {
+        ".spv"
+    };
 }
 #[cfg(all(feature = "shader_passthrough", target_os = "macos"))]
 macro_rules! shader_ext {
-    () => (".msl");
+    () => {
+        ".msl"
+    };
 }
 
 #[cfg(not(feature = "comptime"))]

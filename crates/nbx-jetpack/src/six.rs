@@ -1,23 +1,22 @@
 use std::iter::once;
 
-use zkvm_jetpack::form::mary::Mary;
-use zkvm_jetpack::form::math::poly::*;
-use zkvm_jetpack::form::{poly::Poly, Belt, ElementEx};
-use zkvm_jetpack::form::{FPolySlice, FPolyVec, Felt, PolySlice, PolyVec};
-use zkvm_jetpack::hand::handle::{finalize_mary, new_handle_mut_mary};
-use zkvm_jetpack::noun::noun_ext::NounExt;
+use nbx_tip5::base::binv;
 use nockvm::interpreter::Context;
 use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::noun::{Atom, Noun, Slots, D, T};
-
 use num_traits::Pow;
-use nbx_tip5::base::binv;
+use zkvm_jetpack::form::mary::Mary;
+use zkvm_jetpack::form::math::poly::*;
+use zkvm_jetpack::form::poly::Poly;
+use zkvm_jetpack::form::{Belt, ElementEx, FPolySlice, FPolyVec, Felt, PolySlice, PolyVec};
+use zkvm_jetpack::hand::handle::{finalize_mary, new_handle_mut_mary};
 use zkvm_jetpack::jets::utils::jet_err;
+use zkvm_jetpack::noun::noun_ext::NounExt;
 
+use super::four::{absorb_proof_objects_impl, Proof, ProofData};
 use super::one::*;
 use super::three::{build_merk_heap_impl, MerkHeap};
-use super::four::{absorb_proof_objects_impl, Proof, ProofData};
 
 // $:  offset=belt
 //     omega=belt

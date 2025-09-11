@@ -18,7 +18,6 @@ fn main() {
             .emulate_extended_math(emumath)
             .spirv_version(if spirv_1_3 { Some(13) } else { None })
             //.printf_ext(true)
-            .has_int8(true)
-            ,
+            .has_int8(true),
     );
 }

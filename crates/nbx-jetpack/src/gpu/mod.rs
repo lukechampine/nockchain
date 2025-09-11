@@ -1,42 +1,47 @@
 use core::num::NonZeroU64;
+use std::collections::btree_map::Entry;
+use std::collections::BTreeMap;
 use std::marker::PhantomData;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use std::collections::{BTreeMap, btree_map::Entry};
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use either::Either;
+pub use handle::GpuHandle;
 use nbx_shaders::get_shader_module;
-use crate::log::*;
-use wgpu::{Backends, Buffer, Queue, DeviceType, SubmissionIndex, CommandBuffer};
+pub use registry::GpuRegistry;
+use wgpu::{Backends, Buffer, CommandBuffer, DeviceType, Queue, SubmissionIndex};
 use zkvm_jetpack::form::Melt;
-use crate::engine::Engine;
-use crate::gpu::queue::GpuQueue;
-use self::codewords::{BpShiftUniform, Hash10FixedPrependUniform, HashFixedMultipleUniform, HashVarlenMultipleUniform, MaryTransposeUniform, MontUniform};
+
+use self::codewords::{
+    BpShiftUniform, Hash10FixedPrependUniform, HashFixedMultipleUniform, HashVarlenMultipleUniform,
+    MaryTransposeUniform, MontUniform,
+};
 use self::substitute::{AccumUniform, MulUniform, SubstituteIterOps};
 use self::util::PNttUniform;
 use super::substitute::SubstituteEngine;
+use crate::engine::Engine;
+use crate::gpu::queue::GpuQueue;
 use crate::hash::{HashEngine, NounDigest, ReduceOp, VariableReduceOp};
 use crate::instruments::local_instruments;
+use crate::log::*;
 
-pub use handle::GpuHandle;
-pub use registry::GpuRegistry;
-
+mod codewords;
 mod hash;
 mod substitute;
-mod codewords;
 
-pub(crate) mod util;
+mod handle;
 mod queue;
 mod registry;
-mod handle;
+pub(crate) mod util;
 
 struct Pipeline {
     pipeline: wgpu::ComputePipeline,
     bind_group_layout: wgpu::BindGroupLayout,
 }
 
-static GPUS: Mutex<BTreeMap<(Option<String>, usize), (wgpu::Device, wgpu::Queue)>> = Mutex::new(BTreeMap::new());
+static GPUS: Mutex<BTreeMap<(Option<String>, usize), (wgpu::Device, wgpu::Queue)>> =
+    Mutex::new(BTreeMap::new());
 
 pub const DEFAULT_GPU_QUEUE_SIZE: usize = 5;
 
@@ -62,14 +67,20 @@ pub struct Gpu {
 }
 
 impl Gpu {
-    fn new(gpu_name_filter: Option<&str>, gpu_idx: usize, queue_size: usize) -> Result<Self, Box<dyn std::error::Error>> {
+    fn new(
+        gpu_name_filter: Option<&str>,
+        gpu_idx: usize,
+        queue_size: usize,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let mut cache = GPUS.lock()?;
         let (device, wgpu_queue) = match cache.entry((gpu_name_filter.map(String::from), gpu_idx)) {
             Entry::Occupied(e) => e.get().clone(),
             Entry::Vacant(e) => {
-                let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::from_env_or_default());
+                let instance =
+                    wgpu::Instance::new(&wgpu::InstanceDescriptor::from_env_or_default());
 
-                let mut adapters = instance.enumerate_adapters(Backends::from_env().unwrap_or_default());
+                let mut adapters =
+                    instance.enumerate_adapters(Backends::from_env().unwrap_or_default());
 
                 fn dt_to_weight(dt: DeviceType) -> usize {
                     match dt {
@@ -88,17 +99,21 @@ impl Gpu {
                 }
 
                 let adapter = if let Some(target_gpu) = gpu_name_filter {
-                    adapters.into_iter().filter(|v| v.get_info().name.contains(target_gpu)).nth(gpu_idx)
+                    adapters
+                        .into_iter()
+                        .filter(|v| v.get_info().name.contains(target_gpu))
+                        .nth(gpu_idx)
                 } else {
                     adapters.into_iter().nth(gpu_idx)
-                }.ok_or("Adapter not found")?;
+                }
+                .ok_or("Adapter not found")?;
 
                 debug!("Adapter found {:?}", adapter.get_info());
 
                 let downlevel_capabilities = adapter.get_downlevel_capabilities();
                 if !downlevel_capabilities
                     .flags
-                        .contains(wgpu::DownlevelFlags::COMPUTE_SHADERS)
+                    .contains(wgpu::DownlevelFlags::COMPUTE_SHADERS)
                 {
                     return Err("No compute shader support".into());
                 }
@@ -108,7 +123,8 @@ impl Gpu {
                 let required_features = wgpu::Features::SHADER_INT64;
 
                 #[cfg(all(feature = "shader_passthrough", target_os = "linux"))]
-                let required_features = required_features | wgpu::Features::SPIRV_SHADER_PASSTHROUGH;
+                let required_features =
+                    required_features | wgpu::Features::SPIRV_SHADER_PASSTHROUGH;
 
                 #[cfg(all(feature = "shader_passthrough", target_os = "macos"))]
                 let required_features = required_features | wgpu::Features::MSL_SHADER_PASSTHROUGH;
@@ -131,195 +147,197 @@ impl Gpu {
 
         // Shader related
 
-        let [hash_fixed, hash_variable, substitute_mul, substitute_accum, bp_shift, p_ntt_swap, bp_ntt, fp_ntt, mary_transpose, montify, montyred, hash_varlen_multiple, hash_fixed_multiple, hash_10_fixedprepend] = [
-            (
-                Some(size_of::<ReduceOp>()),
-                "hash_fixed",
-                Either::Left(1),
-                &[size_of::<WgOffsets>()] as &[_],
-            ),
-            (
-                Some(size_of::<VariableReduceOp>()),
-                "hash_variable",
-                Either::Left(1),
-                &[size_of::<WgOffsets>()],
-            ),
-            (
-                Some(size_of::<SubstituteIterOps>()),
-                "substitute_mul",
-                Either::Right(&[true, false][..]),
-                &[size_of::<MulUniform>()],
-            ),
-            (
-                None,
-                "substitute_accum",
-                Either::Right(&[false]),
-                &[size_of::<AccumUniform>()],
-            ),
-            (
-                None,
-                "bp_shift",
-                Either::Right(&[false, false]),
-                &[size_of::<BpShiftUniform>()],
-            ),
-            (
-                None,
-                "p_ntt_swap",
-                Either::Right(&[false, false]),
-                &[size_of::<PNttUniform>()],
-            ),
-            (
-                None,
-                "bp_ntt",
-                Either::Right(&[false]),
-                &[size_of::<PNttUniform>(), size_of::<u32>()],
-            ),
-            (
-                None,
-                "fp_ntt",
-                Either::Right(&[false]),
-                &[size_of::<PNttUniform>(), size_of::<u32>()],
-            ),
-            (
-                None,
-                "mary_transpose",
-                Either::Right(&[false]),
-                &[size_of::<MaryTransposeUniform>()],
-            ),
-            (
-                None,
-                "montify",
-                Either::Right(&[false]),
-                &[size_of::<MontUniform>()],
-            ),
-            (
-                None,
-                "montyred",
-                Either::Right(&[false]),
-                &[size_of::<MontUniform>()],
-            ),
-            (
-                None,
-                "hash_varlen_multiple",
-                Either::Right(&[true]),
-                &[size_of::<HashVarlenMultipleUniform>()],
-            ),
-            (
-                None,
-                "hash_fixed_multiple",
-                Either::Right(&[true]),
-                &[size_of::<HashFixedMultipleUniform>()],
-            ),
-            (
-                None,
-                "hash_10_fixedprepend",
-                Either::Right(&[true]),
-                &[size_of::<Hash10FixedPrependUniform>()],
-            ),
-        ]
-        .map(|(ops_sz, source_label, inputs, uniform_sz)| {
-            debug!("Shader module");
-            let module = get_shader_module(&device, source_label);
+        let [hash_fixed, hash_variable, substitute_mul, substitute_accum, bp_shift, p_ntt_swap, bp_ntt, fp_ntt, mary_transpose, montify, montyred, hash_varlen_multiple, hash_fixed_multiple, hash_10_fixedprepend] =
+            [
+                (
+                    Some(size_of::<ReduceOp>()),
+                    "hash_fixed",
+                    Either::Left(1),
+                    &[size_of::<WgOffsets>()] as &[_],
+                ),
+                (
+                    Some(size_of::<VariableReduceOp>()),
+                    "hash_variable",
+                    Either::Left(1),
+                    &[size_of::<WgOffsets>()],
+                ),
+                (
+                    Some(size_of::<SubstituteIterOps>()),
+                    "substitute_mul",
+                    Either::Right(&[true, false][..]),
+                    &[size_of::<MulUniform>()],
+                ),
+                (
+                    None,
+                    "substitute_accum",
+                    Either::Right(&[false]),
+                    &[size_of::<AccumUniform>()],
+                ),
+                (
+                    None,
+                    "bp_shift",
+                    Either::Right(&[false, false]),
+                    &[size_of::<BpShiftUniform>()],
+                ),
+                (
+                    None,
+                    "p_ntt_swap",
+                    Either::Right(&[false, false]),
+                    &[size_of::<PNttUniform>()],
+                ),
+                (
+                    None,
+                    "bp_ntt",
+                    Either::Right(&[false]),
+                    &[size_of::<PNttUniform>(), size_of::<u32>()],
+                ),
+                (
+                    None,
+                    "fp_ntt",
+                    Either::Right(&[false]),
+                    &[size_of::<PNttUniform>(), size_of::<u32>()],
+                ),
+                (
+                    None,
+                    "mary_transpose",
+                    Either::Right(&[false]),
+                    &[size_of::<MaryTransposeUniform>()],
+                ),
+                (
+                    None,
+                    "montify",
+                    Either::Right(&[false]),
+                    &[size_of::<MontUniform>()],
+                ),
+                (
+                    None,
+                    "montyred",
+                    Either::Right(&[false]),
+                    &[size_of::<MontUniform>()],
+                ),
+                (
+                    None,
+                    "hash_varlen_multiple",
+                    Either::Right(&[true]),
+                    &[size_of::<HashVarlenMultipleUniform>()],
+                ),
+                (
+                    None,
+                    "hash_fixed_multiple",
+                    Either::Right(&[true]),
+                    &[size_of::<HashFixedMultipleUniform>()],
+                ),
+                (
+                    None,
+                    "hash_10_fixedprepend",
+                    Either::Right(&[true]),
+                    &[size_of::<Hash10FixedPrependUniform>()],
+                ),
+            ]
+            .map(|(ops_sz, source_label, inputs, uniform_sz)| {
+                debug!("Shader module");
+                let module = get_shader_module(&device, source_label);
 
-            let mut entries = vec![];
+                let mut entries = vec![];
 
-            for sz in uniform_sz.iter().copied() {
-                entries.push(
-                    // Offsets
-                    wgpu::BindGroupLayoutEntry {
-                        binding: entries.len() as _,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            // This is the size of a single element in the buffer.
-                            min_binding_size: Some(NonZeroU64::new(sz as _).unwrap()),
-                            has_dynamic_offset: false,
+                for sz in uniform_sz.iter().copied() {
+                    entries.push(
+                        // Offsets
+                        wgpu::BindGroupLayoutEntry {
+                            binding: entries.len() as _,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                // This is the size of a single element in the buffer.
+                                min_binding_size: Some(NonZeroU64::new(sz as _).unwrap()),
+                                has_dynamic_offset: false,
+                            },
+                            count: None,
                         },
-                        count: None,
-                    },
-                );
-            }
+                    );
+                }
 
-            if let Some(sz) = ops_sz {
-                entries.push(
-                    // Ops buffer
-                    wgpu::BindGroupLayoutEntry {
-                        binding: entries.len() as _,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            // This is the size of a single element in the buffer.
-                            min_binding_size: Some(NonZeroU64::new(sz as _).unwrap()),
-                            has_dynamic_offset: false,
+                if let Some(sz) = ops_sz {
+                    entries.push(
+                        // Ops buffer
+                        wgpu::BindGroupLayoutEntry {
+                            binding: entries.len() as _,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                // This is the size of a single element in the buffer.
+                                min_binding_size: Some(NonZeroU64::new(sz as _).unwrap()),
+                                has_dynamic_offset: false,
+                            },
+                            count: None,
                         },
-                        count: None,
-                    },
-                );
-            }
+                    );
+                }
 
-            entries.push(
-                // Output buffer
-                wgpu::BindGroupLayoutEntry {
-                    binding: entries.len() as _,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        min_binding_size: None,
-                        has_dynamic_offset: false,
-                    },
-                    count: None,
-                },
-            );
-
-            for read_only in inputs
-                .map_left(|sz| (0..sz).map(|_| true))
-                .map_right(|v| v.iter().copied())
-            {
                 entries.push(
-                    // Input buffer
+                    // Output buffer
                     wgpu::BindGroupLayoutEntry {
                         binding: entries.len() as _,
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only },
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
                             min_binding_size: None,
                             has_dynamic_offset: false,
                         },
                         count: None,
                     },
-                )
-            }
+                );
 
-            let bind_group_layout =
-                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                for read_only in inputs
+                    .map_left(|sz| (0..sz).map(|_| true))
+                    .map_right(|v| v.iter().copied())
+                {
+                    entries.push(
+                        // Input buffer
+                        wgpu::BindGroupLayoutEntry {
+                            binding: entries.len() as _,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only },
+                                min_binding_size: None,
+                                has_dynamic_offset: false,
+                            },
+                            count: None,
+                        },
+                    )
+                }
+
+                let bind_group_layout =
+                    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                        label: None,
+                        entries: &entries,
+                    });
+
+                let pipeline_layout =
+                    device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: None,
+                        bind_group_layouts: &[&bind_group_layout],
+                        push_constant_ranges: &[],
+                    });
+
+                debug!("Pipeline layout");
+
+                // The pipeline is the ready-to-go program state for the GPU. It contains the shader modules,
+                // the interfaces (bind group layouts) and the shader entry point.
+                let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                     label: None,
-                    entries: &entries,
+                    layout: Some(&pipeline_layout),
+                    module: &module,
+                    entry_point: Some("main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    cache: None,
                 });
 
-            let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: None,
-                bind_group_layouts: &[&bind_group_layout],
-                push_constant_ranges: &[],
+                Pipeline {
+                    pipeline,
+                    bind_group_layout,
+                }
             });
-
-            debug!("Pipeline layout");
-
-            // The pipeline is the ready-to-go program state for the GPU. It contains the shader modules,
-            // the interfaces (bind group layouts) and the shader entry point.
-            let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: None,
-                layout: Some(&pipeline_layout),
-                module: &module,
-                entry_point: Some("main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                cache: None,
-            });
-
-            Pipeline {
-                pipeline,
-                bind_group_layout,
-            }
-        });
 
         debug!("Pipeline");
 
@@ -513,9 +531,7 @@ struct DebugHandle {
 
 impl From<Option<Arc<Mutex<Option<bool>>>>> for DebugHandle {
     fn from(debug: Option<Arc<Mutex<Option<bool>>>>) -> Self {
-        Self {
-            debug
-        }
+        Self { debug }
     }
 }
 
@@ -559,7 +575,7 @@ impl<T: FromBuffer> Submission<T, CommandBuffer> {
             downloads,
             debug,
             _download_convert,
-            mdata
+            mdata,
         }
     }
 }
@@ -601,7 +617,9 @@ impl<T: FromBuffer> Submission<T, SubmissionIndex> {
         loop {
             gpu.device.poll(wgpu::PollType::Poll).unwrap();
 
-            if tracker.is_all_ready() { break; }
+            if tracker.is_all_ready() {
+                break;
+            }
 
             rayon::yield_now();
         }

@@ -6,16 +6,16 @@ use std::time::{Duration, Instant};
 
 use bincode::{Decode, Encode};
 use futures::{Stream, StreamExt};
+use nbx_jetpack::log::*;
 use nockapp::noun::slab::NounSlab;
 use rand::random;
 use strum::FromRepr;
 use tokio::io::{split, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, Mutex};
-use nbx_jetpack::log::*;
 use tokio::task::JoinSet;
 use zkvm_jetpack::form::Belt;
-use crate::metrics::{counter, gauge, histogram};
 
+use crate::metrics::{counter, gauge, histogram};
 use crate::shared;
 
 pub const PROTOCOL: u32 = 5;
@@ -23,7 +23,10 @@ pub const NAME_MAX_LENGTH: usize = 16;
 pub const RECENTLY_EXPIRED_DURATION: Duration = Duration::from_secs(20);
 
 pub fn name_valid(client_name: &str) -> bool {
-    client_name.len() <= NAME_MAX_LENGTH && client_name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    client_name.len() <= NAME_MAX_LENGTH
+        && client_name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 #[derive(Encode, Decode, Clone, Debug)]
@@ -107,7 +110,13 @@ fn cue(d: Vec<u8>) -> NounSlab {
     slab
 }
 
-async fn binsend(mut stream: impl AsyncWrite + Unpin, target_cn: Arc<str>, target_name: Arc<str>, msg_type: &'static str, d: impl Encode) -> io::Result<()> {
+async fn binsend(
+    mut stream: impl AsyncWrite + Unpin,
+    target_cn: Arc<str>,
+    target_name: Arc<str>,
+    msg_type: &'static str,
+    d: impl Encode,
+) -> io::Result<()> {
     let t = Instant::now();
     let d = bincode::encode_to_vec(d, bincode::config::standard())
         .map_err(|_| io::ErrorKind::InvalidData)?;
@@ -119,11 +128,17 @@ async fn binsend(mut stream: impl AsyncWrite + Unpin, target_cn: Arc<str>, targe
         "target_cn" => target_cn,
         "target_name" => target_name,
         "msg_type" => msg_type,
-    ).record(t.elapsed().as_secs_f64());
+    )
+    .record(t.elapsed().as_secs_f64());
     Ok(())
 }
 
-async fn binrecv<T: Decode<()>>(mut stream: impl AsyncRead + Unpin, target_cn: Arc<str>, target_name: Arc<str>, msg_type: &'static str) -> io::Result<T> {
+async fn binrecv<T: Decode<()>>(
+    mut stream: impl AsyncRead + Unpin,
+    target_cn: Arc<str>,
+    target_name: Arc<str>,
+    msg_type: &'static str,
+) -> io::Result<T> {
     let len = stream.read_u32_le().await?;
 
     let t = Instant::now();
@@ -143,7 +158,8 @@ async fn binrecv<T: Decode<()>>(mut stream: impl AsyncRead + Unpin, target_cn: A
         "target_cn" => target_cn,
         "target_name" => target_name,
         "msg_type" => msg_type,
-    ).record(t.elapsed().as_secs_f64());
+    )
+    .record(t.elapsed().as_secs_f64());
 
     Ok(res)
 }
@@ -193,8 +209,9 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
         server_cn.clone(),
         server_name.clone(),
         "client_name",
-        client_name
-    ).await?;
+        client_name,
+    )
+    .await?;
 
     *handshaked = true;
 
@@ -209,40 +226,67 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
                 "channel_name" => "mining_data",
                 "server_name" => server_name.clone(),
                 "server_id" => server_id_str.clone(),
-            ).set(mining_data.capacity() as f64);
+            )
+            .set(mining_data.capacity() as f64);
             gauge!(
                 "nbx_miner_proto_client_channel_capacity",
                 "channel_name" => "ack",
                 "server_name" => server_name.clone(),
                 "server_id" => server_id_str.clone(),
-            ).set(ack.capacity() as f64);
+            )
+            .set(ack.capacity() as f64);
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
     };
 
     let receiver = async {
         loop {
-            let datas: MiningDatas = binrecv(&mut read, server_cn.clone(), server_name.clone(), "mining_data").await?;
+            let datas: MiningDatas = binrecv(
+                &mut read,
+                server_cn.clone(),
+                server_name.clone(),
+                "mining_data",
+            )
+            .await?;
             gauge!(
                 "nbx_miner_proto_client_block_height",
                 "server_name" => server_name.clone(),
                 "server_id" => server_id_str.clone(),
-            ).set(datas.new_datas.iter().map(|v| v.block_height).max().unwrap_or_default() as f64);
+            )
+            .set(
+                datas
+                    .new_datas
+                    .iter()
+                    .map(|v| v.block_height)
+                    .max()
+                    .unwrap_or_default() as f64,
+            );
             if mining_data
                 .send(MiningDataOut {
                     server_id,
                     session_id: nonce,
                     expire: datas.expire,
-                    new_datas: datas.new_datas.into_iter().map(|data| (
-                        data.data_id,
-                        shared::MiningData {
-                            block_header: cue(data.block_header),
-                            version: cue(data.version),
-                            target: cue(data.target),
-                            pow_len: data.pow_len,
-                            block_height: data.block_height,
-                            fixed_nonce_atoms: data.fixed_nonce_atoms.into_iter().map(Belt).collect(),
-                    })).collect::<Vec<_>>(),
+                    new_datas: datas
+                        .new_datas
+                        .into_iter()
+                        .map(|data| {
+                            (
+                                data.data_id,
+                                shared::MiningData {
+                                    block_header: cue(data.block_header),
+                                    version: cue(data.version),
+                                    target: cue(data.target),
+                                    pow_len: data.pow_len,
+                                    block_height: data.block_height,
+                                    fixed_nonce_atoms: data
+                                        .fixed_nonce_atoms
+                                        .into_iter()
+                                        .map(Belt)
+                                        .collect(),
+                                },
+                            )
+                        })
+                        .collect::<Vec<_>>(),
                 })
                 .await
                 .is_err()
@@ -259,8 +303,9 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
             server_cn.clone(),
             server_name.clone(),
             "miner_metadata",
-            SetMinerMetadata { miners: metadata }
-        ).await?;
+            SetMinerMetadata { miners: metadata },
+        )
+        .await?;
 
         while let Some(MiningResultIn {
             data_id,
@@ -276,7 +321,8 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
                     "server_name" => server_name.clone(),
                     "server_id" => server_id_str.clone(),
                     "miner_id" => miner_id.clone(),
-                ).increment(1);
+                )
+                .increment(1);
                 continue;
             }
             let rdata = MiningResult {
@@ -295,15 +341,17 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
                 "server_name" => server_name.clone(),
                 "server_id" => server_id_str.clone(),
                 "miner_id" => miner_id.clone(),
-            ).set(rdata.data_id as f64);
+            )
+            .set(rdata.data_id as f64);
             write.write_u8(MinerResponse::RESULT as _).await?;
             binsend(
                 &mut write,
                 server_cn.clone(),
                 server_name.clone(),
                 "mining_result",
-                rdata
-            ).await?;
+                rdata,
+            )
+            .await?;
             let _ = ack
                 .send(MiningAckOut {
                     server_id,
@@ -341,15 +389,10 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
     }
     req.nonce += 1;
 
-    binsend(
-        &mut write,
-        client_cn.clone(),
-        "".into(),
-        "hello",
-        req
-    ).await?;
+    binsend(&mut write, client_cn.clone(), "".into(), "hello", req).await?;
 
-    let client_name: String = binrecv(&mut read, client_cn.clone(), "".into(), "client_name").await?;
+    let client_name: String =
+        binrecv(&mut read, client_cn.clone(), "".into(), "client_name").await?;
 
     if !name_valid(&client_name) {
         return Err(io::ErrorKind::InvalidData.into());
@@ -369,7 +412,11 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
     }
 
     impl DataTracker {
-        fn add_data(&mut self, data: Arc<shared::MiningData>, expire: Arc<OnceLock<Instant>>) -> u32 {
+        fn add_data(
+            &mut self,
+            data: Arc<shared::MiningData>,
+            expire: Arc<OnceLock<Instant>>,
+        ) -> u32 {
             let data_id = self.data_id;
             self.data_id = self.data_id.wrapping_add(1);
             self.data_map.insert(data_id, (data, expire));
@@ -378,15 +425,22 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
 
         fn remove_recently_expired(&mut self) {
             // Retain only for last 10 seconds, as to give enough time for shares to be submitted.
-            self.recently_expired_map.retain(|_, v| v.1.elapsed() < RECENTLY_EXPIRED_DURATION);
+            self.recently_expired_map
+                .retain(|_, v| v.1.elapsed() < RECENTLY_EXPIRED_DURATION);
         }
 
         fn collect_expired(&mut self) -> Vec<u32> {
             self.remove_recently_expired();
-            let expired = self.data_map.iter().filter(|(_, (_, v))| v.get().is_some()).map(|(v, _)| *v).collect::<Vec<_>>();
+            let expired = self
+                .data_map
+                .iter()
+                .filter(|(_, (_, v))| v.get().is_some())
+                .map(|(v, _)| *v)
+                .collect::<Vec<_>>();
             for i in &expired {
                 let d = self.data_map.remove(&i).unwrap();
-                self.recently_expired_map.insert(*i, (d.0, *d.1.get().unwrap()));
+                self.recently_expired_map
+                    .insert(*i, (d.0, *d.1.get().unwrap()));
             }
             expired
         }
@@ -396,13 +450,20 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
             self.data_map
                 .get(&data_id)
                 .and_then(|(v, e)| {
-                    if e.get().filter(|v| v.elapsed() >= RECENTLY_EXPIRED_DURATION).is_none() {
+                    if e.get()
+                        .filter(|v| v.elapsed() >= RECENTLY_EXPIRED_DURATION)
+                        .is_none()
+                    {
                         Some(v.clone())
                     } else {
                         None
                     }
                 })
-                .or_else(|| self.recently_expired_map.get(&data_id).map(|(v, _)| v.clone()))
+                .or_else(|| {
+                    self.recently_expired_map
+                        .get(&data_id)
+                        .map(|(v, _)| v.clone())
+                })
         }
     }
 
@@ -420,7 +481,8 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
                 "client_cn" => client_cn.clone(),
                 "client_name" => client_name.clone(),
                 "client_id" => client_id_str.clone(),
-            ).set(results_out.capacity() as f64);
+            )
+            .set(results_out.capacity() as f64);
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
     };
@@ -483,14 +545,16 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
                 client_cn.clone(),
                 client_name.clone(),
                 "mining_data",
-                set_data
-            ).await?;
+                set_data,
+            )
+            .await?;
             counter!(
                 "nbx_miner_proto_server_set_data_count",
                 "client_id" => client_id_str.clone(),
                 "client_cn" => client_cn.clone(),
                 "client_name" => client_name.clone(),
-            ).increment(1);
+            )
+            .increment(1);
         }
 
         io::Result::Ok(())
@@ -507,21 +571,39 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
             match cmd {
                 MinerResponse::METADATA => {
                     // TODO: remove, or change to fixed metadata
-                    let _: SetMinerMetadata = binrecv(&mut read, client_cn.clone(), client_name.clone(), "miner_metadata").await?;
+                    let _: SetMinerMetadata = binrecv(
+                        &mut read,
+                        client_cn.clone(),
+                        client_name.clone(),
+                        "miner_metadata",
+                    )
+                    .await?;
                 }
                 MinerResponse::RESULT => {
-                    let res: MiningResult = binrecv(&mut read, client_cn.clone(), client_name.clone(), "mining_result").await?;
+                    let res: MiningResult = binrecv(
+                        &mut read,
+                        client_cn.clone(),
+                        client_name.clone(),
+                        "mining_result",
+                    )
+                    .await?;
 
                     let mut guard = tracker.lock().await;
                     let Some(data) = guard.valid_data(res.data_id) else {
-                        trace!("Unable to find data with ID {} ({:?})", res.data_id, guard.data_map.keys().collect::<Vec<_>>());
+                        trace!(
+                            "Unable to find data with ID {} ({:?})",
+                            res.data_id,
+                            guard.data_map.keys().collect::<Vec<_>>()
+                        );
                         counter!(
                             "nbx_miner_proto_server_data_id_outdated_or_invalid_count",
                             "client_id" => client_id_str.clone(),
                             "client_cn" => client_cn.clone(),
                             "client_name" => client_name.clone(),
-                        ).increment(1);
-                        counter!("nbx_miner_proto_global_server_data_id_outdated_or_invalid_count").increment(1);
+                        )
+                        .increment(1);
+                        counter!("nbx_miner_proto_global_server_data_id_outdated_or_invalid_count")
+                            .increment(1);
                         continue;
                     };
                     core::mem::drop(guard);
@@ -531,11 +613,13 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
                         "client_id" => client_id_str.clone(),
                         "client_cn" => client_cn.clone(),
                         "client_name" => client_name.clone(),
-                    ).increment(1);
+                    )
+                    .increment(1);
                     counter!(
                         "nbx_miner_proto_cn_server_data_id_valid_count",
                         "client_cn" => client_cn.clone(),
-                    ).increment(1);
+                    )
+                    .increment(1);
                     counter!("nbx_miner_proto_global_server_data_id_valid_count").increment(1);
 
                     histogram!(
@@ -543,29 +627,36 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
                         "client_id" => client_id_str.clone(),
                         "client_cn" => client_cn.clone(),
                         "client_name" => client_name.clone(),
-                    ).record((res.attempt_millis as f64) / 1000.0);
+                    )
+                    .record((res.attempt_millis as f64) / 1000.0);
 
-                    if res.gpu_enqueue_millis > 0 || res.gpu_submit_millis > 0 || res.gpu_wait_millis > 0 {
+                    if res.gpu_enqueue_millis > 0
+                        || res.gpu_submit_millis > 0
+                        || res.gpu_wait_millis > 0
+                    {
                         histogram!(
                             "nbx_miner_proto_server_gpu_submit_seconds",
                             "client_id" => client_id_str.clone(),
                             "client_cn" => client_cn.clone(),
                             "client_name" => client_name.clone(),
-                        ).record((res.gpu_submit_millis as f64) / 1000.0);
+                        )
+                        .record((res.gpu_submit_millis as f64) / 1000.0);
 
                         histogram!(
                             "nbx_miner_proto_server_gpu_enqueue_seconds",
                             "client_id" => client_id_str.clone(),
                             "client_cn" => client_cn.clone(),
                             "client_name" => client_name.clone(),
-                        ).record((res.gpu_enqueue_millis as f64) / 1000.0);
+                        )
+                        .record((res.gpu_enqueue_millis as f64) / 1000.0);
 
                         histogram!(
                             "nbx_miner_proto_server_gpu_wait_seconds",
                             "client_id" => client_id_str.clone(),
                             "client_cn" => client_cn.clone(),
                             "client_name" => client_name.clone(),
-                        ).record((res.gpu_wait_millis as f64) / 1000.0);
+                        )
+                        .record((res.gpu_wait_millis as f64) / 1000.0);
                     }
 
                     let poke = res.poke.map(cue);

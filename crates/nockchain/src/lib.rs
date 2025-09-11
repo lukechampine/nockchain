@@ -191,7 +191,10 @@ pub async fn init_with_kernel<J: Jammer + Send + 'static>(
     if let Some(bind) = cli.as_ref().map(|v| &v.prometheus_bind) {
         metrics_exporter_prometheus::PrometheusBuilder::new()
             .with_http_listener(bind.parse::<std::net::SocketAddr>()?)
-            .idle_timeout(metrics_util::MetricKindMask::ALL, Some(std::time::Duration::from_secs(300)))
+            .idle_timeout(
+                metrics_util::MetricKindMask::ALL,
+                Some(std::time::Duration::from_secs(300)),
+            )
             .install()?;
     }
 
@@ -458,7 +461,8 @@ pub async fn init_with_kernel<J: Jammer + Send + 'static>(
         client.client_name = Some("_local".to_string());
     }
     client.miner_connect.push(server_ip);
-    let mining_driver = crate::mining::create_mining_driver(mining_config, Some(mining_init_tx), server);
+    let mining_driver =
+        crate::mining::create_mining_driver(mining_config, Some(mining_init_tx), server);
     nockapp.add_io_driver(mining_driver).await;
     if client.num_threads() > 0 {
         tokio::spawn(nbx_miner::client::run_client(client));

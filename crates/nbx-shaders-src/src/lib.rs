@@ -3,7 +3,8 @@ use std::path::Path;
 use shaderc::{
     CompileOptions, Compiler, IncludeCallbackResult, IncludeType, ResolvedInclude, ShaderKind,
 };
-use spirv_cross2::{compile::msl, self};
+use spirv_cross2::compile::msl;
+use spirv_cross2::{self};
 
 pub struct BuildOptions<T> {
     out_dir: T,
@@ -282,7 +283,12 @@ pub fn build_shaders(options: BuildOptions<impl AsRef<Path>>) {
 
     let math_emu = emulate_extended_math as usize;
 
-    for shader in ["hash_fixed", "hash_variable", "substitute_mul", "substitute_accum", "bp_shift", "bp_ntt", "fp_ntt", "p_ntt_swap", "mary_transpose", "montify", "montyred", "hash_varlen_multiple", "hash_fixed_multiple", "hash_10_fixedprepend", "weighted_combo_finish", "fp_hadamard_samepoly", "fp_accum"] {
+    for shader in [
+        "hash_fixed", "hash_variable", "substitute_mul", "substitute_accum", "bp_shift", "bp_ntt",
+        "fp_ntt", "p_ntt_swap", "mary_transpose", "montify", "montyred", "hash_varlen_multiple",
+        "hash_fixed_multiple", "hash_10_fixedprepend", "weighted_combo_finish",
+        "fp_hadamard_samepoly", "fp_accum",
+    ] {
         let artifact = compiler
             .compile_into_spirv(
                 &format!(
@@ -305,7 +311,11 @@ pub fn build_shaders(options: BuildOptions<impl AsRef<Path>>) {
 
         let spv = spirv_cross2::Module::from_words(words_from_bytes(artifact.as_binary_u8()));
         let mut compiler = spirv_cross2::Compiler::<spirv_cross2::targets::Msl>::new(spv).unwrap();
-        compiler.rename_entry_point("main", "main_", spirv_cross2::spirv::ExecutionModel::GLCompute);
+        compiler.rename_entry_point(
+            "main",
+            "main_",
+            spirv_cross2::spirv::ExecutionModel::GLCompute,
+        );
         let mut compiler_options = msl::CompilerOptions::default();
         compiler_options.enable_decoration_binding = true;
         compiler_options.version = msl::MslVersion::new(2, 3, 0);

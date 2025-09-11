@@ -3,7 +3,6 @@ use nockvm::jets::util::slot;
 use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::noun::*;
-
 use zkvm_jetpack::form::{Belt, ElementEx, Felt};
 use zkvm_jetpack::hand::structs::HoonList;
 use zkvm_jetpack::jets::utils::jet_err;

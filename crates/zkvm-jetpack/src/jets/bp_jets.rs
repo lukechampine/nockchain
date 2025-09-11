@@ -243,7 +243,7 @@ pub fn init_bpoly_jet(context: &mut Context, subject: Noun) -> Result {
     let (res, res_poly) = if let Ok(list_belt) = HoonList::try_from(poly) {
         let count = list_belt.count();
         let (res, res_poly): (IndirectAtom, &mut [Belt]) =
-                              new_handle_mut_slice(stack, Some(count as usize));
+            new_handle_mut_slice(stack, Some(count as usize));
         init_bpoly(list_belt, res_poly);
 
         (res, res_poly)

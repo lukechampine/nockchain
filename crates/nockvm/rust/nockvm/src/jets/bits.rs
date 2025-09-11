@@ -430,9 +430,8 @@ pub mod util {
         stack: &mut NockStack,
         bloq: usize,
         step: usize,
-        original_list: Noun
+        original_list: Noun,
     ) -> result::Result<Atom, JetErr> {
-
         let mut len = 0usize;
         let mut list = original_list;
         loop {

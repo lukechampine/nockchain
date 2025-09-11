@@ -1,4 +1,3 @@
-use crate::engine::Engine;
 use std::iter::once;
 use std::mem::MaybeUninit;
 
@@ -9,22 +8,20 @@ use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::noun::{Atom, Noun, D, T};
 use tracing::info_span;
-
-use super::one::*;
-use super::utils::*;
-use super::hash::{NounDigest, HashEngine, leaf_sequence_impl};
 use zkvm_jetpack::form::mary::{Mary, MarySlice};
 use zkvm_jetpack::form::math::tip5::{self, CAPACITY, DIGEST_LENGTH, RATE, STATE_SIZE};
 use zkvm_jetpack::form::poly::Poly;
 use zkvm_jetpack::form::tip5::permute;
-use zkvm_jetpack::form::{
-    BPolyVec, Belt, Element, ElementEx, Felt,
-    Melt, PolySlice, PolyVec,
-};
+use zkvm_jetpack::form::{BPolyVec, Belt, Element, ElementEx, Felt, Melt, PolySlice, PolyVec};
 use zkvm_jetpack::hand::handle::{finalize_mary, new_handle_mut_mary};
 use zkvm_jetpack::hand::structs::HoonList;
 use zkvm_jetpack::jets::utils::jet_err;
 use zkvm_jetpack::noun::noun_ext::NounExt;
+
+use super::hash::{leaf_sequence_impl, HashEngine, NounDigest};
+use super::one::*;
+use super::utils::*;
+use crate::engine::Engine;
 
 pub fn leaf_sequence(stack: &mut NockStack, t: Noun) -> Result {
     let mut r = leaf_sequence_impl(t)?;

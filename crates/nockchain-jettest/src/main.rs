@@ -1,27 +1,28 @@
-use anyhow::Result;
-use clap::{Parser, Subcommand};
-use nockapp::save::SaveableCheckpoint;
 use core::iter::once;
-use flume::Receiver;
-use futures::Stream;
-use futures::{stream::iter, StreamExt};
-use itertools::Itertools;
-use nockapp::kernel::boot::{self, Cli};
-use nockapp::kernel::form::SerfThread;
-use nockapp::utils::{NOCK_STACK_1KB, NOCK_STACK_SIZE_TINY};
-use nockapp::wire::Wire;
-use nockapp::{noun::slab::NounSlab, NounExt};
-use nockvm::jets::hot::HotEntry;
-use nockvm::jets::hot::URBIT_HOT_STATE;
-use nockvm::mem::NockStack;
-use nockvm::mug::mug;
 use std::path::Path;
 use std::time::Instant;
-use zkvm_jetpack::hot::produce_prover_hot_state;
-use nbx_jetpack::{bpoly_to_fpoly, nbx_jets, new_fpoly, snag_as_poly_mary};
+
+use anyhow::Result;
+use clap::{Parser, Subcommand};
+use flume::Receiver;
+use futures::stream::iter;
+use futures::{Stream, StreamExt};
+use itertools::Itertools;
 use nbx_jetpack::engine::Engine;
 #[cfg(feature = "gpu")]
 use nbx_jetpack::gpu;
+use nbx_jetpack::{bpoly_to_fpoly, nbx_jets, new_fpoly, snag_as_poly_mary};
+use nockapp::kernel::boot::{self, Cli};
+use nockapp::kernel::form::SerfThread;
+use nockapp::noun::slab::NounSlab;
+use nockapp::save::SaveableCheckpoint;
+use nockapp::utils::{NOCK_STACK_1KB, NOCK_STACK_SIZE_TINY};
+use nockapp::wire::Wire;
+use nockapp::NounExt;
+use nockvm::jets::hot::{HotEntry, URBIT_HOT_STATE};
+use nockvm::mem::NockStack;
+use nockvm::mug::mug;
+use zkvm_jetpack::hot::produce_prover_hot_state;
 
 pub enum MiningWire {
     Mined,
@@ -85,7 +86,12 @@ pub struct Test {
     #[arg(short = 'F', long, help = "Target GPU to filter against")]
     gpu_filter: Option<String>,
     #[cfg(feature = "gpu")]
-    #[arg(short = 'I', long, help = "Target GPU ID to use in tests (post-filtering)", default_value = "0")]
+    #[arg(
+        short = 'I',
+        long,
+        help = "Target GPU ID to use in tests (post-filtering)",
+        default_value = "0"
+    )]
     gpu_id: usize,
 }
 
@@ -116,11 +122,7 @@ impl Test {
         #[cfg(feature = "gpu")]
         if use_gpu {
             gpu::GpuRegistry::builder()
-                .add_gpu(
-                    gpu_filter.as_deref(),
-                    gpu_id,
-                    gpu::DEFAULT_GPU_QUEUE_SIZE
-                )
+                .add_gpu(gpu_filter.as_deref(), gpu_id, gpu::DEFAULT_GPU_QUEUE_SIZE)
                 .unwrap()
                 .build()
                 .unwrap();

@@ -1,7 +1,8 @@
 use std::vec;
 
-use crate::form::math::{poly::*, FieldError};
-use crate::form::{bpow, poly::*};
+use crate::form::math::poly::*;
+use crate::form::math::FieldError;
+use crate::form::poly::*;
 
 pub fn bpadd(a: &[Belt], b: &[Belt], res: &mut [Belt]) {
     let min: &[Belt];
@@ -155,11 +156,9 @@ pub fn bp_hadamard_inplace(a: &mut [Belt], b: &[Belt]) {
         a.len(),
         b.len()
     );
-    a.iter_mut()
-        .zip(b.iter())
-        .for_each(|(a_i, b_i)| {
-            *a_i = *a_i * *b_i;
-        });
+    a.iter_mut().zip(b.iter()).for_each(|(a_i, b_i)| {
+        *a_i = *a_i * *b_i;
+    });
 }
 
 #[inline(always)]
@@ -278,12 +277,7 @@ pub fn bpdvr_vec(a: &[Belt], b: &[Belt]) -> (Vec<Belt>, Vec<Belt>) {
     let mut q = vec![Belt(0); len_q as usize];
     let mut r = vec![Belt(0); len_r as usize];
 
-    bpdvr(
-        a,
-        b,
-        q.as_mut_slice(),
-        r.as_mut_slice(),
-    );
+    bpdvr(a, b, q.as_mut_slice(), r.as_mut_slice());
 
     (q, r)
 }

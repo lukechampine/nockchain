@@ -1,12 +1,12 @@
 #[cfg(feature = "client")]
 pub mod client;
-pub mod proto;
-pub mod server;
-pub mod shared;
-pub mod proxy;
+pub mod client_base;
 #[cfg(feature = "client")]
 pub mod poker;
-pub mod client_base;
+pub mod proto;
+pub mod proxy;
+pub mod server;
+pub mod shared;
 
 #[cfg(feature = "stealthy")]
 pub mod metrics {
@@ -20,20 +20,26 @@ pub mod metrics {
 
     #[macro_export]
     macro_rules! gauge {
-        ($($tt:tt)*) => { $crate::metrics::NoopMetrics }
+        ($($tt:tt)*) => {
+            $crate::metrics::NoopMetrics
+        };
     }
 
     #[macro_export]
     macro_rules! counter {
-        ($($tt:tt)*) => { $crate::metrics::NoopMetrics }
+        ($($tt:tt)*) => {
+            $crate::metrics::NoopMetrics
+        };
     }
 
     #[macro_export]
     macro_rules! histogram {
-        ($($tt:tt)*) => { $crate::metrics::NoopMetrics }
+        ($($tt:tt)*) => {
+            $crate::metrics::NoopMetrics
+        };
     }
 
-    pub use super::{gauge, counter, histogram};
+    pub use super::{counter, gauge, histogram};
 }
 
 #[cfg(not(feature = "stealthy"))]

@@ -4,7 +4,6 @@ use nockvm::jets::Result;
 use nockvm::mem::NockStack;
 use nockvm::noun::*;
 use nockvm_macros::tas;
-
 use zkvm_jetpack::form::mary::{Mary, MarySlice};
 use zkvm_jetpack::form::{binv, bsub, PRIME};
 use zkvm_jetpack::hand::handle::{finalize_mary, new_handle_mut_mary};

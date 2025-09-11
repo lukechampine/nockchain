@@ -1,16 +1,16 @@
 use bytemuck::{Pod, Zeroable};
 use nbx_tip5::melt::Melt;
 use nockvm::noun::D;
+use tracing::info_span;
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
-use wgpu::{Buffer, BufferDescriptor, BufferUsages, ComputePass, CommandBuffer};
+use wgpu::{Buffer, BufferDescriptor, BufferUsages, CommandBuffer, ComputePass};
 use zkvm_jetpack::form::bpoly::bitreverse;
 use zkvm_jetpack::form::mary::{Mary, MarySlice};
 use zkvm_jetpack::form::math::poly::p_ntt_twiddles;
 use zkvm_jetpack::form::Belt;
-use tracing::info_span;
 
 use super::util::p_ntt;
-use super::{FromBuffer, GpuHandle, Pipeline, Submission, Submittable, DebugHandle};
+use super::{DebugHandle, FromBuffer, GpuHandle, Pipeline, Submission, Submittable};
 use crate::codewords::CodewordEngine;
 use crate::engine::Engine;
 use crate::hash::{HashEngine, NounDigest};
@@ -162,7 +162,8 @@ impl<'a> Submittable for CodewordEngine<'a> {
         } else {
             core::mem::drop(debug_capture_guard);
             None
-        }.into();
+        }
+        .into();
 
         encoder.copy_buffer_to_buffer(&codeword_array, 0, &download, 0, download.size());
 
@@ -292,24 +293,20 @@ fn turn_coseword(
     }
 
     let twiddles = p_ntt_twiddles(order as usize, &root);
-    let twiddles = twiddles.iter().enumerate().map(|(i, t)| {
-        gpu.device.create_buffer_init(&BufferInitDescriptor {
-            label: Some(&format!("coseword-twiddles {order} {i}")),
-            contents: bytemuck::cast_slice(&t),
-            usage: BufferUsages::STORAGE,
+    let twiddles = twiddles
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            gpu.device.create_buffer_init(&BufferInitDescriptor {
+                label: Some(&format!("coseword-twiddles {order} {i}")),
+                contents: bytemuck::cast_slice(&t),
+                usage: BufferUsages::STORAGE,
+            })
         })
-    }).collect::<Vec<_>>();
+        .collect::<Vec<_>>();
 
     p_ntt(
-        gpu,
-        compute_pass,
-        order,
-        out,
-        out_off,
-        out_len,
-        &twiddles,
-        1,
-        &gpu.bp_ntt,
+        gpu, compute_pass, order, out, out_off, out_len, &twiddles, 1, &gpu.bp_ntt,
     );
 }
 
@@ -612,7 +609,12 @@ pub struct HashFixedMultipleUniform {
     num_elems: u32,
 }
 
-fn hash_fixed_multiple(gpu: &GpuHandle, compute_pass: &mut ComputePass, input: &Buffer, cnt: usize) -> Buffer {
+fn hash_fixed_multiple(
+    gpu: &GpuHandle,
+    compute_pass: &mut ComputePass,
+    input: &Buffer,
+    cnt: usize,
+) -> Buffer {
     // We are reducing to 5 * (len / 8 / step) melts
     let num_hashes = (input.size() as usize) / size_of::<NounDigest<Melt>>() / 2;
 

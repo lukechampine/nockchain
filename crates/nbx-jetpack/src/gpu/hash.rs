@@ -1,13 +1,13 @@
 use std::time::Instant;
 
-use crate::log::*;
 use wgpu::util::DeviceExt;
 use wgpu::{Buffer, CommandBuffer};
 
-use super::{FromBuffer, Submittable, WgOffsets, DebugHandle, GpuHandle};
+use super::{DebugHandle, FromBuffer, GpuHandle, Submittable, WgOffsets};
 use crate::gpu::Submission;
-use crate::instruments::local_instruments;
 use crate::hash::{HashEngine, NounDigest, ReduceChunk};
+use crate::instruments::local_instruments;
+use crate::log::*;
 
 impl FromBuffer for Vec<NounDigest> {
     type Metadata = ();
@@ -269,7 +269,8 @@ impl Submittable for HashEngine {
         } else {
             core::mem::drop(debug_capture_guard);
             None
-        }.into();
+        }
+        .into();
 
         let mut encoder = gpu
             .device
@@ -285,29 +286,28 @@ impl Submittable for HashEngine {
             for (fixed_runs, variable_runs) in processed_stages {
                 compute_pass.set_pipeline(&gpu.hash_fixed.pipeline);
                 for runargs in fixed_runs {
-                    let bind_group =
-                        gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                            label: None,
-                            layout: &gpu.hash_fixed.bind_group_layout,
-                            entries: &[
-                                wgpu::BindGroupEntry {
-                                    binding: 0,
-                                    resource: runargs.uniform.as_entire_binding(),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 1,
-                                    resource: runargs.fixed.as_entire_binding(),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 2,
-                                    resource: runargs.output.as_entire_binding(),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 3,
-                                    resource: runargs.input.as_entire_binding(),
-                                },
-                            ],
-                        });
+                    let bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: None,
+                        layout: &gpu.hash_fixed.bind_group_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: runargs.uniform.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: runargs.fixed.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: runargs.output.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: runargs.input.as_entire_binding(),
+                            },
+                        ],
+                    });
 
                     // Set the bind group that we want to use
                     compute_pass.set_bind_group(0, &bind_group, &[]);
@@ -318,29 +318,28 @@ impl Submittable for HashEngine {
 
                 compute_pass.set_pipeline(&gpu.hash_variable.pipeline);
                 for runargs in variable_runs {
-                    let bind_group =
-                        gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                            label: None,
-                            layout: &gpu.hash_variable.bind_group_layout,
-                            entries: &[
-                                wgpu::BindGroupEntry {
-                                    binding: 0,
-                                    resource: runargs.uniform.as_entire_binding(),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 1,
-                                    resource: runargs.variable.as_entire_binding(),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 2,
-                                    resource: runargs.output.as_entire_binding(),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 3,
-                                    resource: runargs.input.as_entire_binding(),
-                                },
-                            ],
-                        });
+                    let bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: None,
+                        layout: &gpu.hash_variable.bind_group_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: runargs.uniform.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: runargs.variable.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: runargs.output.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: runargs.input.as_entire_binding(),
+                            },
+                        ],
+                    });
 
                     // Set the bind group that we want to use
                     compute_pass.set_bind_group(0, &bind_group, &[]);

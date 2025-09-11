@@ -1,17 +1,17 @@
 use std::sync::Arc;
-use crate::log::*;
 
 use nbx_tip5::base::binv;
+use rayon::prelude::*;
 use zkvm_jetpack::form::math::poly::{
     p_fft_twiddles, p_hadamard_inplace, p_ntt_twiddled, p_ntt_twiddles, pscal_inplace,
 };
 use zkvm_jetpack::form::{Belt, ElementEx, FPolySlice, FPolyVec, Felt, PolyVec};
+
 use crate::new_fpoly;
 use crate::two::{
     con_mon, fdegree, fpadd, fpsub, id_fpoly, pinv_mod_x_to, zero_fpoly, zeroextend_slice,
 };
 use crate::utils::{scag_vec, xeb};
-use rayon::prelude::*;
 
 #[derive(Clone)]
 pub struct WeightedDivConst {
@@ -144,10 +144,7 @@ impl DivisorBatch {
             return zero_fpoly();
         }
 
-        let div_const = WeightedDivConst::new(
-            self.get_divisor_polynomial(),
-            self.polys[0].0.len()
-        );
+        let div_const = WeightedDivConst::new(self.get_divisor_polynomial(), self.polys[0].0.len());
 
         // Pre-compute the maximum polynomial length to avoid reallocations
         let max_len = self.polys.iter().map(|p| p.0.len()).max().unwrap();
@@ -203,9 +200,6 @@ impl<'a> DeepEngine<'a> {
         self.divisor_batches
             .into_par_iter()
             .map(|batch| batch.weighted_division())
-            .reduce(
-                || zero_fpoly(),
-                |acc, result| fpadd(acc, (&result).into())
-            )
+            .reduce(|| zero_fpoly(), |acc, result| fpadd(acc, (&result).into()))
     }
 }

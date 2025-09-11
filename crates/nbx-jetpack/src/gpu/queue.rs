@@ -26,11 +26,8 @@ impl GpuQueue {
         // Decrementing the counter can fail due to either (1) concurrent access or (2) because the
         //  queue is already full. Either way, the current thread should use the CPU to process the
         //  piece of work.
-        self.available_slots.compare_exchange_weak(
-            current,
-            current - 1,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        ).is_ok()
+        self.available_slots
+            .compare_exchange_weak(current, current - 1, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
     }
 }

@@ -1,10 +1,10 @@
 pub mod belt;
-pub mod melt;
 pub mod crypto;
 pub mod felt;
 pub mod mary;
 pub mod math;
 pub mod mega;
+pub mod melt;
 pub mod poly;
 
 pub use math::*;

@@ -1,4 +1,5 @@
 use ibig::UBig;
+use nbx_tip5::based;
 use nockvm::interpreter::Context;
 use nockvm::jets::list::util::{lent, weld};
 use nockvm::jets::util::slot;
@@ -7,7 +8,6 @@ use nockvm::mem::NockStack;
 use nockvm::noun::{Atom, Noun, D, T};
 use nockvm_macros::tas;
 
-use nbx_tip5::based;
 use crate::form::math::tip5::*;
 use crate::form::{Belt, Melt, Poly};
 use crate::hand::structs::HoonList;
@@ -144,11 +144,13 @@ pub fn hash_varlen(mut input_vec: Vec<Belt>) -> [u64; 5] {
 pub fn create_init_sponge_variable() -> [Melt; STATE_SIZE] {
     [Melt(0); STATE_SIZE]
 }
+
 pub fn create_init_sponge_fixed() -> [Melt; STATE_SIZE] {
     [
         0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 4294967295u64, 4294967295u64,
         4294967295u64, 4294967295u64, 4294967295u64, 4294967295u64,
-    ].map(Melt)
+    ]
+    .map(Melt)
 }
 
 pub fn montify_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {

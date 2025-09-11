@@ -33,8 +33,15 @@ async fn main() {
 
     #[cfg(feature = "prom-exporter")]
     metrics_exporter_prometheus::PrometheusBuilder::new()
-        .with_http_listener(cli.prometheus_bind.parse::<std::net::SocketAddr>().expect("Invalid socket address"))
-        .idle_timeout(metrics_util::MetricKindMask::ALL, Some(std::time::Duration::from_secs(300)))
+        .with_http_listener(
+            cli.prometheus_bind
+                .parse::<std::net::SocketAddr>()
+                .expect("Invalid socket address"),
+        )
+        .idle_timeout(
+            metrics_util::MetricKindMask::ALL,
+            Some(std::time::Duration::from_secs(300)),
+        )
         .install()
         .expect("Unable to install prometheus exporter");
 

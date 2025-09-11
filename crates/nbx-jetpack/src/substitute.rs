@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use rayon::prelude::*;
 
 use nbx_tip5::melt::Melt;
+use rayon::prelude::*;
 use zkvm_jetpack::form::math::poly::*;
 use zkvm_jetpack::form::poly::Poly;
 use zkvm_jetpack::form::{ElementEx, PolySlice, PolyVec};
@@ -10,7 +10,6 @@ use zkvm_jetpack::form::{ElementEx, PolySlice, PolyVec};
 #[cfg(feature = "gpu")]
 use super::gpu;
 use crate::engine::Engine;
-use crate::log::*;
 
 // 64MB in melts/belts
 pub const MAX_CHUNK_SIZE: usize = 0x4000000 / core::mem::size_of::<u64>();
@@ -84,9 +83,9 @@ impl<E: ElementEx> SubstituteIter<'_, E> {
                     }))
                     .collect::<Vec<_>>();
 
-                operations.into_iter().fold(
-                    PolyVec(vec![m.scal; out_len]),
-                    |mut acc, (o, exp)| {
+                operations
+                    .into_iter()
+                    .fold(PolyVec(vec![m.scal; out_len]), |mut acc, (o, exp)| {
                         debug_assert_eq!(o.len(), acc.0.len());
                         debug_assert!(o.len() % 16 == 0);
                         debug_assert!(acc.0.len() % 16 == 0);
@@ -97,8 +96,7 @@ impl<E: ElementEx> SubstituteIter<'_, E> {
                             p_hadamard_inplace(a, b);
                         }
                         acc
-                    },
-                )
+                    })
             })
             .reduce(
                 || PolyVec(vec![E::zero(); out_len]),
@@ -214,10 +212,18 @@ impl<'a, E: ElementEx> SubstituteEngine<'a, E> {
         }
         let stage = &mut self.stages[stage];
         let ret = stage.iters.len();
-        let zero_traces = self.zero_trace_cache.entry((traces.0.as_ptr() as usize, traces.0.len())).or_insert_with(|| {
-            let zt = traces.0.chunks(self.poly_len).map(|c| c.iter().all(|v| v.is_zero())).collect::<Vec<_>>();
-            Arc::from(&*zt)
-        }).clone();
+        let zero_traces = self
+            .zero_trace_cache
+            .entry((traces.0.as_ptr() as usize, traces.0.len()))
+            .or_insert_with(|| {
+                let zt = traces
+                    .0
+                    .chunks(self.poly_len)
+                    .map(|c| c.iter().all(|v| v.is_zero()))
+                    .collect::<Vec<_>>();
+                Arc::from(&*zt)
+            })
+            .clone();
         stage.iters.push(SubstituteIter::new(traces, zero_traces));
 
         let fits_in_last = stage
@@ -248,7 +254,11 @@ impl<'a, E: ElementEx> SubstituteEngine<'a, E> {
         let iter = &mut stage.iters[iter];
 
         // If the mul stage hits any zero-trace, we can filter it out
-        if mul.vars.iter().any(|v| iter.zero_traces.get(v.chunk as usize) == Some(&true)) {
+        if mul
+            .vars
+            .iter()
+            .any(|v| iter.zero_traces.get(v.chunk as usize) == Some(&true))
+        {
             return;
         }
 

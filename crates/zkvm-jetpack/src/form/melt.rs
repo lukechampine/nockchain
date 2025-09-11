@@ -1,4 +1,4 @@
-use crate::form::poly::{Melt, Belt};
+use crate::form::poly::{Belt, Melt};
 
 impl From<Melt> for Belt {
     #[inline(always)]

@@ -128,7 +128,8 @@ impl<C: SerfCheckpoint + Send + 'static> SerfThread<C> {
         let thread = move || {
             let stack = NockStack::new(nock_stack_size, 0);
             let serf = Serf::new(
-                stack, checkpoint, &kernel_bytes, &constant_hot_state, test_jets, trace, always_preserve_updates
+                stack, checkpoint, &kernel_bytes, &constant_hot_state, test_jets, trace,
+                always_preserve_updates,
             );
             event_number_sender
                 .send(serf.event_num.clone())
@@ -190,17 +191,19 @@ impl<C> SerfThread<C> {
                 .await
                 .expect("Failed to send stop action");
             match join_handle {
-                ThreadHandle::Rayon(rx) => {
-                    match rx.await {
-                        Ok(()) => Ok(()),
-                        Err(e) => Err(CrownError::Unknown(format!("Rayon serf thread failed: {e:?}"))),
-                    }
-                }
+                ThreadHandle::Rayon(rx) => match rx.await {
+                    Ok(()) => Ok(()),
+                    Err(e) => Err(CrownError::Unknown(format!(
+                        "Rayon serf thread failed: {e:?}"
+                    ))),
+                },
                 ThreadHandle::Tokio(handle) => {
                     let tokio_join_handle = tokio::task::spawn_blocking(move || handle.join());
                     match tokio_join_handle.await {
                         Ok(Ok(())) => Ok(()),
-                        Ok(Err(e)) => Err(CrownError::Unknown(format!("Serf thread panicked: {e:?}"))),
+                        Ok(Err(e)) => {
+                            Err(CrownError::Unknown(format!("Serf thread panicked: {e:?}")))
+                        }
                         Err(e) => Err(CrownError::JoinError(e)),
                     }
                 }
@@ -210,12 +213,10 @@ impl<C> SerfThread<C> {
 
     pub(crate) fn join(&mut self) -> Result<(), Box<dyn Any + Send + 'static>> {
         match self.handle.take().expect("Serf thread already joined") {
-            ThreadHandle::Rayon(rx) => {
-                rx.blocking_recv().map_err(|_| Box::new("Unable to join rayon serf") as _)
-            }
-            ThreadHandle::Tokio(handle) => {
-                handle.join()
-            }
+            ThreadHandle::Rayon(rx) => rx
+                .blocking_recv()
+                .map_err(|_| Box::new("Unable to join rayon serf") as _),
+            ThreadHandle::Tokio(handle) => handle.join(),
         }
     }
 
@@ -369,7 +370,7 @@ impl<C> SerfThread<C> {
 }
 
 fn wait_for_action<C: SerfCheckpoint>(
-    action_receiver: &mut mpsc::Receiver<SerfAction<C>>
+    action_receiver: &mut mpsc::Receiver<SerfAction<C>>,
 ) -> Option<SerfAction<C>> {
     if rayon::current_thread_index().is_none() {
         // This thread is not scheduled on the rayon thread pool, block until the action is received.
@@ -387,7 +388,7 @@ fn wait_for_action<C: SerfCheckpoint>(
                 rayon::yield_now();
             }
             Err(mpsc::error::TryRecvError::Disconnected) => {
-               return None;
+                return None;
             }
         }
     }
@@ -644,14 +645,7 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
         let serf = SerfThread::new(
-            kernel_vec,
-            checkpoint,
-            hot_state_vec,
-            NOCK_STACK_SIZE,
-            test_jets,
-            trace,
-            true,
-            false,
+            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE, test_jets, trace, true, false,
         )
         .await?;
         Ok(Self { serf })
@@ -667,13 +661,7 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
         let serf = SerfThread::new(
-            kernel_vec,
-            checkpoint,
-            hot_state_vec,
-            NOCK_STACK_SIZE_TINY,
-            test_jets,
-            trace,
-            true,
+            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_TINY, test_jets, trace, true,
             false,
         )
         .await?;
@@ -690,13 +678,7 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
         let serf = SerfThread::new(
-            kernel_vec,
-            checkpoint,
-            hot_state_vec,
-            NOCK_STACK_SIZE_SMALL,
-            test_jets,
-            trace,
-            true,
+            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_SMALL, test_jets, trace, true,
             false,
         )
         .await?;
@@ -713,13 +695,7 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
         let serf = SerfThread::new(
-            kernel_vec,
-            checkpoint,
-            hot_state_vec,
-            NOCK_STACK_SIZE_MEDIUM,
-            test_jets,
-            trace,
-            true,
+            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_MEDIUM, test_jets, trace, true,
             false,
         )
         .await?;
@@ -736,13 +712,7 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
         let serf = SerfThread::new(
-            kernel_vec,
-            checkpoint,
-            hot_state_vec,
-            NOCK_STACK_SIZE_LARGE,
-            test_jets,
-            trace,
-            true,
+            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_LARGE, test_jets, trace, true,
             false,
         )
         .await?;
@@ -759,13 +729,7 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
         let serf = SerfThread::new(
-            kernel_vec,
-            checkpoint,
-            hot_state_vec,
-            NOCK_STACK_SIZE_HUGE,
-            test_jets,
-            trace,
-            true,
+            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_HUGE, test_jets, trace, true,
             false,
         )
         .await?;

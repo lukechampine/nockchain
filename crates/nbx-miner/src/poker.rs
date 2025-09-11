@@ -2,19 +2,20 @@ use std::sync::{Arc, Mutex as SyncMutex};
 use std::time::Instant;
 
 use kernels::miner::KERNEL;
-use nockapp::wire::WireRepr;
-use nockapp::CrownError;
-use crate::metrics::{counter, histogram};
 use nbx_jetpack::instruments::{local_instruments, Instruments, ReadInstruments};
+use nbx_jetpack::log::*;
 use nockapp::kernel::form::SerfThread;
 use nockapp::noun::slab::NounSlab;
 use nockapp::save::SaveableCheckpoint;
 use nockapp::utils::NOCK_STACK_SIZE_TINY;
+use nockapp::wire::WireRepr;
+use nockapp::CrownError;
 use nockvm::interpreter::NockCancelToken;
 use nockvm::jets::hot::HotEntry;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
-use nbx_jetpack::log::*;
+
+use crate::metrics::{counter, histogram};
 
 pub struct PokerAttemptRes<M> {
     pub id: usize,
@@ -65,7 +66,7 @@ impl<M: Send + 'static> Poker<M> {
 
             let duration_millis = start.elapsed().as_millis() as u32;
 
-            trace!("duration_millis: {duration_millis}\ninstrumentation: {inst_delta:#?}", );
+            trace!("duration_millis: {duration_millis}\ninstrumentation: {inst_delta:#?}",);
 
             let results = PokerAttemptRes {
                 duration_millis,
@@ -130,7 +131,10 @@ impl<M: Send + 'static> PokerHandle<M> {
                 .expect("Could not pin the poker thread");
         }
 
-        let instruments = serf.call_fn(local_instruments).await.expect("Unable to get instruments");
+        let instruments = serf
+            .call_fn(local_instruments)
+            .await
+            .expect("Unable to get instruments");
 
         let (tx, rx) = watch::channel(SyncMutex::new(None));
 
@@ -159,15 +163,13 @@ impl<M: Send + 'static> PokerHandle<M> {
     }
 
     pub async fn await_free_request(&self) {
-        self.reqs_rx.clone().wait_for(|v| v.lock().unwrap().is_some()).await;
+        self.reqs_rx
+            .clone()
+            .wait_for(|v| v.lock().unwrap().is_some())
+            .await;
     }
 
-    pub fn send_poke(
-        &self,
-        poke_slab: NounSlab,
-        metadata: M,
-        cancel_previous: bool,
-    ) {
+    pub fn send_poke(&self, poke_slab: NounSlab, metadata: M, cancel_previous: bool) {
         self.reqs.send_modify(|v| {
             let mut guard = v.lock().expect("Poisoned lock");
             *guard = Some((poke_slab, metadata));

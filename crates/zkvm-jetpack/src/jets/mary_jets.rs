@@ -1,6 +1,5 @@
 use nockvm::interpreter::Context;
-use nockvm::jets::bits::util::rep;
-use nockvm::jets::bits::util::{lsh, rip};
+use nockvm::jets::bits::util::{lsh, rep, rip};
 use nockvm::jets::list::util::{lent, reap, snip, weld, zing};
 use nockvm::jets::math::util::add;
 use nockvm::jets::util::{bite_to_word, chop, slot};

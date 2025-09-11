@@ -4,16 +4,17 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+
 use clap::Args;
+use gdt_cpus::CoreType;
+use nbx_jetpack::log::*;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio::time::sleep;
-use gdt_cpus::CoreType;
-use nbx_jetpack::log::*;
 
 use crate::metrics::gauge;
-use crate::proto::{self,MiningAckOut, MiningDataOut, MiningResultIn};
+use crate::proto::{self, MiningAckOut, MiningDataOut, MiningResultIn};
 use crate::shared::{tls_connect_wrap, TlsClientConfig};
 
 pub struct ServerExtras {
@@ -27,7 +28,7 @@ pub fn client_loops(
     client_name: &String,
     mining_tx: mpsc::Sender<MiningDataOut>,
     ack_tx: mpsc::Sender<MiningAckOut>,
-    miner_metadata: Vec<BTreeMap<String, Arc<str>>>
+    miner_metadata: Vec<BTreeMap<String, Arc<str>>>,
 ) -> (JoinSet<()>, Vec<ServerExtras>) {
     let mut client_tasks = JoinSet::new();
     let mut server_extras = vec![];
@@ -148,10 +149,7 @@ pub struct ClientConfig {
         help = "Pin miner threads to given CPU cores. Format: sequence=starting_core, exact=core1,core2,core3, or performance"
     )]
     pub pin_threads: Option<PinThreads>,
-    #[arg(
-        long,
-        help = "What's the client name to send in the protocol"
-    )]
+    #[arg(long, help = "What's the client name to send in the protocol")]
     pub client_name: Option<String>,
     #[cfg(not(feature = "force-send-only-targets"))]
     #[arg(long, help = "Whether to forward non-block proofs upstream")]
@@ -288,4 +286,3 @@ impl FromStr for GpuConfig {
         })
     }
 }
-

@@ -116,10 +116,13 @@ mod tests {
         );
         assert_eq!(
             parse_tree("[[a b] c] asd").unwrap(),
-            (Node::Branch(vec![
-                Node::Branch(vec![Node::Leaf("a".into()), Node::Leaf("b".into())]),
-                Node::Leaf("c".into()),
-            ]), " asd")
+            (
+                Node::Branch(vec![
+                    Node::Branch(vec![Node::Leaf("a".into()), Node::Leaf("b".into())]),
+                    Node::Leaf("c".into()),
+                ]),
+                " asd"
+            )
         );
         assert_eq!(
             parse_tree("[[a b c] d]").unwrap().0,

@@ -3,18 +3,18 @@ use nbx_tip5::tip5::RATE;
 use nockvm::jets::JetErr;
 use nockvm::noun::{Atom, Noun, D};
 use nockvm_macros::tas;
-use crate::log::*;
+use zkvm_jetpack::form::mary::MarySlice;
+use zkvm_jetpack::form::math::tip5::DIGEST_LENGTH;
+use zkvm_jetpack::form::{Belt, Element, Melt};
+use zkvm_jetpack::hand::structs::HoonList;
+use zkvm_jetpack::jets::utils::jet_err;
+use zkvm_jetpack::noun::noun_ext::NounExt;
 
 #[cfg(feature = "gpu")]
 use super::gpu;
 use super::three::{hash_10, hash_varlen_padded};
-use zkvm_jetpack::form::mary::MarySlice;
-use zkvm_jetpack::form::math::tip5::DIGEST_LENGTH;
-use zkvm_jetpack::form::{Belt, Element, Felt, Melt};
-use zkvm_jetpack::hand::structs::HoonList;
-use zkvm_jetpack::jets::utils::jet_err;
-use zkvm_jetpack::noun::noun_ext::NounExt;
 use crate::engine::Engine;
+use crate::log::*;
 
 // 64MB in melts
 const MAX_CHUNK_SIZE: usize = 0x4000000 / core::mem::size_of::<Melt>();
@@ -575,7 +575,13 @@ impl HashEngine {
         ret
     }
 
-    pub fn push_mary_prehashed<T: Into<Melt> + Copy>(&mut self, stage: usize, ma: MarySlice, step_hash: NounDigest<T>, len_hash: NounDigest<T>) -> usize {
+    pub fn push_mary_prehashed<T: Into<Melt> + Copy>(
+        &mut self,
+        stage: usize,
+        ma: MarySlice,
+        step_hash: NounDigest<T>,
+        len_hash: NounDigest<T>,
+    ) -> usize {
         if self.stages.len() <= stage {
             assert_eq!(self.stages.len(), stage);
             self.stages.push(ReduceStage::default());

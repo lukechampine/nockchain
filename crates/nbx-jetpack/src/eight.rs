@@ -1,34 +1,33 @@
-use crate::engine::Engine;
 use std::collections::BTreeMap;
 
 use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::noun::{Atom, IndirectAtom, Noun, D, T};
-use crate::deep::{DeepEngine, DivisorBatch};
-use crate::log::*;
-
-use crate::codewords::CodewordEngine;
-use crate::seven::height_mary;
-use crate::three::{build_merk_heap_impl, mary_to_noun};
-
-use super::one::*;
-use super::substitute::SubstituteEngine;
-use super::two::*;
-use super::utils::*;
 use zkvm_jetpack::form::fext::{fmul_, fpow_};
 use zkvm_jetpack::form::mary::{Mary, MarySlice, MarySliceMut};
 use zkvm_jetpack::form::math::poly::*;
 use zkvm_jetpack::form::poly::Poly;
 use zkvm_jetpack::form::{
-    binv, bneg, BPolySlice, BPolyVec, Belt, Element, ElementEx, FPolySlice, FPolyVec, Felt, Melt,
-    PolySlice, PolyVec,
+    binv, bneg, BPolySlice, BPolyVec, Belt, Element, ElementEx, FPolySlice, Felt, Melt, PolySlice,
+    PolyVec,
 };
 use zkvm_jetpack::hand::handle::{
     finalize_mary, finalize_poly, new_handle_mut_mary, new_handle_mut_slice,
 };
-use zkvm_jetpack::hand::structs::{HoonList, HoonMap, HoonMapIter};
+use zkvm_jetpack::hand::structs::{HoonList, HoonMap};
 use zkvm_jetpack::jets::utils::{det_err, jet_err};
 use zkvm_jetpack::noun::noun_ext::NounExt;
+
+use super::one::*;
+use super::substitute::SubstituteEngine;
+use super::two::*;
+use super::utils::*;
+use crate::codewords::CodewordEngine;
+use crate::deep::{DeepEngine, DivisorBatch};
+use crate::engine::Engine;
+use crate::log::*;
+use crate::seven::height_mary;
+use crate::three::mary_to_noun;
 
 pub fn compute_deep(stack: &mut NockStack, inp: Noun) -> Result {
     // ~/  %compute-deep
@@ -130,12 +129,18 @@ pub fn compute_deep(stack: &mut NockStack, inp: Noun) -> Result {
                 let fp = bpoly_to_fpoly(bp);
 
                 point_batch.polys.push(fp.clone());
-                point_batch.openings.push(trace_openings.0[num + j as usize]);
+                point_batch
+                    .openings
+                    .push(trace_openings.0[num + j as usize]);
                 point_batch.weights.push(weights.0[num + j as usize]);
 
                 omicron_batch.polys.push(fp);
-                omicron_batch.openings.push(trace_openings.0[num + p.len as usize + j as usize]);
-                omicron_batch.weights.push(weights.0[num + p.len as usize + j as usize]);
+                omicron_batch
+                    .openings
+                    .push(trace_openings.0[num + p.len as usize + j as usize]);
+                omicron_batch
+                    .weights
+                    .push(weights.0[num + p.len as usize + j as usize]);
             }
 
             engine.add_batch(omicron_batch);
@@ -195,7 +200,9 @@ pub fn compute_deep(stack: &mut NockStack, inp: Noun) -> Result {
 
     for (poly_idx, poly) in composition_pieces.iter().enumerate() {
         comp_batch.polys.push(poly.clone());
-        comp_batch.openings.push(composition_piece_openings.0[poly_idx]);
+        comp_batch
+            .openings
+            .push(composition_piece_openings.0[poly_idx]);
         comp_batch.weights.push(weights.0[num + poly_idx]);
     }
 
@@ -326,13 +333,10 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
         return jet_err();
     };
 
-    let [constraint_map, constraint_counts, weights_map] = [
-        constraint_map,
-        constraint_counts,
-        weights_map,
-    ]
-    .map(HoonMap::try_from)
-    .map(|v| v.ok());
+    let [constraint_map, constraint_counts, weights_map] =
+        [constraint_map, constraint_counts, weights_map]
+            .map(HoonMap::try_from)
+            .map(|v| v.ok());
 
     let is_extra = is_extra.as_direct()?.data() == 0;
 
@@ -377,12 +381,7 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
                 // =/  comps=(list bpoly)
                 //   (mp-substitute-ultra mp trace max-height chal-map dyns)
                 comp_cnts.push(mp_substitute_ultra_impl(
-                        &mut engine,
-                        0,
-                        *mp,
-                        trace,
-                        challenges,
-                        dyns,
+                    &mut engine, 0, *mp, trace, challenges, dyns,
                 )?);
             }
         }
@@ -435,8 +434,11 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
             [boundary_zerofier, row_zerofier, transition_zerofier, last_row, row_zerofier];
 
         let mut weights = weights2.0;
-        for (o, ((constraints, count), dividend)) in
-            constraints2.iter().zip(counts.into_iter()).zip(dividends).enumerate()
+        for (o, ((constraints, count), dividend)) in constraints2
+            .iter()
+            .zip(counts.into_iter())
+            .zip(dividends)
+            .enumerate()
         {
             //   ?.  is-extra  zero-bpoly
             if o == dividends.len() - 1 && !is_extra {
@@ -467,17 +469,13 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
             //   acc
 
             match o {
-                0 => {
-                    match boundary_acc.as_mut() {
-                        Some(acc) => padd_in_place(acc, &processed_constraints.0),
-                        None => boundary_acc = Some(processed_constraints.0),
-                    }
+                0 => match boundary_acc.as_mut() {
+                    Some(acc) => padd_in_place(acc, &processed_constraints.0),
+                    None => boundary_acc = Some(processed_constraints.0),
                 },
-                1 | 4 => {
-                    match row_acc.as_mut() {
-                        Some(acc) => padd_in_place(acc, &processed_constraints.0),
-                        None => row_acc = Some(processed_constraints.0),
-                    }
+                1 | 4 => match row_acc.as_mut() {
+                    Some(acc) => padd_in_place(acc, &processed_constraints.0),
+                    None => row_acc = Some(processed_constraints.0),
                 },
                 _ => {
                     let dividend: PolyVec<Elem> = PolyVec(dividend.0.to_vec()).into();
@@ -514,8 +512,7 @@ fn process_composition_constraints<'a>(
     constraints: &ProcessedDeg,
     weights: BPolySlice,
     fri_deg_bound: u64,
-) -> core::result::Result<PolyVec<Melt>, JetErr>
-{
+) -> core::result::Result<PolyVec<Melt>, JetErr> {
     // |=  $:  constraints=(list [(list @) mp-ultra])
     //         trace=bpoly
     //         weights=bpoly
@@ -753,7 +750,10 @@ pub fn compute_table_polys(tables: &[MarySlice]) -> Vec<Mary> {
     // ?:  =(height 0)
     //   ~|("compute-table-polys: height 0 table detected" !!)
     // (interpolate-table p height)
-    tables.iter().map(|p| interpolate_table(*p, height_mary(*p))).collect()
+    tables
+        .iter()
+        .map(|p| interpolate_table(*p, height_mary(*p)))
+        .collect()
 }
 
 pub fn compute_codeword_commitments_sam(stack: &mut NockStack, sam: Noun) -> Result {
@@ -783,11 +783,18 @@ pub fn compute_codeword_commitments_sam(stack: &mut NockStack, sam: Noun) -> Res
     // =/  table-polys=(list mary)
     //   (compute-table-polys table-marys)
     let table_polys_vec = compute_table_polys(&table_marys_vec);
-    let table_polys = table_polys_vec.iter().map(MarySlice::from).collect::<Vec<_>>();
+    let table_polys = table_polys_vec
+        .iter()
+        .map(MarySlice::from)
+        .collect::<Vec<_>>();
     let engine = CodewordEngine::new(table_polys, fri_domain_len, total_cols);
     let (codeword_array, height, mh) = engine.reduce();
     // [table-polys codeword-array merk-heap]
-    let table_polys = table_polys_vec.into_iter().map(|v| mary_to_noun(stack, v)).chain([D(0)]).collect::<Vec<_>>();
+    let table_polys = table_polys_vec
+        .into_iter()
+        .map(|v| mary_to_noun(stack, v))
+        .chain([D(0)])
+        .collect::<Vec<_>>();
     let table_polys = T(stack, &table_polys);
     let codeword_array = mary_to_noun(stack, codeword_array);
     let height = Atom::new(stack, height as _).as_noun();
@@ -833,7 +840,9 @@ pub fn compute_lde<T: ElementEx>(
     fri_domain_len: u32,
     num_cols: u64,
     out: MarySliceMut,
-) where Belt: Into<T> {
+) where
+    Belt: Into<T>,
+{
     assert_eq!(out.step, fri_domain_len as u32);
     assert_eq!(out.len, num_cols as u32);
     // =/  fps=(list mary)

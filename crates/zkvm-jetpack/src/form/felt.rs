@@ -1,6 +1,5 @@
 use core::ops::{Add, Div, Mul, Neg, Sub};
-use std::ops::AddAssign;
-use std::ops::MulAssign;
+use std::ops::{AddAssign, MulAssign};
 
 use nockvm::noun::Noun;
 use num_traits::{MulAdd, Pow};

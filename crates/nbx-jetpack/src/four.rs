@@ -1,10 +1,9 @@
-use crate::engine::Engine;
+use std::iter::once;
+
 use nockvm::jets::JetErr;
 use nockvm::mem::NockStack;
 use nockvm::noun::*;
 use nockvm_macros::tas;
-use std::iter::once;
-
 use zkvm_jetpack::form::mary::MarySlice;
 use zkvm_jetpack::form::{BPolyVec, Belt, Element, ElementEx, FPolyVec, Felt, Melt, PolyVec};
 use zkvm_jetpack::hand::handle::{finalize_poly, new_handle_mut_slice};
@@ -12,8 +11,9 @@ use zkvm_jetpack::hand::structs::HoonList;
 use zkvm_jetpack::jets::utils::jet_err;
 use zkvm_jetpack::noun::noun_ext::NounExt;
 
-use super::three::{Tip5Tog, absorb_sponge, new_sponge};
 use super::hash::{HashEngine, NounDigest};
+use super::three::{absorb_sponge, new_sponge, Tip5Tog};
+use crate::engine::Engine;
 
 fn poly_noun<T: Element + Copy>(stack: &mut NockStack, p: PolyVec<T>) -> Noun {
     let (ret, slc) = new_handle_mut_slice(stack, Some(p.0.len()));

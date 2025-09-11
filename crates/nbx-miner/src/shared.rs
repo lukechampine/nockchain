@@ -1,32 +1,30 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 use std::future::Future;
 use std::io::{self, Cursor};
 use std::net::{Ipv4Addr, SocketAddr};
-use std::sync::{Arc, OnceLock};
 use std::pin::Pin;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use ibig::UBig;
+use nbx_jetpack::log::*;
 use nockapp::noun::slab::{slab_equality, NounSlab};
 use nockapp::wire::Wire;
+use nockvm::noun::{Noun, D, T};
+use nockvm_macros::tas;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use rustls::server::WebPkiClientVerifier;
 use rustls::{ClientConfig, RootCertStore, ServerConfig};
-use rustls_pemfile::{certs, ec_private_keys, rsa_private_keys};
+use rustls_pemfile::{certs, ec_private_keys};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
-use tokio_rustls::client;
-use tokio_rustls::server;
-use tokio_rustls::{TlsAcceptor, TlsConnector};
-use nbx_jetpack::log::*;
+use tokio_rustls::{client, server, TlsAcceptor, TlsConnector};
 use x509_parser::oid_registry::OID_X509_COMMON_NAME;
 use x509_parser::prelude::*;
 use zkvm_jetpack::form::{Belt, PRIME};
-use nockvm_macros::tas;
-use nockvm::noun::{D, T, Noun};
 use zkvm_jetpack::noun::noun_ext::NounExt;
 
-use crate::proto::{name_valid, NAME_MAX_LENGTH};
+use crate::proto::name_valid;
 
 #[derive(Debug)]
 pub struct MiningData {
@@ -107,7 +105,10 @@ fn make_root_store(pem_buf: &[u8]) -> RootCertStore {
     store
 }
 
-fn load_cert_chain<'a>(cert_pem: &'a [u8], key_pem: &'a [u8]) -> (Vec<CertificateDer<'a>>, PrivateKeyDer<'a>) {
+fn load_cert_chain<'a>(
+    cert_pem: &'a [u8],
+    key_pem: &'a [u8],
+) -> (Vec<CertificateDer<'a>>, PrivateKeyDer<'a>) {
     let mut r = Cursor::new(cert_pem);
     let cert_chain = certs(&mut r)
         .into_iter()
@@ -124,7 +125,7 @@ fn load_cert_chain<'a>(cert_pem: &'a [u8], key_pem: &'a [u8]) -> (Vec<Certificat
 pub struct TlsClientConfig {
     server_chain_pem: &'static [u8],
     client_chain_pem: &'static [u8],
-    client_key_pem: &'static [u8]
+    client_key_pem: &'static [u8],
 }
 
 impl Default for TlsClientConfig {
@@ -142,7 +143,7 @@ pub async fn tls_connect(
     TlsClientConfig {
         server_chain_pem,
         client_chain_pem,
-        client_key_pem
+        client_key_pem,
     }: TlsClientConfig,
 ) -> std::io::Result<client::TlsStream<TcpStream>> {
     let (cert_chain, priv_key) = load_cert_chain(client_chain_pem, client_key_pem);
@@ -167,7 +168,7 @@ impl<T: AsyncRead + AsyncWrite> AsyncReadWrite for T {}
 
 pub async fn tls_connect_wrap(
     tcp: impl Future<Output = std::io::Result<TcpStream>>,
-    tls: Option<TlsClientConfig>
+    tls: Option<TlsClientConfig>,
 ) -> std::io::Result<Pin<Box<dyn 'static + AsyncReadWrite + Send>>> {
     let tcp = tcp.await?;
     trace!("Connected");
@@ -201,7 +202,7 @@ pub async fn tls_accept(
     TlsServerConfig {
         server_chain_pem,
         server_key_pem,
-        ca_pem
+        ca_pem,
     }: TlsServerConfig,
 ) -> std::io::Result<server::TlsStream<TcpStream>> {
     let (cert_chain, priv_key) = load_cert_chain(server_chain_pem, server_key_pem);
@@ -221,15 +222,17 @@ pub async fn tls_accept(
 
     trace!("TLS acceptor built");
 
-    acceptor
-        .accept(tcp)
-        .await
+    acceptor.accept(tcp).await
 }
 
 pub async fn tls_accept_wrap(
     tcp: impl Future<Output = std::io::Result<(TcpStream, SocketAddr)>>,
-    tls: Option<TlsServerConfig>
-) -> std::io::Result<(Pin<Box<dyn 'static + AsyncReadWrite + Send>>, SocketAddr, Arc<str>)> {
+    tls: Option<TlsServerConfig>,
+) -> std::io::Result<(
+    Pin<Box<dyn 'static + AsyncReadWrite + Send>>,
+    SocketAddr,
+    Arc<str>,
+)> {
     let (tcp, addr) = tcp.await?;
     trace!("Accepted {addr}");
     if let Some(tls) = tls {
@@ -237,7 +240,8 @@ pub async fn tls_accept_wrap(
         let Some(tls_name) = tls.get_ref().1.peer_certificates().and_then(|v| {
             let c = v.first()?;
             let (_rem, x509) = X509Certificate::from_der(c.as_ref()).ok()?;
-            let cn = x509.subject()
+            let cn = x509
+                .subject()
                 .iter_attributes()
                 .find(|attr| attr.attr_type() == &OID_X509_COMMON_NAME)
                 .and_then(|attr| attr.as_str().ok())?;
@@ -367,7 +371,11 @@ impl TargetMetrics {
     }
 
     pub fn emit(&self) {
-        let diff = self.get_min().cloned().map(target_to_difficulty).unwrap_or_default();
+        let diff = self
+            .get_min()
+            .cloned()
+            .map(target_to_difficulty)
+            .unwrap_or_default();
         crate::metrics::gauge!("nbx_miner_observed_digest_hit_difficulty", "mode" => self.mode, "level" => self.level).set(diff.to_f64());
     }
 
@@ -378,7 +386,8 @@ impl TargetMetrics {
     pub fn measure_down(&mut self) {
         self.emit();
         let now = Instant::now();
-        self.measurements.retain(|(v, _)| now.duration_since(*v) <= self.interval);
+        self.measurements
+            .retain(|(v, _)| now.duration_since(*v) <= self.interval);
         let min = self.get_min().cloned();
         let delta = now.duration_since(self.last_commit);
         if delta >= self.interval {

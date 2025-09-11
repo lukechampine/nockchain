@@ -1,5 +1,5 @@
-use crate::parse::{parse_tree, Node};
-use crate::{run_kernel, SendSlab};
+use std::collections::HashMap;
+
 use anyhow::{anyhow, Result};
 use either::Either;
 use flume::Sender;
@@ -11,7 +11,9 @@ use nockvm::jets::JetErr;
 use nockvm::noun::*;
 use nockvm_macros::tas;
 use reedline::{DefaultPrompt, DefaultPromptSegment, FileBackedHistory, Reedline, Signal};
-use std::collections::HashMap;
+
+use crate::parse::{parse_tree, Node};
+use crate::{run_kernel, SendSlab};
 
 fn input_func(out: Sender<Option<String>>) -> Result<()> {
     loop {
@@ -304,10 +306,7 @@ impl Shell {
                 let sam = slot(sam, 3).unwrap();
                 slab.copy_into(sam);
                 let sam = unsafe { *slab.root() };
-                T(
-                    &mut slab,
-                    &[D(tas!(b"sam")), prt, hoon, vased_subject, sam],
-                )
+                T(&mut slab, &[D(tas!(b"sam")), prt, hoon, vased_subject, sam])
             }
             (Some(hoon), None) => T(&mut slab, &[D(tas!(b"raw")), prt, hoon, vased_subject]),
             (None, Some(sam)) => {

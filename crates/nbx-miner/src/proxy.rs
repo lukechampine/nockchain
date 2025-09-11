@@ -6,19 +6,22 @@ use std::time::{Duration, Instant};
 
 use clap::Args;
 use ibig::UBig;
-use crate::client_base::client_loops;
-use crate::metrics::{counter, gauge, histogram};
-use crate::server::{mining_server, MiningConfig};
+use nbx_jetpack::log::*;
 use nockapp::noun::slab::NounSlab;
 use nockapp::NockAppError;
 use rustls::crypto::ring::default_provider;
 use tokio::sync::mpsc;
-use nbx_jetpack::log::*;
 use zkvm_jetpack::form::{Belt, PRIME};
 use zkvm_jetpack::noun::noun_ext::NounExt as OtherNounExt;
 
+use crate::client_base::client_loops;
+use crate::metrics::{counter, gauge, histogram};
 use crate::proto::{MiningAckOut, MiningDataOut, MiningResultIn, RECENTLY_EXPIRED_DURATION};
-use crate::shared::{difficulty_to_target, parse_bn, target_to_difficulty, to_bn, MiningData, MiningResult, TargetMetrics, TimeWriter};
+use crate::server::{mining_server, MiningConfig};
+use crate::shared::{
+    difficulty_to_target, parse_bn, target_to_difficulty, to_bn, MiningData, MiningResult,
+    TargetMetrics, TimeWriter,
+};
 
 #[derive(Clone, Debug, Args)]
 pub struct ProxyConfig {
@@ -33,14 +36,15 @@ pub struct ProxyConfig {
     #[cfg(not(feature = "force-tls"))]
     #[arg(long, help = "Use TLS for the miner")]
     miner_connect_tls: bool,
-    #[arg(
-        long,
-        help = "What's the client name to send in the protocol"
-    )]
+    #[arg(long, help = "What's the client name to send in the protocol")]
     pub client_name: String,
     #[arg(long, help = "Whether to forward non-block proofs upstream")]
     pub forward_non_block: bool,
-    #[arg(long, help = "Target time to adjust proxy difficulty to", default_value = "60")]
+    #[arg(
+        long,
+        help = "Target time to adjust proxy difficulty to",
+        default_value = "60"
+    )]
     pub target_share_seconds: u64,
     #[arg(long, help = "Minimum difficulty for the proxy", default_value = "1")]
     pub min_share_difficulty: u64,
@@ -67,7 +71,8 @@ impl DifficultyTracker {
             self.rolling_timings.pop_front();
         }
         self.accumulated_work += diff;
-        self.rolling_timings.push_back((Instant::now(), self.accumulated_work));
+        self.rolling_timings
+            .push_back((Instant::now(), self.accumulated_work));
         // Update proxy difficulty
         if self.rolling_timings.len() == ROLLING_TIMING_CNT {
             self.update_difficulty();
@@ -84,22 +89,43 @@ impl DifficultyTracker {
             let elapsed = end.duration_since(*start).as_millis();
             (elapsed, self.accumulated_work - start_work)
         };
-        trace!("all elapsed: {:?}", self.rolling_timings.iter().map(|v| self.last_updated.duration_since(v.0).as_millis()).collect::<Vec<_>>());
+        trace!(
+            "all elapsed: {:?}",
+            self.rolling_timings
+                .iter()
+                .map(|v| self.last_updated.duration_since(v.0).as_millis())
+                .collect::<Vec<_>>()
+        );
         trace!("{elapsed} * {} / ({accum_work} * 10)", self.current_diff10);
         let elapsed = elapsed * self.current_diff10 as u128 / (accum_work * 10) as u128;
-        trace!("{} * {} / {}", self.current_diff10, self.target_interval.as_millis(), elapsed);
-        let target_diff10 = self.current_diff10 as u128 * self.target_interval.as_millis() / elapsed;
+        trace!(
+            "{} * {} / {}",
+            self.current_diff10,
+            self.target_interval.as_millis(),
+            elapsed
+        );
+        let target_diff10 =
+            self.current_diff10 as u128 * self.target_interval.as_millis() / elapsed;
         let target_diff10 = core::cmp::min(std::u64::MAX as u128, target_diff10) as u64;
-        let new_diff10 = (self.current_diff10 * (100 - DIFF_ADJUSTMENT_PRC) + (target_diff10 * DIFF_ADJUSTMENT_PRC)) / 100;
+        let new_diff10 = (self.current_diff10 * (100 - DIFF_ADJUSTMENT_PRC)
+            + (target_diff10 * DIFF_ADJUSTMENT_PRC))
+            / 100;
         let new_diff10 = core::cmp::max(new_diff10, 10 * core::cmp::max(self.min_difficulty, 1));
-        trace!("Update difficulty {} -> {} ({})", self.current_diff10 / 10, new_diff10 / 10, target_diff10 / 10);
+        trace!(
+            "Update difficulty {} -> {} ({})",
+            self.current_diff10 / 10,
+            new_diff10 / 10,
+            target_diff10 / 10
+        );
         self.current_diff10 = new_diff10;
         self.current_target = difficulty_to_target(self.current_diff10 / 10);
     }
 }
 
 pub async fn run_proxy(cfg: ProxyConfig) {
-    let server_listener = crate::server::bind(&cfg.server).await.expect("Unable to bind proxy listener");
+    let server_listener = crate::server::bind(&cfg.server)
+        .await
+        .expect("Unable to bind proxy listener");
 
     #[cfg(not(feature = "force-tls"))]
     let tls = if cfg.miner_connect_tls {
@@ -117,7 +143,14 @@ pub async fn run_proxy(cfg: ProxyConfig) {
 
     let (mining_tx, mut mining_rx) = mpsc::channel(cfg.miner_connect.len());
     let (ack_tx, mut ack_rx) = mpsc::channel(cfg.miner_connect.len());
-    let (_client_tasks, server_extras) = client_loops(cfg.miner_connect, tls, &cfg.client_name, mining_tx, ack_tx, Default::default());
+    let (_client_tasks, server_extras) = client_loops(
+        cfg.miner_connect,
+        tls,
+        &cfg.client_name,
+        mining_tx,
+        ack_tx,
+        Default::default(),
+    );
 
     let mut requests = BTreeMap::new();
     let server_id_map = SyncMutex::new(BTreeMap::<_, (_, (u32, usize, u32, UBig))>::new());
@@ -134,10 +167,13 @@ pub async fn run_proxy(cfg: ProxyConfig) {
         last_updated,
     }));
 
+    #[rustfmt::skip]
     let hit_metrics = TargetMetrics::new(Duration::from_secs(10), "hit", "10s")
         .with_previous(TargetMetrics::new(Duration::from_secs(60), "hit", "1m")
         .with_previous(TargetMetrics::new(Duration::from_secs(600), "hit", "10m")
         .with_previous(TargetMetrics::new(Duration::from_secs(3600), "hit", "60m"))));
+
+    #[rustfmt::skip]
     let miss_metrics = TargetMetrics::new(Duration::from_secs(10), "miss", "10s")
         .with_previous(TargetMetrics::new(Duration::from_secs(60), "miss", "1m")
         .with_previous(TargetMetrics::new(Duration::from_secs(600), "miss", "10m")
@@ -146,80 +182,89 @@ pub async fn run_proxy(cfg: ProxyConfig) {
     let miss_metrics = Arc::new(SyncMutex::new(miss_metrics));
 
     // Any pokes that passed server's verification steps.
-    let process_target = |mut data: MiningResult, _, cn: Arc<str>, in_data: Arc<MiningData>, poke_slab: NounSlab| {
-        let data_info = server_id_map.lock().unwrap().get(&Arc::as_ptr(&in_data)).map(|(_, v)| (v.clone(), server_extras[v.1].mining_res.clone()));
-        let diff_tracker = diff_tracker.clone();
-        let hit_metrics = hit_metrics.clone();
-        let miss_metrics = miss_metrics.clone();
-        async move {
-            let Some(((data_id, server_id, session_id, parent_target), mining_res)) = data_info else {
-                debug!("Unable to grab data info (data expired?)");
-                // The data had expired before this function being called.
-                return Ok(());
-            };
-
-            let proxy_target = unsafe { in_data.target.root() };
-            let proxy_target = parse_bn(*proxy_target);
-            let proxy_diff = target_to_difficulty(proxy_target);
-            let Ok(proxy_diff) = u64::try_from(&proxy_diff) else {
-                error!("Too high of difficulty: {proxy_diff}");
-                return Err(NockAppError::PokeFailed);
-            };
-
-            {
-                diff_tracker.lock().unwrap().measure_and_update(proxy_diff);
-            }
-
-            counter!("nbx_miner_proxy_global_accumulated_work").increment(proxy_diff);
-            counter!(
-                "nbx_miner_proxy_accumulated_work",
-                "client_cn" => cn,
-                "server_id" => server_id.to_string(),
-            ).increment(proxy_diff);
-
-            let poke = unsafe { poke_slab.root() };
-            let [_, _, _, dig, _, _] = poke.uncell()?;
-            let dig = dig.as_atom()?;
-            #[cfg(target_endian = "little")]
-            let dig = UBig::from_le_bytes(&dig.as_ne_bytes());
-            #[cfg(target_endian = "big")]
-            let dig = UBig::from_be_bytes(&dig.as_ne_bytes());
-
-            // Local server has verified that we hit the pool target. Now, we need to verify
-            // whether we hit the parent target.
-            data.target_hit = dig <= parent_target;
-            if !data.target_hit {
-                miss_metrics.lock().unwrap().measure(dig);
-                if !forward_non_block {
+    let process_target =
+        |mut data: MiningResult, _, cn: Arc<str>, in_data: Arc<MiningData>, poke_slab: NounSlab| {
+            let data_info = server_id_map
+                .lock()
+                .unwrap()
+                .get(&Arc::as_ptr(&in_data))
+                .map(|(_, v)| (v.clone(), server_extras[v.1].mining_res.clone()));
+            let diff_tracker = diff_tracker.clone();
+            let hit_metrics = hit_metrics.clone();
+            let miss_metrics = miss_metrics.clone();
+            async move {
+                let Some(((data_id, server_id, session_id, parent_target), mining_res)) = data_info
+                else {
+                    debug!("Unable to grab data info (data expired?)");
+                    // The data had expired before this function being called.
                     return Ok(());
+                };
+
+                let proxy_target = unsafe { in_data.target.root() };
+                let proxy_target = parse_bn(*proxy_target);
+                let proxy_diff = target_to_difficulty(proxy_target);
+                let Ok(proxy_diff) = u64::try_from(&proxy_diff) else {
+                    error!("Too high of difficulty: {proxy_diff}");
+                    return Err(NockAppError::PokeFailed);
+                };
+
+                {
+                    diff_tracker.lock().unwrap().measure_and_update(proxy_diff);
                 }
-                data.poke = None;
-                data.effect = None;
-            } else {
-                hit_metrics.lock().unwrap().measure(dig);
-            }
 
-            gauge!(
-                "nbx_miner_proxy_channel_mining_res_capacity",
-                "server_id" => server_id.to_string(),
-            ).set(mining_res.capacity() as f64);
-
-            if let Err(e) = mining_res.try_send(MiningResultIn {
-                data_id,
-                session_id,
-                data,
-            }) {
+                counter!("nbx_miner_proxy_global_accumulated_work").increment(proxy_diff);
                 counter!(
-                    "nbx_miner_proxy_send_mining_res_fail_total",
+                    "nbx_miner_proxy_accumulated_work",
+                    "client_cn" => cn,
                     "server_id" => server_id.to_string(),
-                ).increment(1);
-                error!("Unable to send mining result to {server_id}: {e:?}");
-                return Err(NockAppError::PokeFailed);
-            }
+                )
+                .increment(proxy_diff);
 
-            Ok(())
-        }
-    };
+                let poke = unsafe { poke_slab.root() };
+                let [_, _, _, dig, _, _] = poke.uncell()?;
+                let dig = dig.as_atom()?;
+                #[cfg(target_endian = "little")]
+                let dig = UBig::from_le_bytes(&dig.as_ne_bytes());
+                #[cfg(target_endian = "big")]
+                let dig = UBig::from_be_bytes(&dig.as_ne_bytes());
+
+                // Local server has verified that we hit the pool target. Now, we need to verify
+                // whether we hit the parent target.
+                data.target_hit = dig <= parent_target;
+                if !data.target_hit {
+                    miss_metrics.lock().unwrap().measure(dig);
+                    if !forward_non_block {
+                        return Ok(());
+                    }
+                    data.poke = None;
+                    data.effect = None;
+                } else {
+                    hit_metrics.lock().unwrap().measure(dig);
+                }
+
+                gauge!(
+                    "nbx_miner_proxy_channel_mining_res_capacity",
+                    "server_id" => server_id.to_string(),
+                )
+                .set(mining_res.capacity() as f64);
+
+                if let Err(e) = mining_res.try_send(MiningResultIn {
+                    data_id,
+                    session_id,
+                    data,
+                }) {
+                    counter!(
+                        "nbx_miner_proxy_send_mining_res_fail_total",
+                        "server_id" => server_id.to_string(),
+                    )
+                    .increment(1);
+                    error!("Unable to send mining result to {server_id}: {e:?}");
+                    return Err(NockAppError::PokeFailed);
+                }
+
+                Ok(())
+            }
+        };
 
     let (reqs_out, reqs_in) = mpsc::channel(1);
     let server = mining_server(cfg.server, server_listener, reqs_in, process_target);

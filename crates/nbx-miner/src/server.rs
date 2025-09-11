@@ -1,46 +1,46 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::future::Future;
 use std::net::{Ipv6Addr, SocketAddr};
-use std::sync::{Arc, OnceLock};
 use std::pin::pin;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use clap::{Args, ValueEnum};
+use futures::stream::StreamExt;
 #[cfg(feature = "verifier")]
 use kernels::verifier::KERNEL;
 use metrics::counter;
+use nbx_jetpack::log::*;
+use nockapp::driver::NockAppHandle;
+use nockapp::noun::slab::NounSlab;
+use nockapp::wire::Wire;
 #[cfg(feature = "verifier")]
 use nockapp::{
-    kernel::form::SerfThread,
-    save::SaveableCheckpoint,
+    kernel::form::SerfThread, noun::slab::NockJammer, save::SaveableCheckpoint,
     utils::NOCK_STACK_SIZE_TINY,
-    noun::slab::NockJammer,
 };
+use nockapp::{NockAppError, NounExt};
+use nockchain_libp2p_io::tip5_util::tip5_hash_to_base58;
+use nockvm::noun::D;
 #[cfg(feature = "verifier")]
 use nockvm::noun::T;
 #[cfg(feature = "verifier")]
 use nockvm_macros::tas;
-#[cfg(feature = "verifier")]
-use tokio::sync::Mutex;
-use nockapp::driver::NockAppHandle;
-use nockapp::noun::slab::NounSlab;
-use nockapp::wire::Wire;
-use nockapp::{NockAppError, NounExt};
-use nockchain_libp2p_io::tip5_util::tip5_hash_to_base58;
-use nockvm::noun::D;
 use rustls::crypto::ring::default_provider;
 use tokio::net::TcpListener;
+#[cfg(feature = "verifier")]
+use tokio::sync::Mutex;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::{AbortHandle, Id, JoinSet};
 use tokio::time::sleep;
 use tokio_stream::wrappers::BroadcastStream;
-use nbx_jetpack::log::*;
 use zkvm_jetpack::form::{Belt, PRIME};
 use zkvm_jetpack::noun::noun_ext::NounExt as ZNounExt;
-use futures::stream::StreamExt;
 
 use crate::proto::{server, MiningResultOut};
-use crate::shared::{tls_accept_wrap, MiningData, MiningResult, MiningWire, TimeWriter, TlsServerConfig};
+use crate::shared::{
+    tls_accept_wrap, MiningData, MiningResult, MiningWire, TimeWriter, TlsServerConfig,
+};
 
 #[derive(Clone, Debug, Args)]
 pub struct MiningConfig {
@@ -125,7 +125,7 @@ pub(crate) enum AbortReason {
     NounValidation(&'static str),
     ValidatorFailure(&'static str),
     ProofValidation(String),
-    ProofRejected
+    ProofRejected,
 }
 
 impl AbortReason {
@@ -138,6 +138,7 @@ impl AbortReason {
         }
     }
 
+    #[rustfmt::skip]
     pub fn emit_metrics(&self) {
         match self {
             Self::NounValidation(_) => counter!("nbx_miner_server_abort_count", "mode" => "noun_validation").increment(1),
@@ -185,13 +186,15 @@ pub async fn mining_driver(
 ) -> Result {
     let (reqs_out, reqs_in) = mpsc::channel(1);
 
-    let process_target = |data: MiningResult, client_id: usize, cn: Arc<str>, _, poke_slab: NounSlab| {
-        info!("Found block! client={} cn={cn} miner={}", client_id, data.miner_id);
-        let fut = handle.poke(MiningWire::Mined.to_wire(), poke_slab);
-        async move {
-            fut.await.map(|_| ())
-        }
-    };
+    let process_target =
+        |data: MiningResult, client_id: usize, cn: Arc<str>, _, poke_slab: NounSlab| {
+            info!(
+                "Found block! client={} cn={cn} miner={}",
+                client_id, data.miner_id
+            );
+            let fut = handle.poke(MiningWire::Mined.to_wire(), poke_slab);
+            async move { fut.await.map(|_| ()) }
+        };
 
     let server = mining_server(cfg, listener, reqs_in, process_target);
     let mut server = pin!(server);
@@ -276,7 +279,10 @@ pub async fn mining_driver(
     Ok(())
 }
 
-pub async fn mining_server<F: FnMut(MiningResult, usize, Arc<str>, Arc<MiningData>, NounSlab) -> Fut, Fut: Future<Output = Result>>(
+pub async fn mining_server<
+    F: FnMut(MiningResult, usize, Arc<str>, Arc<MiningData>, NounSlab) -> Fut,
+    Fut: Future<Output = Result>,
+>(
     cfg: MiningConfig,
     listener: TcpListener,
     mut reqs_in: mpsc::Receiver<(Arc<MiningData>, Arc<OnceLock<Instant>>)>,

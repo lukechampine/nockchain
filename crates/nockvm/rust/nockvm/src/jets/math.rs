@@ -210,11 +210,13 @@ pub fn jet_sub(context: &mut Context, subject: Noun) -> Result {
 }
 
 pub mod util {
-    use ibig::UBig;
     use ibig::ops::DivRem;
+    use ibig::UBig;
 
     use crate::mem::NockStack;
-    use crate::noun::{Atom, T, D, Error, DirectAtom, IndirectAtom, Noun, Result, DIRECT_MAX, NO, YES};
+    use crate::noun::{
+        Atom, DirectAtom, Error, IndirectAtom, Noun, Result, D, DIRECT_MAX, NO, T, YES,
+    };
 
     /// Addition
     pub fn add(stack: &mut NockStack, a: Atom, b: Atom) -> Atom {

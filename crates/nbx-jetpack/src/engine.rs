@@ -1,11 +1,10 @@
 use std::cell::RefCell;
+
+#[cfg(feature = "validate-gpu")]
+use {crate::log::*, std::time::Instant};
+
 #[cfg(feature = "gpu")]
 use crate::gpu;
-#[cfg(feature = "validate-gpu")]
-use {
-    std::time::Instant,
-    crate::log::*
-};
 
 thread_local! {
     static IS_IN_EXECUTION: RefCell<bool> = RefCell::new(false);
@@ -99,4 +98,3 @@ pub trait Engine: Sized + Clone {
     #[cfg(feature = "gpu")]
     fn reduce_gpu(self, gpu: gpu::GpuHandle) -> Self::Output;
 }
-

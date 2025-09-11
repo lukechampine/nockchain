@@ -53,9 +53,9 @@ pub type Jet = fn(&mut Context, Noun) -> Result;
  */
 #[derive(Clone, Copy, Debug)]
 pub enum JetErr {
-    Punt,        // Retry with the raw nock
+    Punt,                  // Retry with the raw nock
     PuntJam(&'static str), // Jam subject+formula to given paths, and retry with the raw nock
-    Fail(Error), // Error; do not retry
+    Fail(Error),           // Error; do not retry
 }
 impl std::fmt::Display for JetErr {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {

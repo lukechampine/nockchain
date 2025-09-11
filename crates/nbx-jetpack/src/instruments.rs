@@ -1,5 +1,7 @@
-use std::{sync::{atomic::{AtomicU64, Ordering}, Arc}, time::Instant};
 use std::cell::LazyCell;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
 
 thread_local! {
     static INSTRUMENTS: LazyCell<Arc<Instruments>> = LazyCell::new(Default::default);
@@ -78,4 +80,3 @@ impl<'a> InstrumentProbe<'a> {
         }
     }
 }
-

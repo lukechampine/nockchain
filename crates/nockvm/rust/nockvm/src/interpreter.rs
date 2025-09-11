@@ -786,14 +786,27 @@ pub fn interpret(context: &mut Context, mut subject: Noun, formula: Noun) -> Res
                                             Err(JetErr::PuntJam(dir)) => {
                                                 let dir = std::path::Path::new(dir);
                                                 let res = jam(&mut context.stack, res);
-                                                let _ = std::fs::write(dir.join("subject.jam"), res.as_ne_bytes());
+                                                let _ = std::fs::write(
+                                                    dir.join("subject.jam"),
+                                                    res.as_ne_bytes(),
+                                                );
                                                 let formula = jam(&mut context.stack, formula);
-                                                let _ = std::fs::write(dir.join("formula.jam"), formula.as_ne_bytes());
+                                                let _ = std::fs::write(
+                                                    dir.join("formula.jam"),
+                                                    formula.as_ne_bytes(),
+                                                );
                                                 let path = jam(&mut context.stack, path);
-                                                let _ = std::fs::write(dir.join("jetpath.jam"), path.as_ne_bytes());
-                                                let cold = context.cold.into_noun(&mut context.stack);
+                                                let _ = std::fs::write(
+                                                    dir.join("jetpath.jam"),
+                                                    path.as_ne_bytes(),
+                                                );
+                                                let cold =
+                                                    context.cold.into_noun(&mut context.stack);
                                                 let cold = jam(&mut context.stack, cold);
-                                                let _ = std::fs::write(dir.join("cold.jam"), cold.as_ne_bytes());
+                                                let _ = std::fs::write(
+                                                    dir.join("cold.jam"),
+                                                    cold.as_ne_bytes(),
+                                                );
                                             }
                                             Err(err) => {
                                                 break Err(err.into());

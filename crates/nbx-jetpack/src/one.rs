@@ -1,16 +1,6 @@
 use std::iter::once;
 
-use zkvm_jetpack::form::mary::{Mary, MarySlice};
-use zkvm_jetpack::form::math::poly::{p_decompose, peval};
-use zkvm_jetpack::form::{binv, BPolySlice, Belt, Element, ElementEx, FPolySlice, Felt};
-use zkvm_jetpack::form::{BPolyVec, PolySlice};
-use zkvm_jetpack::hand::handle::{
-    finalize_mary, finalize_poly, new_handle_mut_mary, new_handle_mut_slice,
-};
-use zkvm_jetpack::jets::utils::jet_err;
-use zkvm_jetpack::noun::noun_ext::NounExt;
 use either::Either;
-use ibig::Stack;
 use nockvm::interpreter::Context;
 use nockvm::jets::bits::util as bits;
 use nockvm::jets::list::util as list;
@@ -19,8 +9,14 @@ use nockvm::jets::util::slot;
 use nockvm::jets::Result;
 use nockvm::mem::NockStack;
 use nockvm::noun::{Atom, Cell, IndirectAtom, Noun, D, T};
-
-use zkvm_jetpack::jets::bp_jets::init_bpoly;
+use zkvm_jetpack::form::mary::MarySlice;
+use zkvm_jetpack::form::math::poly::{p_decompose, peval};
+use zkvm_jetpack::form::{binv, BPolyVec, Belt, Element, ElementEx, PolySlice};
+use zkvm_jetpack::hand::handle::{
+    finalize_mary, finalize_poly, new_handle_mut_mary, new_handle_mut_slice,
+};
+use zkvm_jetpack::jets::utils::jet_err;
+use zkvm_jetpack::noun::noun_ext::NounExt;
 
 use super::utils::*;
 
@@ -262,10 +258,7 @@ pub fn weld_step(context: &mut Context, subject: Noun) -> Result {
     }
 
     Ok(finalize_mary(
-        &mut context.stack,
-        mu_step as usize,
-        ma.len as usize,
-        ret,
+        &mut context.stack, mu_step as usize, ma.len as usize, ret,
     ))
 }
 
