@@ -311,8 +311,10 @@ pub fn bpdvr(a: &[Belt], b: &[Belt], q: &mut [Belt], res: &mut [Belt]) {
     let mut deg_r = a.degree();
     let mut q_index = deg_r.saturating_sub(deg_b);
 
+    let b_lead_inv = Belt::one() / b[end_b];
+
     while deg_r >= deg_b {
-        let coeff = r[i] / b[end_b];
+        let coeff = r[i] * b_lead_inv;
         q[q_index as usize] = coeff;
         for k in 0..(deg_b + 1) {
             let index = k as usize;
