@@ -595,25 +595,29 @@ pub fn pdvr<T: ElementEx>(a: &[T], b: &[T], q: &mut [T], res: &mut [T]) {
         q.fill(T::zero());
         res.fill(T::zero());
         return;
-    } else if b.is_zero() {
-        panic!("divide by zero\r");
-    };
+    }
+
+    assert!(!b.is_zero(), "Division by zero polynomial");
 
     q.fill(T::zero());
     res.fill(T::zero());
 
-    let a_end = a.degree() as usize;
+    let deg_a = a.degree();
+    let deg_b = b.degree();
+
+    let a_end = deg_a as usize;
     let mut r = a[0..(a_end + 1)].to_vec();
 
-    let deg_b = b.degree();
+    // Pre-compute the inverse of leading coefficient of b to avoid repeated divisions
+    let b_lead_inv = T::one() / b[deg_b as usize];
 
     let mut i = a_end;
     let end_b = deg_b as usize;
-    let mut deg_r = a.degree();
+    let mut deg_r = deg_a;
     let mut q_index = deg_r.saturating_sub(deg_b);
 
     while deg_r >= deg_b {
-        let coeff = r[i] / b[end_b];
+        let coeff = r[i] * b_lead_inv;
         q[q_index as usize] = coeff;
         for k in 0..(deg_b + 1) {
             let index = k as usize;
