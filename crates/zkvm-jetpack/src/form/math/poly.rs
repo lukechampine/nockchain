@@ -396,6 +396,7 @@ pub fn pscal_<T: ElementEx>(scalar: T, b: &[T]) -> Vec<T> {
 }
 
 #[inline]
+#[rustfmt::skip]
 pub fn p_hadamard_inplace<T: ElementEx, O: Copy + Into<T>>(a: &mut [T], b: &[O]) {
     assert_eq!(
         a.len(),
@@ -423,7 +424,6 @@ pub fn p_hadamard_inplace<T: ElementEx, O: Copy + Into<T>>(a: &mut [T], b: &[O])
                 );
 
                 #[cfg(target_arch = "x86_64")]
-                #[rustfmt::skip]
                 {
                     std::arch::x86_64::_mm_prefetch::<{ std::arch::x86_64::_MM_HINT_ET0 }>(a.as_ptr().add(CHUNK_SIZE * PREFETCH_CHUNKS) as *const _);
                     std::arch::x86_64::_mm_prefetch::<{ std::arch::x86_64::_MM_HINT_ET0 }>(a.as_ptr().add(CHUNK_SIZE * PREFETCH_CHUNKS + CHUNK_SIZE / 2) as *const _);

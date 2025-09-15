@@ -164,7 +164,11 @@ pub fn hash_10(input: [Melt; 10]) -> NounDigest {
     // =.  sponge  (permutation (weld input (slag rate sponge)))
     // (turn (scag digest-length sponge) mont-reduction)
 
-    hash_any::<false, _>(&input)
+    // Custom implementation similar to hash_any::<false, _> but using
+    //  another permute implementation that perform less work as it
+    //  knows that (1) the input only consists of 10 elements and (2)
+    //  only the first 5 elements of the output are used.
+    tip5::permute_fixed(&input)
 }
 
 pub fn hash_noun_varlen(stack: &mut NockStack, sam: Noun) -> Result {
@@ -200,17 +204,45 @@ pub fn hash_varlen_padded<T: Into<Melt> + Copy>(input: &[T]) -> NounDigest {
     // |=  input=(list belt)
     // ^-  (list belt)
     // =/  spo  (new:sponge)
-    let mut spo = new_sponge(true);
+    let mut sponge = new_sponge(true);
 
     // =.  spo  (absorb:spo input)
-    absorb_sponge::<false, T>(&mut spo, input);
+    // Custom implementation similar to absorb_sponge::<false, _> but using other
+    //  permute implementations that perform less work as it knows that (1) only
+    //  the last 6 elements of the output are used of the first q - 1 iterations
+    //  and (2) only the first 10 elements of the output of the last iteration are
+    //  used.
+    let l = input.len();
+    let q = l / RATE;
 
+    let mut input = input.chunks_exact(RATE).map(|i| {
+        <[T; RATE]>::try_from(i)
+            .unwrap()
+            .map(<T as Into<Melt>>::into)
+    });
+
+    // Every iteration overwrites the first 10 elements of the sponge. The customer permute implementation,
+    //  permute_intermediate, only performs the required operations to determine the last 6 elements that
+    //  are actually used in the next step.
+    //
+    // TODO: During the first iteration, we know that the last 6 elements are still set to zero. This can
+    //  be used to prevent 6 pow(7) computations.
+    for _ in 0..q - 1 {
+        sponge[..RATE].copy_from_slice(&input.next().unwrap());
+
+        //   $:permute
+        tip5::permute_intermediate(&mut sponge);
+    }
+
+    // After the last iteration, only the first 5 elements of the sponge remain due to the squeezing
+    //  and truncating into DIGEST_LENGTH. The custom permute implementation, permute_last, only
+    //  performs the required operations to determine the first 5 elements that are actually returned.
+    sponge[..RATE].copy_from_slice(&input.next().unwrap());
+    //   $:permute
     // =^  output  spo
     //   (squeeze:spo)
-    let output = squeeze_sponge(spo);
-
     // (scag digest-length output)
-    output[..DIGEST_LENGTH].try_into().unwrap()
+    tip5::permute_last(sponge)
 }
 
 pub fn hash_varlen<T: Into<Melt> + Copy>(input: &[T]) -> NounDigest {
