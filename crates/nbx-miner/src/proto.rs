@@ -9,6 +9,7 @@ use futures::{Stream, StreamExt};
 use nbx_jetpack::log::*;
 use nockapp::noun::slab::NounSlab;
 use rand::random;
+use sha3::{Digest, Sha3_256};
 use strum::FromRepr;
 use tokio::io::{split, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, Mutex};
@@ -18,9 +19,10 @@ use zkvm_jetpack::form::Belt;
 use crate::metrics::{counter, gauge, histogram};
 use crate::shared;
 
-pub const PROTOCOL: u32 = 5;
+pub const PROTOCOL: u32 = u32::MAX - 6;
 pub const NAME_MAX_LENGTH: usize = 16;
 pub const RECENTLY_EXPIRED_DURATION: Duration = Duration::from_secs(20);
+pub const PROTO_POW_DIFFICULTY: u32 = 18;
 
 pub fn name_valid(client_name: &str) -> bool {
     client_name.len() <= NAME_MAX_LENGTH
@@ -29,10 +31,36 @@ pub fn name_valid(client_name: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
-#[derive(Encode, Decode, Clone, Debug)]
+fn pow_valid(work: u32, nonce: u32, pow_difficulty: u32) -> bool {
+    let hash = Sha3_256::digest((((work as u64) << 32) | (nonce as u64)).to_le_bytes());
+    let mut leading_zeros = 0;
+    for e in hash {
+        leading_zeros += e.leading_zeros();
+        if e != 0 {
+            break;
+        }
+    }
+    leading_zeros >= pow_difficulty
+}
+
+#[derive(Encode, Decode, Clone, Copy, Debug)]
 pub struct Hello {
     protocol: u32,
     nonce: u32,
+}
+
+#[derive(Encode, Decode, Clone, Copy, Debug)]
+pub struct HelloResp {
+    protocol: u32,
+    nonce_resp: u32,
+    pow_nonce: u32,
+    pow_difficulty: u32,
+}
+
+#[derive(Encode, Decode, Clone, Debug)]
+pub struct PostHello {
+    client_name: Arc<str>,
+    proof: u32,
 }
 
 #[derive(Encode, Decode, Clone, Debug)]
@@ -139,12 +167,21 @@ async fn binrecv<T: Decode<()>>(
     target_name: Arc<str>,
     msg_type: &'static str,
 ) -> io::Result<T> {
+    // 16MB sanity limit
+    binrecv_limited::<T, 0x1000000>(stream, target_cn, target_name, msg_type).await
+}
+
+async fn binrecv_limited<T: Decode<()>, const MAX_READ: u32>(
+    mut stream: impl AsyncRead + Unpin,
+    target_cn: Arc<str>,
+    target_name: Arc<str>,
+    msg_type: &'static str,
+) -> io::Result<T> {
     let len = stream.read_u32_le().await?;
 
     let t = Instant::now();
 
-    // 16MB sanity limit
-    if len > 0x1000000 {
+    if len > MAX_READ {
         return Err(io::ErrorKind::OutOfMemory.into());
     }
 
@@ -168,7 +205,7 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
     stream: S,
     server_id: usize,
     server_name: &str,
-    client_name: String,
+    client_name: Arc<str>,
     mining_out: &mut mpsc::Receiver<MiningResultIn>,
     mining_data: mpsc::Sender<MiningDataOut>,
     ack: mpsc::Sender<MiningAckOut>,
@@ -196,20 +233,31 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
         },
     )
     .await?;
-    let resp: Hello = binrecv(&mut read, server_cn.clone(), server_name.clone(), "hello").await?;
+    let resp: HelloResp =
+        binrecv(&mut read, server_cn.clone(), server_name.clone(), "hello").await?;
     if resp.protocol != PROTOCOL {
         return Err(io::ErrorKind::Unsupported.into());
     }
-    if resp.nonce != nonce + 1 {
+    if resp.nonce_resp != nonce + 1 {
         return Err(io::ErrorKind::BrokenPipe.into());
     }
+
+    let start = Instant::now();
+    let proof = (0..u32::MAX)
+        .filter(|i| pow_valid(*i, resp.pow_nonce, resp.pow_difficulty))
+        .next()
+        .ok_or(io::ErrorKind::InvalidInput)?;
+    debug!(
+        "Computed PoW in {}ms (proof = {proof})",
+        start.elapsed().as_millis()
+    );
 
     binsend(
         &mut write,
         server_cn.clone(),
         server_name.clone(),
-        "client_name",
-        client_name,
+        "post_hello",
+        PostHello { client_name, proof },
     )
     .await?;
 
@@ -382,17 +430,32 @@ pub async fn server<S: AsyncRead + AsyncWrite>(
 
     let (mut read, mut write) = split(stream);
 
-    // Initial handshake
-    let mut req: Hello = binrecv(&mut read, client_cn.clone(), "".into(), "hello").await?;
+    // Initial handshake. We only have 8 bytes in the hello packet, but then there's extra padding
+    let req: Hello =
+        binrecv_limited::<_, 16>(&mut read, client_cn.clone(), "".into(), "hello").await?;
     if req.protocol != PROTOCOL {
         return Err(io::ErrorKind::Unsupported.into());
     }
-    req.nonce += 1;
+    let resp = HelloResp {
+        protocol: PROTOCOL,
+        nonce_resp: req.nonce + 1,
+        pow_nonce: random::<u32>(),
+        pow_difficulty: PROTO_POW_DIFFICULTY,
+    };
 
-    binsend(&mut write, client_cn.clone(), "".into(), "hello", req).await?;
+    binsend(&mut write, client_cn.clone(), "".into(), "hello", resp).await?;
 
-    let client_name: String =
-        binrecv(&mut read, client_cn.clone(), "".into(), "client_name").await?;
+    let PostHello { proof, client_name } = binrecv_limited::<_, { NAME_MAX_LENGTH as u32 + 16 }>(
+        &mut read,
+        client_cn.clone(),
+        "".into(),
+        "post_hello",
+    )
+    .await?;
+
+    if !pow_valid(proof, resp.pow_nonce, resp.pow_difficulty) {
+        return Err(io::ErrorKind::InvalidData.into());
+    }
 
     if !name_valid(&client_name) {
         return Err(io::ErrorKind::InvalidData.into());

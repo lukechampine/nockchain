@@ -57,6 +57,7 @@ metrics.workspace = true
 metrics-exporter-prometheus = { workspace = true, optional = true }
 metrics-util = { workspace = true, optional = true }
 ibig.workspace = true
+sha3.workspace = true
 
 zkvm-jetpack.workspace = true
 nbx-jetpack.workspace = true

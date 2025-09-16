@@ -32,6 +32,7 @@ pub fn client_loops(
 ) -> (JoinSet<()>, Vec<ServerExtras>) {
     let mut client_tasks = JoinSet::new();
     let mut server_extras = vec![];
+    let client_name = Arc::<str>::from(&(**client_name));
 
     for (i, a) in miner_connect.into_iter().enumerate() {
         let (tx, rx) = mpsc::channel(64);
@@ -60,7 +61,7 @@ async fn client_loop(
     addr: SocketAddr,
     tls: Option<TlsClientConfig>,
     server_id: usize,
-    client_name: String,
+    client_name: Arc<str>,
     live: Arc<AtomicBool>,
     mut results: mpsc::Receiver<MiningResultIn>,
     data: mpsc::Sender<MiningDataOut>,

@@ -9,7 +9,7 @@ static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "nbx-miner")]
-pub struct Cli {
+pub struct ProxyCli {
     #[command(flatten)]
     proxy: ProxyConfig,
     #[command(flatten)]
@@ -21,7 +21,7 @@ pub struct Cli {
 
 #[tokio::main]
 async fn main() {
-    let cli = Cli::parse();
+    let cli = ProxyCli::parse();
 
     #[cfg(feature = "prom-exporter")]
     metrics_exporter_prometheus::PrometheusBuilder::new()

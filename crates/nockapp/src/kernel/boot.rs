@@ -51,10 +51,10 @@ pub struct TraceOpts {
     #[arg(long = "trace", help = "Make a Sword trace in json or tracing mode")]
     pub mode: Option<TraceMode>,
 
-    #[arg(long, requires = "trace")]
+    #[arg(long, requires = "mode")]
     pub keyword_filter: Option<String>,
 
-    #[arg(long, requires = "trace")]
+    #[arg(long, requires = "mode")]
     pub interval_filter: Option<usize>,
 }
 

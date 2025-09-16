@@ -14,7 +14,7 @@ static ALLOC: tracy_client::ProfiledAllocator<tikv_jemallocator::Jemalloc> =
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "nbx-miner")]
-pub struct Cli {
+pub struct MinerCli {
     #[command(flatten)]
     client: ClientConfig,
     #[command(flatten)]
@@ -26,7 +26,7 @@ pub struct Cli {
 
 #[tokio::main]
 async fn main() {
-    let cli = Cli::parse();
+    let cli = MinerCli::parse();
     if cli.client.client_name.is_none() {
         panic!("Client name must be set");
     }
