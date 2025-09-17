@@ -409,5 +409,10 @@ pub async fn run_proxy(cfg: ProxyConfig) {
         }
     };
 
-    let _ = tokio::join!(server, main_iter);
+    tokio::select! {
+        r = server => {
+            error!("Server finished: {r:?}");
+        },
+        _ = main_iter => unreachable!(),
+    }
 }

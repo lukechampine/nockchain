@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::future::Future;
+use std::io;
 use std::net::{Ipv6Addr, SocketAddr};
 use std::pin::pin;
 use std::sync::{Arc, OnceLock};
@@ -10,7 +11,7 @@ use futures::stream::StreamExt;
 use jsonwebtoken::DecodingKey;
 #[cfg(feature = "verifier")]
 use kernels::verifier::KERNEL;
-use metrics::counter;
+use metrics::{counter, gauge};
 use nbx_jetpack::log::*;
 use nockapp::driver::NockAppHandle;
 use nockapp::noun::slab::NounSlab;
@@ -333,11 +334,26 @@ pub async fn mining_server<
     let accept_loop = async move {
         let mut handshake_set = JoinSet::new();
         let mut err_cnt = 0;
+        let mut last_iter = Instant::now();
         loop {
             match listener.accept().await {
                 Err(e) => {
-                    // TODO: ignore errors causable by clients
-                    err_cnt += 1;
+                    // Client-causable errors.
+                    if matches!(
+                        e.kind(),
+                        io::ErrorKind::ConnectionRefused
+                            | io::ErrorKind::ConnectionAborted
+                            | io::ErrorKind::ConnectionReset
+                    ) {
+                        continue;
+                    }
+                    // If we keep entering this state, then keep counting up. However, this
+                    // shouldn't happen.
+                    if last_iter.elapsed() < Duration::from_secs(1) {
+                        err_cnt += 1;
+                    } else {
+                        err_cnt = 1;
+                    }
                     if err_cnt > 32 {
                         error!("Accept error {e:?}. Too many accept errors in a row!");
                         return Err(e);
@@ -392,6 +408,8 @@ pub async fn mining_server<
                     });
                 }
             }
+            last_iter = Instant::now();
+            gauge!("nbx_miner_server_accept_errors_cnt").set(err_cnt as f64);
         }
     };
     client_set.spawn(accept_loop);
@@ -456,7 +474,7 @@ pub async fn mining_server<
                     error!("client_id={client_id} died ({r:?})");
                 } else {
                     error!("Accept loop removed");
-                    break;
+                    break Err(NockAppError::IoError(io::ErrorKind::BrokenPipe.into()));
                 }
             }
             data = rx.recv() => {
@@ -584,7 +602,7 @@ pub async fn mining_server<
                 }
             }
             d = reqs_in.recv() => {
-                let Some((new_mining_data, lock)) = d else { break; };
+                let Some((new_mining_data, lock)) = d else { break Ok(()); };
                 debug!("received new candidate block header: {:?}",
                     tip5_hash_to_base58(*unsafe { new_mining_data.block_header.root() })
                     .expect("Failed to convert header to Base58")
@@ -596,6 +614,4 @@ pub async fn mining_server<
             }
         }
     }
-
-    Ok(())
 }
