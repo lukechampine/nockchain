@@ -1,5 +1,3 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use either::Either::*;
 use nockvm::interpreter::Context;
 use nockvm::jets::hot::{HotEntry, K_138};
@@ -34,18 +32,15 @@ pub mod instruments;
 pub use eight::compute_table_polys;
 use eight::*;
 use five::*;
-use four::*;
 use hoon::*;
 pub use one::snag_as_poly_mary;
 use one::*;
-use prover_compute::{build as compute_build, *};
+use prover_compute::build as compute_build;
 use prover_memory::{build_v0_v1 as memory_build_v0_v1, build_v2 as memory_build_v2, *};
-use seven::*;
 use six::*;
 use three::*;
 use two::*;
 pub use two::{bpoly_to_fpoly, mp_substitute_ultra_impl, new_fpoly};
-use zkvm_jetpack::jets::utils::jet_err;
 use zoon::*;
 
 #[cfg(not(feature = "stealthy"))]

@@ -131,7 +131,7 @@ pub fn interpolate_table(table: MarySlice, domain_len: u32) -> Mary {
     out_trace
 }
 
-pub fn bpoly_to_fpoly<'a>(bp: BPolySlice<'a>) -> FPolyVec {
+pub fn bpoly_to_fpoly(bp: BPolySlice<'_>) -> FPolyVec {
     // ~/  %bpoly-to-fpoly
     // |=  bp=bpoly
     // ^-  fpoly
@@ -235,14 +235,6 @@ fn copy_slice_extend_zero<T: Copy>(a: PolySlice<T>, n: usize, zero: T) -> PolyVe
             .chain(repeat_n(zero, n - a.0.len()))
             .collect(),
     )
-}
-
-fn alloc_slice<'a, T: Copy>(num: usize) -> PolyVec<T> {
-    PolyVec(unsafe {
-        let mut ret = Vec::with_capacity(num);
-        ret.set_len(num);
-        ret
-    })
 }
 
 pub fn zeroextend_slice<'a, T: Copy>(mut a: PolyVec<T>, n: usize, zero: T) -> PolyVec<T> {
@@ -509,8 +501,8 @@ pub fn mp_substitute_ultra(stack: &mut NockStack, inp: Noun) -> Result {
             let (res, res_poly): (IndirectAtom, &mut [Belt]) =
                 new_handle_mut_slice(stack, Some(v.len()));
             res_poly.copy_from_slice(v);
-            let res_cell = finalize_poly(stack, Some(v.len()), res);
-            res_cell
+
+            finalize_poly(stack, Some(v.len()), res)
         })
         .collect::<Vec<_>>();
     ret.push(D(0));
@@ -660,9 +652,7 @@ pub fn fpmul_fast<'a>(fp: FPolyVec, fq: FPolyVec) -> FPolyVec {
     // fmul
     a.0.truncate(b.0.len());
     b.0.truncate(a.0.len());
-    a.0.iter_mut()
-        .zip(b.0.into_iter())
-        .for_each(|(a, b)| *a = fmul_(a, &b));
+    a.0.iter_mut().zip(b.0).for_each(|(a, b)| *a = fmul_(a, &b));
     fp_ifft(a).unwrap()
 }
 
@@ -709,7 +699,7 @@ pub fn fdegree<T: Element + Copy + PartialEq>(p: PolySlice<T>) -> usize {
 }
 
 // ::  con-mon: split p(x)!=0 uniquely into c*f(x) where c is constant f monic
-pub fn con_mon(mut fp: FPolyVec) -> (Felt, FPolyVec) {
+pub fn con_mon(fp: FPolyVec) -> (Felt, FPolyVec) {
     // |=  fp=fpoly
     // ^-  [felt fpoly]
     // ~+
@@ -867,7 +857,7 @@ where
                     let rnd = chals.0[idx];
                     // (bpscal (bpow rnd exp) acc)
                     let powed = bpow(rnd.0, exp);
-                    muls.scal = muls.scal * E::from_u64(powed);
+                    muls.scal *= E::from_u64(powed);
                 }
                 // %dyn
                 MegaTyp::Dyn => {
@@ -875,7 +865,7 @@ where
                     let _dyn = dyns.0[idx];
                     // (bpscal (bpow dyn exp) acc)
                     let powed = bpow(_dyn.0, exp);
-                    muls.scal = muls.scal * E::from_u64(powed);
+                    muls.scal *= E::from_u64(powed);
                 }
                 // %con
                 MegaTyp::Con => {
@@ -968,22 +958,6 @@ fn hensel_lift_inverse<'a>(p: FPolySlice, level: usize) -> FPolyVec {
     inv
 }
 
-// ::  pmul-by-x-to: multiply by x to the power l
-fn pmul_by_x_to<'a>(stack: &mut NockStack, l: usize, p: FPolySlice) -> FPolyVec {
-    jam_to(stack, p.0, "pbxt-p");
-    jam_to2(stack, D(l as u64), "pbxt-l");
-    // |=  [l=@ p=fpoly]
-    // ^-  fpoly
-    // %.  p
-    // ~(weld fop (init-fpoly (reap l (lift 0))))
-    let mut out = alloc_slice(l + p.0.len());
-    let (a, b) = out.0.split_at_mut(l);
-    a.iter_mut().for_each(|v| *v = Felt::zero());
-    b.copy_from_slice(p.0);
-    jam_to(stack, &out.0, "pbxt-r");
-    out
-}
-
 // ::  +fpmul-naive: high school polynomial multiplication
 fn fpmul_naive<'a>(fq: FPolyVec, fp: FPolyVec) -> FPolyVec {
     // ~/  %fpmul-naive
@@ -1046,7 +1020,7 @@ fn fpmul_naive<'a>(fq: FPolyVec, fp: FPolyVec) -> FPolyVec {
         v[0] = dot;
     }
     if prod.0.is_empty() {
-        return new_fpoly(&mut [Felt::zero()]);
+        new_fpoly(&mut [Felt::zero()])
     } else {
         // NOTE: flop part
         //prod.0.reverse();

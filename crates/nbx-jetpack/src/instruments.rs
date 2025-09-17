@@ -60,7 +60,7 @@ impl Instruments {
     }
 }
 
-impl<'a> Drop for InstrumentProbe<'a> {
+impl Drop for InstrumentProbe<'_> {
     fn drop(&mut self) {
         let ms = self.instant.elapsed().as_millis() as u64;
         self.target.fetch_add(ms, Ordering::Relaxed);

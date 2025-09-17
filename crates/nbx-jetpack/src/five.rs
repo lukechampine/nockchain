@@ -8,8 +8,6 @@ use zkvm_jetpack::hand::structs::HoonList;
 use zkvm_jetpack::jets::utils::jet_err;
 use zkvm_jetpack::noun::noun_ext::NounExt;
 
-use super::utils::DP;
-
 // +$  pelt-stack
 //   $:  alf=pelt
 //       alf-inv=pelt

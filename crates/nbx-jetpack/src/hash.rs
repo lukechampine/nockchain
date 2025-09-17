@@ -126,7 +126,7 @@ pub struct ReduceChunkSlice<'a> {
     pub out: &'a mut [Melt],
 }
 
-impl<'a> ReduceChunkSlice<'a> {
+impl ReduceChunkSlice<'_> {
     #[tracing::instrument(skip_all)]
     fn reduce(self, inp_start: usize, inp: &[Melt]) {
         use rayon::prelude::*;
@@ -570,9 +570,8 @@ impl HashEngine {
         let arr = stage1.push_fixed(len, hash);
 
         let stage = self.stages.get_mut(stage).unwrap();
-        let ret = stage.push_fixed(step, arr);
 
-        ret
+        stage.push_fixed(step, arr)
     }
 
     pub fn push_mary_prehashed<T: Into<Melt> + Copy>(
@@ -607,9 +606,8 @@ impl HashEngine {
         let arr = stage1.push_fixed(len, hash);
 
         let stage = self.stages.get_mut(stage).unwrap();
-        let ret = stage.push_fixed(step, arr);
 
-        ret
+        stage.push_fixed(step, arr)
     }
 
     pub fn push_hash<T: Into<Melt> + Copy>(&mut self, stage: usize, h: NounDigest<T>) -> usize {

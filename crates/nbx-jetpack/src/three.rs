@@ -111,10 +111,9 @@ pub fn squeeze_sponge(spo: [Melt; tip5::STATE_SIZE]) -> [Melt; RATE] {
     // =*  rng  +.$
     // ::  squeeze out the full rate and bring out of montgomery space
     // =/  output  (turn (scag rate sponge) mont-reduction)
-    let ret = <[Melt; RATE]>::try_from(&spo[..RATE]).unwrap();
     // NOTE: we do not permute the sponge, because that's inefficient
     // =.  sponge  $:permute
-    ret
+    <[Melt; RATE]>::try_from(&spo[..RATE]).unwrap()
 }
 
 pub fn hash_ten_cell(stack: &mut NockStack, sam: Noun) -> Result {
@@ -577,7 +576,7 @@ pub fn build_merk_heap_impl<T: ElementEx>(
     Ok((height, merk_heap))
 }
 
-fn hashable_poly<'a, T: ElementEx>(p: PolySlice<'a, T>) -> MarySlice<'a> {
+fn hashable_poly<T: ElementEx>(p: PolySlice<'_, T>) -> MarySlice<'_> {
     let dat =
         unsafe { core::slice::from_raw_parts(p.0.as_ptr() as *const u64, p.0.len() * T::len()) };
     MarySlice {

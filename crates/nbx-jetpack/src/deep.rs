@@ -106,8 +106,8 @@ fn fpmul_fast_cached<'a>(
     twiddles: &[impl AsRef<[Felt]>],
     b: FPolyVec,
 ) -> FPolyVec {
-    let mut b = PolyVec(p_ntt_twiddled(b.0, &twiddles));
-    p_hadamard_inplace(&mut b.0, &a.0);
+    let mut b = PolyVec(p_ntt_twiddled(b.0, twiddles));
+    p_hadamard_inplace(&mut b.0, a.0);
     let ntt = p_ntt_twiddled(b.0, ifft_twiddles);
     PolyVec(ntt)
 }
@@ -200,6 +200,6 @@ impl<'a> DeepEngine<'a> {
         self.divisor_batches
             .into_par_iter()
             .map(|batch| batch.weighted_division())
-            .reduce(|| zero_fpoly(), |acc, result| fpadd(acc, (&result).into()))
+            .reduce(zero_fpoly, |acc, result| fpadd(acc, (&result).into()))
     }
 }

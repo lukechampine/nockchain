@@ -73,7 +73,7 @@ pub fn snag_mary(stack: &mut NockStack, ma: MarySlice, i: usize) -> Atom {
     }
 }
 
-pub fn snag_as_poly_mary<'a, T: Element>(ma: MarySlice<'a>, i: usize) -> PolySlice<'a, T> {
+pub fn snag_as_poly_mary<T: Element>(ma: MarySlice<'_>, i: usize) -> PolySlice<'_, T> {
     // ~/  %snag-as-fpoly
     // |=  i=@
     // ^-  fpoly
@@ -115,8 +115,7 @@ fn lift_elt(stack: &mut NockStack, step: usize, a: Noun) -> Result {
     if step == 1 {
         Ok(a)
     } else {
-        let (res, res_poly): (IndirectAtom, &mut [Belt]) =
-            new_handle_mut_slice(stack, Some(step as usize));
+        let (res, res_poly): (IndirectAtom, &mut [Belt]) = new_handle_mut_slice(stack, Some(step));
         res_poly[0] = Belt(a.as_atom()?.as_u64()?);
         res_poly[1..].iter_mut().for_each(|v| *v = Belt(0));
 

@@ -47,7 +47,7 @@ pub fn compute_deep(stack: &mut NockStack, inp: Noun) -> Result {
     // Convert nouns to appropriate types
     let trace_polys = HoonList::try_from(trace_polys)?
         .into_iter()
-        .map(|x| MarySlice::try_from(x))
+        .map(MarySlice::try_from)
         .collect::<core::result::Result<Vec<_>, _>>()
         .or_else(|_| jet_err())?;
 
@@ -112,7 +112,7 @@ pub fn compute_deep(stack: &mut NockStack, inp: Noun) -> Result {
             let omicron = omicrons.0[i];
 
             // Omicron batch: divisor = (id - omicron*point)
-            let omicron_point = fmul_(&omicron, &point);
+            let omicron_point = fmul_(&omicron, point);
             let mut omicron_batch = DivisorBatch {
                 polys: Vec::with_capacity(p.len as usize),
                 openings: Vec::with_capacity(p.len as usize),
@@ -478,7 +478,7 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
                     None => row_acc = Some(processed_constraints.0),
                 },
                 _ => {
-                    let dividend: PolyVec<Elem> = PolyVec(dividend.0.to_vec()).into();
+                    let dividend: PolyVec<Elem> = PolyVec(dividend.0.to_vec());
                     let result = pdiv(&processed_constraints.0, &dividend.0);
                     padd_in_place(&mut acc.0, &result);
                 }
@@ -843,7 +843,7 @@ pub fn compute_lde<T: ElementEx>(
 ) where
     Belt: Into<T>,
 {
-    assert_eq!(out.step, fri_domain_len as u32);
+    assert_eq!(out.step, { fri_domain_len });
     assert_eq!(out.len, num_cols as u32);
     // =/  fps=(list mary)
     //   %+  turn  table-polys

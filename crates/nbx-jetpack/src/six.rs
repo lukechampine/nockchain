@@ -46,8 +46,8 @@ impl FriInput {
         // ?:  &((gth len expansion-fac) (lth (mul 4 num-spot-checks) len))
         while len > self.expansion_fac && (4 * self.num_spot_checks) < len {
             //   $(num +(num), len (div len folding-deg))
-            num = num + 1;
-            len = len / self.folding_deg;
+            num += 1;
+            len /= self.folding_deg;
         }
         // (max 1 (dec num))
         if num > 1 {
@@ -317,7 +317,7 @@ pub fn prove_commit_impl(
             //   |=  i=@
             for i in 0..fri.folding_deg {
                 //   =/  idx  (add (mul i num) k)
-                let idx = (i as usize) * num + (k as usize);
+                let idx = (i as usize) * num + k;
                 //   (~(snag fop codeword) idx)
                 cosets.dat.extend(codeword.0[idx].0.iter().map(|v| v.0));
             }
@@ -358,7 +358,7 @@ pub fn prove_commit_impl(
             let evaled = peval(PolySlice(&icoset), eval_point);
             codeword.0[i] = evaled;
 
-            eval_point = eval_point * omega_inv;
+            eval_point *= omega_inv;
         }
         // ::
         // :*  new-codeword

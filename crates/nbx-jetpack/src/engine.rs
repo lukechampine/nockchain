@@ -7,7 +7,7 @@ use {crate::log::*, std::time::Instant};
 use crate::gpu;
 
 thread_local! {
-    static IS_IN_EXECUTION: RefCell<bool> = RefCell::new(false);
+    static IS_IN_EXECUTION: RefCell<bool> = const { RefCell::new(false) };
 }
 
 pub trait Engine: Sized + Clone {
