@@ -33,9 +33,6 @@ pub struct ProxyConfig {
         value_delimiter = ','
     )]
     pub miner_connect: Vec<SocketAddr>,
-    #[cfg(not(feature = "force-tls"))]
-    #[arg(long, help = "Use TLS for the miner")]
-    miner_connect_tls: bool,
     #[arg(long, help = "What's the client name to send in the protocol")]
     pub client_name: String,
     #[arg(long, help = "Whether to forward non-block proofs upstream")]
@@ -127,19 +124,8 @@ pub async fn run_proxy(cfg: ProxyConfig) {
         .await
         .expect("Unable to bind proxy listener");
 
-    #[cfg(not(feature = "force-tls"))]
-    let tls = if cfg.miner_connect_tls {
-        let _ = default_provider().install_default();
-        Some(Default::default())
-    } else {
-        None
-    };
-
-    #[cfg(feature = "force-tls")]
-    let tls = {
-        let _ = default_provider().install_default();
-        Some(Default::default())
-    };
+    let _ = default_provider().install_default();
+    let tls = Default::default();
 
     let (mining_tx, mut mining_rx) = mpsc::channel(cfg.miner_connect.len());
     let (ack_tx, mut ack_rx) = mpsc::channel(cfg.miner_connect.len());
@@ -182,89 +168,92 @@ pub async fn run_proxy(cfg: ProxyConfig) {
     let miss_metrics = Arc::new(SyncMutex::new(miss_metrics));
 
     // Any pokes that passed server's verification steps.
-    let process_target =
-        |mut data: MiningResult, _, cn: Arc<str>, in_data: Arc<MiningData>, poke_slab: NounSlab| {
-            let data_info = server_id_map
-                .lock()
-                .unwrap()
-                .get(&Arc::as_ptr(&in_data))
-                .map(|(_, v)| (v.clone(), server_extras[v.1].mining_res.clone()));
-            let diff_tracker = diff_tracker.clone();
-            let hit_metrics = hit_metrics.clone();
-            let miss_metrics = miss_metrics.clone();
-            async move {
-                let Some(((data_id, server_id, session_id, parent_target), mining_res)) = data_info
-                else {
-                    debug!("Unable to grab data info (data expired?)");
-                    // The data had expired before this function being called.
-                    return Ok(());
-                };
+    let process_target = |mut data: MiningResult,
+                          _,
+                          sub: Arc<str>,
+                          in_data: Arc<MiningData>,
+                          poke_slab: NounSlab| {
+        let data_info = server_id_map
+            .lock()
+            .unwrap()
+            .get(&Arc::as_ptr(&in_data))
+            .map(|(_, v)| (v.clone(), server_extras[v.1].mining_res.clone()));
+        let diff_tracker = diff_tracker.clone();
+        let hit_metrics = hit_metrics.clone();
+        let miss_metrics = miss_metrics.clone();
+        async move {
+            let Some(((data_id, server_id, session_id, parent_target), mining_res)) = data_info
+            else {
+                debug!("Unable to grab data info (data expired?)");
+                // The data had expired before this function being called.
+                return Ok(());
+            };
 
-                let proxy_target = unsafe { in_data.target.root() };
-                let proxy_target = parse_bn(*proxy_target);
-                let proxy_diff = target_to_difficulty(proxy_target);
-                let Ok(proxy_diff) = u64::try_from(&proxy_diff) else {
-                    error!("Too high of difficulty: {proxy_diff}");
-                    return Err(NockAppError::PokeFailed);
-                };
+            let proxy_target = unsafe { in_data.target.root() };
+            let proxy_target = parse_bn(*proxy_target);
+            let proxy_diff = target_to_difficulty(proxy_target);
+            let Ok(proxy_diff) = u64::try_from(&proxy_diff) else {
+                error!("Too high of difficulty: {proxy_diff}");
+                return Err(NockAppError::PokeFailed);
+            };
 
-                {
-                    diff_tracker.lock().unwrap().measure_and_update(proxy_diff);
-                }
-
-                counter!("nbx_miner_proxy_global_accumulated_work").increment(proxy_diff);
-                counter!(
-                    "nbx_miner_proxy_accumulated_work",
-                    "client_cn" => cn,
-                    "server_id" => server_id.to_string(),
-                )
-                .increment(proxy_diff);
-
-                let poke = unsafe { poke_slab.root() };
-                let [_, _, _, dig, _, _] = poke.uncell()?;
-                let dig = dig.as_atom()?;
-                #[cfg(target_endian = "little")]
-                let dig = UBig::from_le_bytes(&dig.as_ne_bytes());
-                #[cfg(target_endian = "big")]
-                let dig = UBig::from_be_bytes(&dig.as_ne_bytes());
-
-                // Local server has verified that we hit the pool target. Now, we need to verify
-                // whether we hit the parent target.
-                data.target_hit = dig <= parent_target;
-                if !data.target_hit {
-                    miss_metrics.lock().unwrap().measure(dig);
-                    if !forward_non_block {
-                        return Ok(());
-                    }
-                    data.poke = None;
-                    data.effect = None;
-                } else {
-                    hit_metrics.lock().unwrap().measure(dig);
-                }
-
-                gauge!(
-                    "nbx_miner_proxy_channel_mining_res_capacity",
-                    "server_id" => server_id.to_string(),
-                )
-                .set(mining_res.capacity() as f64);
-
-                if let Err(e) = mining_res.try_send(MiningResultIn {
-                    data_id,
-                    session_id,
-                    data,
-                }) {
-                    counter!(
-                        "nbx_miner_proxy_send_mining_res_fail_total",
-                        "server_id" => server_id.to_string(),
-                    )
-                    .increment(1);
-                    error!("Unable to send mining result to {server_id}: {e:?}");
-                    return Err(NockAppError::PokeFailed);
-                }
-
-                Ok(())
+            {
+                diff_tracker.lock().unwrap().measure_and_update(proxy_diff);
             }
-        };
+
+            counter!("nbx_miner_proxy_global_accumulated_work").increment(proxy_diff);
+            counter!(
+                "nbx_miner_proxy_accumulated_work",
+                "client_sub" => sub,
+                "server_id" => server_id.to_string(),
+            )
+            .increment(proxy_diff);
+
+            let poke = unsafe { poke_slab.root() };
+            let [_, _, _, dig, _, _] = poke.uncell()?;
+            let dig = dig.as_atom()?;
+            #[cfg(target_endian = "little")]
+            let dig = UBig::from_le_bytes(&dig.as_ne_bytes());
+            #[cfg(target_endian = "big")]
+            let dig = UBig::from_be_bytes(&dig.as_ne_bytes());
+
+            // Local server has verified that we hit the pool target. Now, we need to verify
+            // whether we hit the parent target.
+            data.target_hit = dig <= parent_target;
+            if !data.target_hit {
+                miss_metrics.lock().unwrap().measure(dig);
+                if !forward_non_block {
+                    return Ok(());
+                }
+                data.poke = None;
+                data.effect = None;
+            } else {
+                hit_metrics.lock().unwrap().measure(dig);
+            }
+
+            gauge!(
+                "nbx_miner_proxy_channel_mining_res_capacity",
+                "server_id" => server_id.to_string(),
+            )
+            .set(mining_res.capacity() as f64);
+
+            if let Err(e) = mining_res.try_send(MiningResultIn {
+                data_id,
+                session_id,
+                data,
+            }) {
+                counter!(
+                    "nbx_miner_proxy_send_mining_res_fail_total",
+                    "server_id" => server_id.to_string(),
+                )
+                .increment(1);
+                error!("Unable to send mining result to {server_id}: {e:?}");
+                return Err(NockAppError::PokeFailed);
+            }
+
+            Ok(())
+        }
+    };
 
     let (reqs_out, reqs_in) = mpsc::channel(1);
     let server = mining_server(cfg.server, server_listener, reqs_in, process_target);

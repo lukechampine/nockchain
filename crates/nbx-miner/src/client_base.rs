@@ -15,7 +15,7 @@ use tokio::time::sleep;
 
 use crate::metrics::gauge;
 use crate::proto::{self, MiningAckOut, MiningDataOut, MiningResultIn};
-use crate::shared::{tls_connect_wrap, TlsClientConfig};
+use crate::shared::{tls_connect, TlsClientConfig};
 
 pub struct ServerExtras {
     pub mining_res: mpsc::Sender<MiningResultIn>,
@@ -24,7 +24,7 @@ pub struct ServerExtras {
 
 pub fn client_loops(
     miner_connect: Vec<SocketAddr>,
-    tls: Option<TlsClientConfig>,
+    tls: TlsClientConfig,
     client_name: &String,
     mining_tx: mpsc::Sender<MiningDataOut>,
     ack_tx: mpsc::Sender<MiningAckOut>,
@@ -33,6 +33,7 @@ pub fn client_loops(
     let mut client_tasks = JoinSet::new();
     let mut server_extras = vec![];
     let client_name = Arc::<str>::from(&(**client_name));
+    let jwt = std::env::var("NBX_AUTH_JWT").ok().map(Arc::<str>::from);
 
     for (i, a) in miner_connect.into_iter().enumerate() {
         let (tx, rx) = mpsc::channel(64);
@@ -42,6 +43,7 @@ pub fn client_loops(
             tls,
             i,
             client_name.clone(),
+            jwt.clone(),
             live.clone(),
             rx,
             mining_tx.clone(),
@@ -59,9 +61,10 @@ pub fn client_loops(
 
 async fn client_loop(
     addr: SocketAddr,
-    tls: Option<TlsClientConfig>,
+    tls: TlsClientConfig,
     server_id: usize,
     client_name: Arc<str>,
+    jwt: Option<Arc<str>>,
     live: Arc<AtomicBool>,
     mut results: mpsc::Receiver<MiningResultIn>,
     data: mpsc::Sender<MiningDataOut>,
@@ -71,11 +74,25 @@ async fn client_loop(
     let mut err_cnt = 0;
     let server_name = addr.to_string();
     for i in 1.. {
-        let stream = match tls_connect_wrap(TcpStream::connect(addr), tls).await {
+        let stream = match TcpStream::connect(addr).await {
             Ok(stream) => stream,
             Err(e) => {
                 let sleep_secs = 1 << err_cnt;
                 error!("Unable to connect to {addr}: {e:?}. Sleeping for {sleep_secs} seconds");
+                sleep(Duration::from_secs(sleep_secs)).await;
+                err_cnt = core::cmp::min(err_cnt + 1, 5);
+                gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string()).set(err_cnt as f64);
+                continue;
+            }
+        };
+
+        let stream = match tls_connect(stream, &tls).await {
+            Ok(stream) => stream,
+            Err(e) => {
+                let sleep_secs = 1 << err_cnt;
+                error!(
+                    "Unable to establish TLS on {addr}: {e:?}. Sleeping for {sleep_secs} seconds"
+                );
                 sleep(Duration::from_secs(sleep_secs)).await;
                 err_cnt = core::cmp::min(err_cnt + 1, 5);
                 gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string()).set(err_cnt as f64);
@@ -91,6 +108,7 @@ async fn client_loop(
             server_id,
             &server_name,
             client_name.clone(),
+            jwt.clone(),
             &mut results,
             data.clone(),
             ack.clone(),
@@ -122,7 +140,7 @@ async fn client_loop(
 
         if let Err(e) = res {
             let sleep_secs = 1 << err_cnt;
-            error!("Protocol error: {e:?}. Reconnecting in {sleep_secs} seconds");
+            error!("Protocol error: {e}. Reconnecting in {sleep_secs} seconds");
             err_cnt = core::cmp::min(err_cnt + 1, 5);
             gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string()).set(err_cnt as f64);
             sleep(Duration::from_secs(sleep_secs)).await;

@@ -16,6 +16,7 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use rustls::server::WebPkiClientVerifier;
 use rustls::{ClientConfig, RootCertStore, ServerConfig};
 use rustls_pemfile::{certs, ec_private_keys};
+use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio_rustls::{client, server, TlsAcceptor, TlsConnector};
@@ -94,6 +95,16 @@ impl Wire for MiningWire {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct JwtClaims {
+    pub sub: String,
+    pub exp: u64,
+    pub aud: String,
+    pub iss: String,
+    #[serde(default)]
+    pub non_share_proofs: bool,
+}
+
 fn make_root_store(pem_buf: &[u8]) -> RootCertStore {
     let mut store = RootCertStore::empty();
     let mut reader = Cursor::new(pem_buf);
@@ -124,34 +135,23 @@ fn load_cert_chain<'a>(
 #[derive(Clone, Copy)]
 pub struct TlsClientConfig {
     server_chain_pem: &'static [u8],
-    client_chain_pem: &'static [u8],
-    client_key_pem: &'static [u8],
 }
 
 impl Default for TlsClientConfig {
     fn default() -> Self {
         Self {
             server_chain_pem: include_bytes!("../tls/server_chain.pem"),
-            client_chain_pem: include_bytes!("../tls/client_chain.pem"),
-            client_key_pem: include_bytes!("../tls/client.key"),
         }
     }
 }
 
 pub async fn tls_connect(
     tcp: TcpStream,
-    TlsClientConfig {
-        server_chain_pem,
-        client_chain_pem,
-        client_key_pem,
-    }: TlsClientConfig,
+    TlsClientConfig { server_chain_pem }: &TlsClientConfig,
 ) -> std::io::Result<client::TlsStream<TcpStream>> {
-    let (cert_chain, priv_key) = load_cert_chain(client_chain_pem, client_key_pem);
-
     let config = ClientConfig::builder()
         .with_root_certificates(make_root_store(server_chain_pem))
-        .with_client_auth_cert(cert_chain, priv_key)
-        .expect("invalid client auth setup");
+        .with_no_client_auth();
 
     let connector = TlsConnector::from(Arc::new(config));
 
@@ -166,25 +166,10 @@ pub async fn tls_connect(
 pub trait AsyncReadWrite: AsyncRead + AsyncWrite {}
 impl<T: AsyncRead + AsyncWrite> AsyncReadWrite for T {}
 
-pub async fn tls_connect_wrap(
-    tcp: impl Future<Output = std::io::Result<TcpStream>>,
-    tls: Option<TlsClientConfig>,
-) -> std::io::Result<Pin<Box<dyn 'static + AsyncReadWrite + Send>>> {
-    let tcp = tcp.await?;
-    trace!("Connected");
-    if let Some(tls) = tls {
-        let tls = tls_connect(tcp, tls).await?;
-        Ok(Box::pin(tls))
-    } else {
-        Ok(Box::pin(tcp))
-    }
-}
-
 #[derive(Clone, Copy)]
 pub struct TlsServerConfig {
     server_chain_pem: &'static [u8],
     server_key_pem: &'static [u8],
-    ca_pem: &'static [u8],
 }
 
 impl Default for TlsServerConfig {
@@ -192,7 +177,6 @@ impl Default for TlsServerConfig {
         Self {
             server_chain_pem: include_bytes!("../tls/server_chain.pem"),
             server_key_pem: include_bytes!("../tls/server.key"),
-            ca_pem: include_bytes!("../tls/ca.pem"),
         }
     }
 }
@@ -202,19 +186,12 @@ pub async fn tls_accept(
     TlsServerConfig {
         server_chain_pem,
         server_key_pem,
-        ca_pem,
-    }: TlsServerConfig,
+    }: &TlsServerConfig,
 ) -> std::io::Result<server::TlsStream<TcpStream>> {
     let (cert_chain, priv_key) = load_cert_chain(server_chain_pem, server_key_pem);
 
-    let roots = make_root_store(ca_pem);
-
-    let verifier = WebPkiClientVerifier::builder(roots.into())
-        .build()
-        .expect("Unable to build verifier");
-
     let config = ServerConfig::builder()
-        .with_client_cert_verifier(verifier)
+        .with_no_client_auth()
         .with_single_cert(cert_chain, priv_key)
         .unwrap();
 
@@ -223,41 +200,6 @@ pub async fn tls_accept(
     trace!("TLS acceptor built");
 
     acceptor.accept(tcp).await
-}
-
-pub async fn tls_accept_wrap(
-    tcp: impl Future<Output = std::io::Result<(TcpStream, SocketAddr)>>,
-    tls: Option<TlsServerConfig>,
-) -> std::io::Result<(
-    Pin<Box<dyn 'static + AsyncReadWrite + Send>>,
-    SocketAddr,
-    Arc<str>,
-)> {
-    let (tcp, addr) = tcp.await?;
-    trace!("Accepted {addr}");
-    if let Some(tls) = tls {
-        let tls = tls_accept(tcp, tls).await?;
-        let Some(tls_name) = tls.get_ref().1.peer_certificates().and_then(|v| {
-            let c = v.first()?;
-            let (_rem, x509) = X509Certificate::from_der(c.as_ref()).ok()?;
-            let cn = x509
-                .subject()
-                .iter_attributes()
-                .find(|attr| attr.attr_type() == &OID_X509_COMMON_NAME)
-                .and_then(|attr| attr.as_str().ok())?;
-            if !name_valid(cn) {
-                error!("cn={cn} with too long of a name");
-                None
-            } else {
-                Some(cn.into())
-            }
-        }) else {
-            return Err(io::ErrorKind::InvalidData.into());
-        };
-        Ok((Box::pin(tls), addr, tls_name))
-    } else {
-        Ok((Box::pin(tcp), addr, "__notls".into()))
-    }
 }
 
 pub struct TimeWriter(Arc<OnceLock<Instant>>);

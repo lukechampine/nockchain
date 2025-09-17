@@ -32,19 +32,8 @@ struct MiningRequest {
 }
 
 pub async fn run_client(cfg: ClientConfig) {
-    #[cfg(not(feature = "force-tls"))]
-    let tls = if cfg.miner_connect_tls {
-        let _ = default_provider().install_default();
-        Some(Default::default())
-    } else {
-        None
-    };
-
-    #[cfg(feature = "force-tls")]
-    let tls = {
-        let _ = default_provider().install_default();
-        Some(Default::default())
-    };
+    let _ = default_provider().install_default();
+    let tls = Default::default();
 
     #[cfg(feature = "gpu")]
     {

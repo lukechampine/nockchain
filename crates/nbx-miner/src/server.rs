@@ -7,6 +7,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use clap::{Args, ValueEnum};
 use futures::stream::StreamExt;
+use jsonwebtoken::DecodingKey;
 #[cfg(feature = "verifier")]
 use kernels::verifier::KERNEL;
 use metrics::counter;
@@ -37,9 +38,9 @@ use tokio_stream::wrappers::BroadcastStream;
 use zkvm_jetpack::form::{Belt, PRIME};
 use zkvm_jetpack::noun::noun_ext::NounExt as ZNounExt;
 
-use crate::proto::{server, MiningResultOut};
+use crate::proto::{server, server_handshake, MiningResultOut};
 use crate::shared::{
-    tls_accept_wrap, MiningData, MiningResult, MiningWire, TimeWriter, TlsServerConfig,
+    tls_accept, MiningData, MiningResult, MiningWire, TimeWriter, TlsServerConfig,
 };
 
 #[derive(Clone, Debug, Args)]
@@ -50,9 +51,6 @@ pub struct MiningConfig {
         default_value = "[::1]:0"
     )]
     miner_bind: SocketAddr,
-    #[cfg(not(feature = "force-tls"))]
-    #[arg(long, help = "Use TLS for the miner")]
-    miner_bind_tls: bool,
     #[cfg(all(feature = "verifier", not(feature = "force-preverify")))]
     miner_preverify: bool,
     #[arg(long, help = "Which mining attempts to save", default_value = "none")]
@@ -63,8 +61,6 @@ impl Default for MiningConfig {
     fn default() -> Self {
         Self {
             miner_bind: (Ipv6Addr::LOCALHOST, 0).into(),
-            #[cfg(not(feature = "force-tls"))]
-            miner_bind_tls: false,
             #[cfg(all(feature = "verifier", not(feature = "force-preverify")))]
             miner_preverify: cfg!(feature = "force-preverify"),
             miner_save_attempts: Default::default(),
@@ -75,11 +71,6 @@ impl Default for MiningConfig {
 type Result<T = ()> = core::result::Result<T, NockAppError>;
 
 pub async fn bind(cfg: &MiningConfig) -> Result<TcpListener> {
-    #[cfg(not(feature = "force-tls"))]
-    if cfg.miner_bind_tls {
-        let _ = default_provider().install_default();
-    }
-    #[cfg(feature = "force-tls")]
     let _ = default_provider().install_default();
 
     let listener = TcpListener::bind(cfg.miner_bind)
@@ -187,9 +178,9 @@ pub async fn mining_driver(
     let (reqs_out, reqs_in) = mpsc::channel(1);
 
     let process_target =
-        |data: MiningResult, client_id: usize, cn: Arc<str>, _, poke_slab: NounSlab| {
+        |data: MiningResult, client_id: usize, sub: Arc<str>, _, poke_slab: NounSlab| {
             info!(
-                "Found block! client={} cn={cn} miner={}",
+                "Found block! client={} subject={sub} miner={}",
                 client_id, data.miner_id
             );
             let fut = handle.poke(MiningWire::Mined.to_wire(), poke_slab);
@@ -296,20 +287,27 @@ pub async fn mining_server<
     let mut clients = Clients::default();
     let mut client_cnt = 0;
 
-    #[cfg(not(feature = "force-tls"))]
-    let tls = if cfg.miner_bind_tls {
-        Some(TlsServerConfig::default())
-    } else {
-        None
-    };
-    #[cfg(feature = "force-tls")]
-    let tls = Some(TlsServerConfig::default());
+    let tls = TlsServerConfig::default();
+
+    let mut jwt_keys = vec![];
+
+    for i in 1..10 {
+        if let Ok(v) = std::env::var(&format!("NBX_JWT_KEY{i}")) {
+            jwt_keys.push(
+                DecodingKey::from_base64_secret(&v)
+                    .map_err(|_| NockAppError::OtherError("Invalid JWT".into()))?,
+            );
+        }
+    }
+
+    let jwt_keys: Arc<[DecodingKey]> = (&*jwt_keys).into();
 
     let (accept_tx, mut accept_rx) = mpsc::channel(8);
     let accept_loop = async move {
+        let mut handshake_set = JoinSet::new();
         let mut err_cnt = 0;
         loop {
-            match tls_accept_wrap(listener.accept(), tls).await {
+            match listener.accept().await {
                 Err(e) => {
                     // TODO: ignore errors causable by clients
                     err_cnt += 1;
@@ -320,12 +318,50 @@ pub async fn mining_server<
                     error!("Accept error {e:?}. Sleeping 1 second");
                     sleep(Duration::from_secs(1)).await;
                 }
-                Ok((s, a, cn)) => {
+                Ok((s, a)) => {
                     trace!("Accepted {a}");
                     err_cnt = 0;
-                    if accept_tx.send((s, a, cn)).await.is_err() {
-                        return Ok(());
-                    }
+                    let accept_tx = accept_tx.clone();
+                    let jwt_keys = jwt_keys.clone();
+                    handshake_set.spawn(async move {
+                        let s = match tokio::time::timeout(
+                            Duration::from_secs(10),
+                            tls_accept(s, &tls),
+                        )
+                        .await
+                        {
+                            Ok(Ok(v)) => v,
+                            Ok(Err(e)) => {
+                                debug!("Unable to perform TLS handshake on {a}: {e}");
+                                return;
+                            }
+                            Err(_) => {
+                                debug!("Timeout performing TLS handshake on {a}");
+                                return;
+                            }
+                        };
+
+                        let handshake = match tokio::time::timeout(
+                            Duration::from_secs(20),
+                            server_handshake(s, jwt_keys),
+                        )
+                        .await
+                        {
+                            Ok(Ok(h)) => h,
+                            Ok(Err(e)) => {
+                                warn!("Unable to perform NBX handshake on {a}: {e:?}");
+                                return;
+                            }
+                            Err(_) => {
+                                warn!("Timeout performing NBX handshake on {a}");
+                                return;
+                            }
+                        };
+
+                        if let Err(e) = accept_tx.send((handshake, a)).await {
+                            error!("Unable to send accepted connection: {e:?}");
+                        }
+                    });
                 }
             }
         }
@@ -369,13 +405,14 @@ pub async fn mining_server<
     loop {
         tokio::select! {
             v = accept_rx.recv() => {
-                let Some((s, a, cn)) = v else { continue };
-                debug!("Accepted client_id={client_cnt} with cn={cn:?} on {a}");
+                let Some((handshake, a)) = v else { continue };
+                let sub = handshake.client_sub.clone();
+                debug!("Accepted client_id={client_cnt}, client_name={}, client_sub={sub} on {a}", handshake.client_name);
                 replay_mining_data.retain(|(_, v)| v.get().is_none());
                 let cmd = futures::stream::iter(replay_mining_data.clone()).chain(BroadcastStream::new(mining_data_tx.subscribe()).filter_map(|v| async move { v.ok() }));
-                let srv = server(s, cmd, client_cnt, cn.clone(), tx.clone());
+                let srv = server(handshake, cmd, client_cnt, tx.clone());
                 let srv = client_set.spawn(srv);
-                clients.add(client_cnt, srv, cn);
+                clients.add(client_cnt, srv, sub);
                 client_cnt += 1;
             },
             v = client_set.join_next_with_id() => {
@@ -394,7 +431,7 @@ pub async fn mining_server<
             data = rx.recv() => {
                 let MiningResultOut { data, client_id, in_data, .. } = data.expect("Result senders died");
 
-                let Some(cn) = clients.lookup(client_id).cloned() else {
+                let Some(sub) = clients.lookup(client_id).cloned() else {
                     error!("Unable to lookup client, client_id={client_id}");
                     continue;
                 };
@@ -501,7 +538,7 @@ pub async fn mining_server<
                         }
                     }
 
-                    if process_target(data, client_id, cn, in_data, poke_slab).await.is_err() {
+                    if process_target(data, client_id, sub, in_data, poke_slab).await.is_err() {
                         clients.abort(client_id, AbortReason::ProofRejected);
                         continue;
                     };
