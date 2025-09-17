@@ -1,16 +1,19 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::future::pending;
 use std::net::SocketAddr;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use clap::Args;
+use either::Either;
 use gdt_cpus::CoreType;
 use nbx_jetpack::log::*;
+use rustls::crypto::ring::default_provider;
 use tokio::net::TcpStream;
-use tokio::sync::mpsc;
-use tokio::task::JoinSet;
+use tokio::sync::{mpsc, Mutex};
+use tokio::task::{Id, JoinSet};
 use tokio::time::sleep;
 
 use crate::metrics::gauge;
@@ -22,135 +25,297 @@ pub struct ServerExtras {
     pub live: Arc<AtomicBool>,
 }
 
+struct ClientExtras {
+    id: usize,
+    mining_res: Arc<Mutex<mpsc::Receiver<MiningResultIn>>>,
+    live: Arc<AtomicBool>,
+}
+
+const POOL_CAPACITY: usize = 3;
+
+struct PoolEntry {
+    server_name: Option<String>,
+    err_cnt: Arc<AtomicUsize>,
+    spawn_cnt: usize,
+    last_spawned: Instant,
+    extras: Option<ClientExtras>,
+    handle: Option<tokio::task::AbortHandle>,
+}
+
+impl PoolEntry {
+    fn spawn_time(&self) -> Instant {
+        self.last_spawned
+            + Duration::from_secs(
+                (1u64 << core::cmp::min(5, self.err_cnt.load(Ordering::Relaxed))) - 1,
+            )
+    }
+}
+
+async fn resolve_all(seeds: &[String]) -> std::io::Result<BTreeMap<SocketAddr, Option<String>>> {
+    let mut out = BTreeMap::new();
+    for s in seeds {
+        if let Ok(sa) = s.parse::<SocketAddr>() {
+            out.insert(sa, None);
+        } else {
+            for sa in tokio::net::lookup_host(s).await? {
+                // Currently do not do ipv6
+                // TODO: do ipv6, if we support.
+                if sa.is_ipv4() {
+                    out.insert(sa, Some(s.clone()));
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
 pub fn client_loops(
-    miner_connect: Vec<SocketAddr>,
-    tls: TlsClientConfig,
+    miner_connect: Vec<String>,
     client_name: &String,
     mining_tx: mpsc::Sender<MiningDataOut>,
     ack_tx: mpsc::Sender<MiningAckOut>,
     miner_metadata: Vec<BTreeMap<String, Arc<str>>>,
 ) -> (JoinSet<()>, Vec<ServerExtras>) {
+    let _ = default_provider().install_default();
+
     let mut client_tasks = JoinSet::new();
     let mut server_extras = vec![];
+    let mut client_extras = vec![];
     let client_name = Arc::<str>::from(&(**client_name));
 
-    #[cfg(feature = "jwt-auth-client")]
-    let jwt = std::env::var("NBX_AUTH_JWT").ok().map(Arc::<str>::from);
-    #[cfg(not(feature = "jwt-auth-client"))]
-    let jwt = None;
-
-    for (i, a) in miner_connect.into_iter().enumerate() {
+    for id in 0..POOL_CAPACITY {
         let (tx, rx) = mpsc::channel(64);
         let live = Arc::new(AtomicBool::new(false));
-        client_tasks.spawn(client_loop(
-            a,
-            tls,
-            i,
-            client_name.clone(),
-            jwt.clone(),
-            live.clone(),
-            rx,
-            mining_tx.clone(),
-            ack_tx.clone(),
-            miner_metadata.clone(),
-        ));
+        client_extras.push(ClientExtras {
+            id,
+            mining_res: Arc::new(Mutex::new(rx)),
+            live: live.clone(),
+        });
         server_extras.push(ServerExtras {
             mining_res: tx,
             live,
         });
     }
 
+    client_tasks.spawn(client_pool(
+        miner_connect, client_name, client_extras, mining_tx, ack_tx, miner_metadata,
+    ));
+
     (client_tasks, server_extras)
+}
+
+async fn client_pool(
+    client_connect: Vec<String>,
+    client_name: Arc<str>,
+    mut client_extras: Vec<ClientExtras>,
+    mining_tx: mpsc::Sender<MiningDataOut>,
+    ack_tx: mpsc::Sender<MiningAckOut>,
+    miner_metadata: Vec<BTreeMap<String, Arc<str>>>,
+) {
+    let mut spawned: HashMap<Id, SocketAddr> = HashMap::new();
+    let mut pool: HashMap<SocketAddr, PoolEntry> = HashMap::new();
+    let mut tasks: JoinSet<()> = JoinSet::new();
+
+    let mut ticker = tokio::time::interval(Duration::from_secs(60));
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+    let mut resolved = BTreeMap::new();
+
+    let tls_ip = Arc::new(TlsClientConfig::pinned_default());
+    // TODO: feature flag to not force the server name
+    let tls_dns = Arc::new(TlsClientConfig::forced_server_name(
+        "pool-proxy.intra.nockbox.org".into(),
+    ));
+
+    #[cfg(feature = "jwt-auth-client")]
+    let jwt = std::env::var("NBX_AUTH_JWT").ok().map(Arc::<str>::from);
+    #[cfg(not(feature = "jwt-auth-client"))]
+    let jwt = None;
+
+    loop {
+        if resolved.is_empty() {
+            resolved = resolve_all(&client_connect).await.unwrap_or_default();
+            for (a, server_name) in resolved.iter() {
+                pool.entry(*a).or_insert_with(|| PoolEntry {
+                    server_name: server_name.clone(),
+                    err_cnt: Arc::new(AtomicUsize::new(0)),
+                    last_spawned: Instant::now(),
+                    spawn_cnt: 0,
+                    extras: None,
+                    handle: None,
+                });
+            }
+        }
+
+        let mut backoff = None;
+        while !client_extras.is_empty() {
+            let mut candidates = pool
+                .iter_mut()
+                .filter(|(addr, e)| resolved.contains_key(addr) && e.handle.is_none())
+                .collect::<Vec<_>>();
+            candidates.sort_by_key(|(_, e)| e.spawn_time());
+            let Some((a, c)) = candidates.get_mut(0) else {
+                break;
+            };
+            // We just checked this
+            let sn = resolved.get(a).unwrap().clone();
+            let now = Instant::now();
+            let spawn_time = c.spawn_time();
+            if spawn_time > now {
+                debug!(
+                    "{a} in exponential backoff for {:.02}s",
+                    spawn_time.duration_since(now).as_secs_f64()
+                );
+                backoff = Some(spawn_time);
+                break;
+            }
+            let tls = if let Some(sn) = &sn {
+                debug!("Connecting to {sn} on {a}");
+                tls_dns.clone()
+            } else {
+                debug!("Connecting to {a}");
+                tls_ip.clone()
+            };
+            // We know we are not empty
+            let extras = client_extras.pop().unwrap();
+            c.last_spawned = now;
+            c.spawn_cnt += 1;
+            let jh = tasks.spawn(client_loop(
+                **a,
+                tls,
+                extras.id,
+                sn,
+                client_name.clone(),
+                jwt.clone(),
+                extras.live.clone(),
+                c.err_cnt.clone(),
+                extras.mining_res.clone(),
+                mining_tx.clone(),
+                ack_tx.clone(),
+                miner_metadata.clone(),
+            ));
+            spawned.insert(jh.id(), **a);
+            c.handle = Some(jh);
+            c.extras = Some(extras);
+        }
+
+        // Disconnect one obselete connection if we are at capacity.
+        if client_extras.is_empty() {
+            for (id, v) in &spawned {
+                if !resolved.contains_key(v) {
+                    let id = *id;
+                    let v = *v;
+                    debug!("{v} no longer resolvable. Killing");
+                    pool.get(&v).unwrap().handle.as_ref().unwrap().abort();
+                    break;
+                }
+            }
+        }
+
+        tokio::select! {
+            _ = async {
+                if let Some(backoff) = backoff {
+                    tokio::time::sleep_until(backoff.into()).await
+                } else {
+                    pending().await
+                }
+            } => {}
+            _ = ticker.tick() => {
+                resolved.clear();
+            }
+            Some(r) = tasks.join_next_with_id() => {
+                let id = r.map(|v| v.0).unwrap_or_else(|e| e.id());
+                let addr = spawned.remove(&id).unwrap();
+                let e = pool.get_mut(&addr).unwrap();
+                e.handle = None;
+                let extras = e.extras.take().unwrap();
+                extras.live.store(false, Ordering::Relaxed);
+                client_extras.push(extras);
+            }
+        }
+
+        let to_remove = pool
+            .iter()
+            .inspect(|(a, e)| {
+                gauge!("nbx_miner_client_loop_connected_count", "server_addr" => a.to_string(), "server_name" => e.server_name.clone().unwrap_or_default()).set(e.spawn_cnt as f64);
+            })
+            .filter(|(addr, e)| !resolved.contains_key(addr) && e.handle.is_none())
+            .map(|(addr, _)| *addr)
+            .collect::<Vec<_>>();
+
+        for a in to_remove {
+            trace!("Cleaning up {a}");
+            pool.remove(&a);
+        }
+    }
 }
 
 async fn client_loop(
     addr: SocketAddr,
-    tls: TlsClientConfig,
+    tls: Arc<TlsClientConfig>,
     server_id: usize,
+    server_name: Option<String>,
     client_name: Arc<str>,
     jwt: Option<Arc<str>>,
     live: Arc<AtomicBool>,
-    mut results: mpsc::Receiver<MiningResultIn>,
+    err_cnt: Arc<AtomicUsize>,
+    results: Arc<Mutex<mpsc::Receiver<MiningResultIn>>>,
     data: mpsc::Sender<MiningDataOut>,
     ack: mpsc::Sender<MiningAckOut>,
     miner_metadata: Vec<BTreeMap<String, Arc<str>>>,
 ) {
-    let mut err_cnt = 0;
-    let server_name = addr.to_string();
-    for i in 1.. {
-        let stream = match TcpStream::connect(addr).await {
-            Ok(stream) => stream,
-            Err(e) => {
-                let sleep_secs = 1 << err_cnt;
-                error!("Unable to connect to {addr}: {e:?}. Sleeping for {sleep_secs} seconds");
-                sleep(Duration::from_secs(sleep_secs)).await;
-                err_cnt = core::cmp::min(err_cnt + 1, 5);
-                gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string()).set(err_cnt as f64);
-                continue;
-            }
-        };
+    // This is the only place we access it, and the arc is handed exclusively.
+    let mut results = results.try_lock().unwrap();
+    let server_proto_name = addr.to_string();
 
-        let stream = match tls_connect(stream, &tls).await {
-            Ok(stream) => stream,
-            Err(e) => {
-                let sleep_secs = 1 << err_cnt;
-                error!(
-                    "Unable to establish TLS on {addr}: {e:?}. Sleeping for {sleep_secs} seconds"
-                );
-                sleep(Duration::from_secs(sleep_secs)).await;
-                err_cnt = core::cmp::min(err_cnt + 1, 5);
-                gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string()).set(err_cnt as f64);
-                continue;
-            }
-        };
-
-        let mut handshaked = false;
-
-        live.fetch_or(true, Ordering::SeqCst);
-        let res = proto::client(
-            stream,
-            server_id,
-            &server_name,
-            client_name.clone(),
-            jwt.clone(),
-            &mut results,
-            data.clone(),
-            ack.clone(),
-            miner_metadata.clone(),
-            &mut handshaked,
-        );
-
-        #[cfg(feature = "stealthy")]
-        let metrics_keepalive = std::future::pending::<()>();
-
-        #[cfg(not(feature = "stealthy"))]
-        let metrics_keepalive = async {
-            loop {
-                gauge!("nbx_miner_client_loop_connected_count", "server_id" => server_id.to_string()).set(i as f64);
-                tokio::time::sleep(Duration::from_secs(5)).await;
-            }
-        };
-
-        let res = tokio::select! {
-            v = res => v,
-            _ = metrics_keepalive => unreachable!(),
-        };
-
-        live.fetch_and(false, Ordering::SeqCst);
-
-        if handshaked {
-            err_cnt = 0;
+    let stream = match TcpStream::connect(addr).await {
+        Ok(stream) => stream,
+        Err(e) => {
+            error!("Unable to connect to {addr}: {e}.");
+            let c = err_cnt.fetch_add(1, Ordering::Relaxed);
+            gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string()).set((c + 1) as f64);
+            return;
         }
+    };
 
-        if let Err(e) = res {
-            let sleep_secs = 1 << err_cnt;
-            error!("Protocol error: {e}. Reconnecting in {sleep_secs} seconds");
-            err_cnt = core::cmp::min(err_cnt + 1, 5);
-            gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string()).set(err_cnt as f64);
-            sleep(Duration::from_secs(sleep_secs)).await;
-        } else {
-            break;
+    let stream = match tls_connect(stream, &tls, server_name.clone()).await {
+        Ok(stream) => stream,
+        Err(e) => {
+            error!("Unable to establish TLS on {addr}: {e}.");
+            let c = err_cnt.fetch_add(1, Ordering::Relaxed);
+            gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string()).set((c + 1) as f64);
+            return;
         }
+    };
+
+    let mut handshaked = false;
+
+    live.fetch_or(true, Ordering::SeqCst);
+    let res = proto::client(
+        stream,
+        server_id,
+        &server_proto_name,
+        client_name.clone(),
+        jwt.clone(),
+        &mut results,
+        data.clone(),
+        ack.clone(),
+        miner_metadata.clone(),
+        &mut handshaked,
+    )
+    .await;
+
+    live.fetch_and(false, Ordering::SeqCst);
+
+    if let Err(e) = res {
+        error!("Connection finished: {e}.");
+        let c = err_cnt.fetch_add(1, Ordering::Relaxed);
+        gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string())
+            .set((c + 1) as f64);
+    }
+
+    if handshaked {
+        err_cnt.store(0, Ordering::Relaxed);
     }
 }
 
@@ -161,7 +326,7 @@ pub struct ClientConfig {
         help = "Which servers to connect to in order to receive mining requests from",
         value_delimiter = ','
     )]
-    pub miner_connect: Vec<SocketAddr>,
+    pub miner_connect: Vec<String>,
     #[cfg(not(feature = "force-tls"))]
     #[arg(long, help = "Use TLS for the miner")]
     pub miner_connect_tls: bool,

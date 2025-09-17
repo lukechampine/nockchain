@@ -4162,6 +4162,7 @@ dependencies = [
  "tracing",
  "tracing-test",
  "tracy-client",
+ "webpki-roots",
  "x509-parser",
  "zkvm-jetpack",
 ]

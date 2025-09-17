@@ -460,7 +460,7 @@ pub async fn init_with_kernel<J: Jammer + Send + 'static>(
     if client.client_name.is_none() {
         client.client_name = Some("_local".to_string());
     }
-    client.miner_connect.push(server_ip);
+    client.miner_connect.push(server_ip.to_string());
     let mining_driver =
         crate::mining::create_mining_driver(mining_config, Some(mining_init_tx), server);
     nockapp.add_io_driver(mining_driver).await;

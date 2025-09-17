@@ -13,7 +13,6 @@ use nockvm::noun::{Atom, D, T};
 use rand::distr::weighted::WeightedIndex;
 use rand::prelude::Distribution;
 use rand::Rng;
-use rustls::crypto::ring::default_provider;
 use tokio::sync::mpsc;
 use zkvm_jetpack::form::{Belt, PRIME};
 use zkvm_jetpack::noun::noun_ext::NounExt as OtherNounExt;
@@ -32,9 +31,6 @@ struct MiningRequest {
 }
 
 pub async fn run_client(cfg: ClientConfig) {
-    let _ = default_provider().install_default();
-    let tls = Default::default();
-
     #[cfg(feature = "gpu")]
     {
         let mut builder = nbx_jetpack::gpu::GpuRegistry::builder();
@@ -92,7 +88,7 @@ pub async fn run_client(cfg: ClientConfig) {
     let (ack_tx, mut ack_rx) = mpsc::channel(cfg.miner_connect.len());
 
     let (_client_tasks, server_extras) = client_loops(
-        cfg.miner_connect, tls, &client_name, mining_tx, ack_tx, miner_metadata,
+        cfg.miner_connect, &client_name, mining_tx, ack_tx, miner_metadata,
     );
 
     let mut requests = BTreeMap::new();

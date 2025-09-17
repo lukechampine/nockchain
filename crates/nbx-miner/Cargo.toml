@@ -71,6 +71,7 @@ metrics-util = { workspace = true, optional = true }
 ibig.workspace = true
 sha3.workspace = true
 jsonwebtoken.workspace = true
+webpki-roots.workspace = true
 
 zkvm-jetpack.workspace = true
 nbx-jetpack.workspace = true

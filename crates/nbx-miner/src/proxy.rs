@@ -9,7 +9,6 @@ use ibig::UBig;
 use nbx_jetpack::log::*;
 use nockapp::noun::slab::NounSlab;
 use nockapp::NockAppError;
-use rustls::crypto::ring::default_provider;
 use tokio::sync::mpsc;
 use zkvm_jetpack::form::{Belt, PRIME};
 use zkvm_jetpack::noun::noun_ext::NounExt as OtherNounExt;
@@ -32,7 +31,7 @@ pub struct ProxyConfig {
         help = "Which servers to connect to in order to receive mining requests from",
         value_delimiter = ','
     )]
-    pub miner_connect: Vec<SocketAddr>,
+    pub miner_connect: Vec<String>,
     #[arg(long, help = "What's the client name to send in the protocol")]
     pub client_name: String,
     #[arg(long, help = "Whether to forward non-block proofs upstream")]
@@ -128,14 +127,10 @@ pub async fn run_proxy(cfg: ProxyConfig) {
         .await
         .expect("Unable to bind proxy listener");
 
-    let _ = default_provider().install_default();
-    let tls = Default::default();
-
     let (mining_tx, mut mining_rx) = mpsc::channel(cfg.miner_connect.len());
     let (ack_tx, mut ack_rx) = mpsc::channel(cfg.miner_connect.len());
     let (_client_tasks, server_extras) = client_loops(
         cfg.miner_connect,
-        tls,
         &cfg.client_name,
         mining_tx,
         ack_tx,

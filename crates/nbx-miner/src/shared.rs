@@ -133,35 +133,65 @@ fn load_cert_chain<'a>(
     (cert_chain, PrivateKeyDer::Sec1(key))
 }
 
-#[derive(Clone, Copy)]
 pub struct TlsClientConfig {
-    server_chain_pem: &'static [u8],
+    pinned_server_chain_pem: Option<&'static [u8]>,
+    forced_server_name: Option<String>,
 }
 
-impl Default for TlsClientConfig {
-    fn default() -> Self {
+impl TlsClientConfig {
+    pub fn pinned_default() -> Self {
         Self {
-            server_chain_pem: include_bytes!("../tls/server_chain.pem"),
+            pinned_server_chain_pem: Some(include_bytes!("../tls/server_chain.pem")),
+            forced_server_name: None,
+        }
+    }
+
+    pub fn forced_server_name(server_name: String) -> Self {
+        Self {
+            pinned_server_chain_pem: None,
+            forced_server_name: Some(server_name),
+        }
+    }
+
+    pub fn standard() -> Self {
+        Self {
+            pinned_server_chain_pem: None,
+            forced_server_name: None,
         }
     }
 }
 
 pub async fn tls_connect(
     tcp: TcpStream,
-    TlsClientConfig { server_chain_pem }: &TlsClientConfig,
+    TlsClientConfig {
+        forced_server_name,
+        pinned_server_chain_pem,
+    }: &TlsClientConfig,
+    server_name: Option<String>,
 ) -> std::io::Result<client::TlsStream<TcpStream>> {
+    let root_certs = if let Some(pinned_server_chain_pem) = pinned_server_chain_pem {
+        make_root_store(pinned_server_chain_pem)
+    } else {
+        RootCertStore {
+            roots: webpki_roots::TLS_SERVER_ROOTS.into(),
+        }
+    };
+
+    let server_name = if let Some(server_name) = forced_server_name.clone().or(server_name) {
+        ServerName::try_from(server_name).map_err(|_| io::ErrorKind::InvalidInput)?
+    } else {
+        ServerName::IpAddress(Ipv4Addr::UNSPECIFIED.into())
+    };
+
     let config = ClientConfig::builder()
-        .with_root_certificates(make_root_store(server_chain_pem))
+        .with_root_certificates(root_certs)
         .with_no_client_auth();
 
     let connector = TlsConnector::from(Arc::new(config));
 
     trace!("TLS connector built");
 
-    connector
-        .connect(ServerName::IpAddress(Ipv4Addr::UNSPECIFIED.into()), tcp)
-        //.connect("nock.box".try_into().unwrap(), tcp)
-        .await
+    connector.connect(server_name, tcp).await
 }
 
 pub trait AsyncReadWrite: AsyncRead + AsyncWrite {}
