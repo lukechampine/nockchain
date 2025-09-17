@@ -53,6 +53,7 @@ pub struct MiningConfig {
     miner_bind: SocketAddr,
     #[cfg(all(feature = "verifier", not(feature = "force-preverify")))]
     miner_preverify: bool,
+    #[cfg(feature = "miner-save-attempts")]
     #[arg(long, help = "Which mining attempts to save", default_value = "none")]
     miner_save_attempts: SaveMineAttempts,
 }
@@ -63,6 +64,7 @@ impl Default for MiningConfig {
             miner_bind: (Ipv6Addr::LOCALHOST, 0).into(),
             #[cfg(all(feature = "verifier", not(feature = "force-preverify")))]
             miner_preverify: cfg!(feature = "force-preverify"),
+            #[cfg(feature = "miner-save-attempts")]
             miner_save_attempts: Default::default(),
         }
     }
@@ -291,6 +293,7 @@ pub async fn mining_server<
 
     let mut jwt_keys = vec![];
 
+    #[cfg(feature = "jwt-auth-server")]
     for i in 1..10 {
         if let Ok(v) = std::env::var(&format!("NBX_JWT_KEY{i}")) {
             jwt_keys.push(
@@ -368,7 +371,10 @@ pub async fn mining_server<
     };
     client_set.spawn(accept_loop);
 
+    #[cfg(feature = "miner-save-attempts")]
     let save_mine_attempts = cfg.miner_save_attempts;
+    #[cfg(not(feature = "miner-save-attempts"))]
+    let save_mine_attempts = SaveMineAttempts::None;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("time went backwards");

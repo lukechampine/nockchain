@@ -10,17 +10,29 @@ default = ["jemalloc"]
 jemalloc = ["tikv-jemallocator"]
 tracing-heap = ["tikv-jemallocator", "tracy-client"]
 gpu = ["nbx-jetpack/gpu-prod"]
-stealthy = ["force-tls", "nbx-jetpack/stealthy"]
-force-tls = []
+# Disables logging in most places
+stealthy = ["nbx-jetpack/stealthy"]
+# Enables --miner-tls-key,--miner-tls-chain arguments, that enable setting up non-embedded TLS keys for auth
+server-tls-key-load = []
+# Enables prometheus exporter http server
 prom-exporter = ["metrics-exporter-prometheus", "metrics-util"]
+# Enables client module, which is necessary for the client binary
 client = ["kernels/miner"]
+# Enables server-based verification, and proxy difficulty adjustments
 verifier = ["kernels/verifier"]
+# Forces the server pre-verify the proofs. Mandatory for pool setups
 force-preverify = ["verifier"]
+# Disables --forward-non-block command line argument
 force-send-only-targets = []
+# Enable NBX_JWT_KEY[1-9] environment variable reading, which configures client authentication
+jwt-auth-server = []
+# Enable NBX_AUTH_JWT environment variable reading, which configures client authentication
+jwt-auth-client = []
+# Enable --miner-save-attempts command line option
+miner-save-attempts = []
 
 [[bin]]
 name = "nbx-proxy"
-required-features = ["verifier"]
 
 [[bin]]
 name = "nbx-miner"

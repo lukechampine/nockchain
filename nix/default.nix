@@ -51,7 +51,7 @@ let
   individualCrateArgs // {
     pname = "nockchain";
     CARGO_PROFILE = profile;
-    cargoExtraArgs = "-p nockchain --features nockchain/jemalloc ${extraArgs}";
+    cargoExtraArgs = "-p nockchain --features nockchain/jemalloc,nbx-miner/miner-save-attempts ${extraArgs}";
     buildInputs = [ hoonc.hoonc ];
     nativeBuildInputs = [ pkgs.protobuf_29 ];
     preBuild = "mkdir -p assets && cp ${jam-pkg.dumb-jam.out} './assets/dumb.jam' && cp ${jam-pkg.miner-jam.out} './assets/miner.jam'";
@@ -110,7 +110,7 @@ let
 
   makeGpu = call: call "--features nbx-miner/gpu --features nbx-jetpack/gpu-prod --features nbx-miner/prom-exporter";
   makeStealthGpu = call: call "--features nbx-miner/gpu --features nbx-jetpack/gpu-prod --features nbx-miner/stealthy -Zbuild-std=std,panic_abort -Zbuild-std-features=panic_immediate_abort";
-  makeStealthGpuDebug = call: call "--features nbx-miner/gpu --features nbx-jetpack/gpu-prod --features nbx-miner/force-tls -Zbuild-std=std,panic_abort";
+  makeStealthGpuDebug = call: call "--features nbx-miner/gpu --features nbx-jetpack/gpu-prod -Zbuild-std=std,panic_abort";
 
   polyfill = stdenv.mkDerivation {
     pname = "polyfill-glibc";

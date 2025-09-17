@@ -33,7 +33,11 @@ pub fn client_loops(
     let mut client_tasks = JoinSet::new();
     let mut server_extras = vec![];
     let client_name = Arc::<str>::from(&(**client_name));
+
+    #[cfg(feature = "jwt-auth-client")]
     let jwt = std::env::var("NBX_AUTH_JWT").ok().map(Arc::<str>::from);
+    #[cfg(not(feature = "jwt-auth-client"))]
+    let jwt = None;
 
     for (i, a) in miner_connect.into_iter().enumerate() {
         let (tx, rx) = mpsc::channel(64);

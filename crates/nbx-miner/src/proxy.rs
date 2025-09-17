@@ -42,14 +42,17 @@ pub struct ProxyConfig {
         help = "Target time to adjust proxy difficulty to",
         default_value = "60"
     )]
+    #[cfg(feature = "verifier")]
     pub target_share_seconds: u64,
     #[arg(long, help = "Minimum difficulty for the proxy", default_value = "1")]
+    #[cfg(feature = "verifier")]
     pub min_share_difficulty: u64,
 }
 
 const ROLLING_TIMING_CNT: usize = 20;
 const DIFF_ADJUSTMENT_PRC: u64 = 20;
 
+#[cfg(feature = "verifier")]
 struct DifficultyTracker {
     // Current difficulty multiplied by 10
     current_diff10: u64,
@@ -61,6 +64,7 @@ struct DifficultyTracker {
     last_updated: Instant,
 }
 
+#[cfg(feature = "verifier")]
 impl DifficultyTracker {
     pub fn measure_and_update(&mut self, diff: u64) {
         // Track timings for proxy difficulty adjustments
@@ -143,6 +147,7 @@ pub async fn run_proxy(cfg: ProxyConfig) {
     let forward_non_block = cfg.forward_non_block;
     let mut last_updated = Instant::now();
 
+    #[cfg(feature = "verifier")]
     let diff_tracker = Arc::new(SyncMutex::new(DifficultyTracker {
         current_diff10: cfg.min_share_difficulty * 10,
         min_difficulty: cfg.min_share_difficulty,
@@ -178,6 +183,7 @@ pub async fn run_proxy(cfg: ProxyConfig) {
             .unwrap()
             .get(&Arc::as_ptr(&in_data))
             .map(|(_, v)| (v.clone(), server_extras[v.1].mining_res.clone()));
+        #[cfg(feature = "verifier")]
         let diff_tracker = diff_tracker.clone();
         let hit_metrics = hit_metrics.clone();
         let miss_metrics = miss_metrics.clone();
@@ -197,6 +203,7 @@ pub async fn run_proxy(cfg: ProxyConfig) {
                 return Err(NockAppError::PokeFailed);
             };
 
+            #[cfg(feature = "verifier")]
             {
                 diff_tracker.lock().unwrap().measure_and_update(proxy_diff);
             }
@@ -269,10 +276,11 @@ pub async fn run_proxy(cfg: ProxyConfig) {
                     counter!("nbx_miner_proxy_main_loop_mining_rx_total").increment(1);
                     let MiningDataOut { server_id, session_id, expire, new_datas } = v.expect("Client loop died");
                     for (data_id, mut data) in new_datas {
-                        assert!(data.fixed_nonce_atoms.len() < 4, "fixed_nonce_atoms have length {}. We cannot have this many hops in-between (do we have a routing loop?)", data.fixed_nonce_atoms.len());
+                        assert!(data.fixed_nonce_atoms.len() < 4, "We are at {} hops. This is too many (do we have a routing loop?)", data.fixed_nonce_atoms.len());
                         data.fixed_nonce_atoms.push(Belt(rand::random::<u64>() % PRIME));
                         let parent_target = parse_bn(*unsafe {data.target.root() });
                         trace!("parent_diff={}", target_to_difficulty(parent_target.clone()));
+                        #[cfg(feature = "verifier")]
                         {
                             data.target = to_bn(core::cmp::max(parent_target.clone(), diff_tracker.lock().unwrap().current_target.clone()));
                         }
@@ -323,49 +331,52 @@ pub async fn run_proxy(cfg: ProxyConfig) {
                         server_id_map.lock().unwrap().retain(|_, (v, _)| v.get().filter(|v| v.elapsed() > RECENTLY_EXPIRED_DURATION).is_none());
                     }
 
-                    let mut guard = diff_tracker.lock().unwrap();
-                    gauge!(
-                        "nbx_miner_proxy_difficulty",
-                    ).set((guard.current_diff10 / 10) as f64);
-                    // Update 50% over target interval to not interfere with proof based updates
-                    // that much.
-                    if guard.last_updated.elapsed() >= guard.target_interval * 3 / 2 {
-                        guard.update_difficulty();
-                    }
-
-                    if last_updated != guard.last_updated {
-                        last_updated = guard.last_updated;
-                        let new_target = guard.current_target.clone();
-                        debug!("Update difficulty to min {}", target_to_difficulty(new_target.clone()));
-                        core::mem::drop(guard);
-                        let mut new_reqs = BTreeMap::new();
-                        for (k, (data, ack_cnt, _inst_handle, session_id)) in requests {
-                            let mut server_id_guard = server_id_map.lock().unwrap();
-                            let Some((_, (data_id, server_id, session_id2, parent_target))) = server_id_guard.get(&Arc::as_ptr(&data)).cloned() else {
-                                error!("Cannot lookup server_id");
-                                continue;
-                            };
-                            let target = to_bn(core::cmp::max(parent_target.clone(), new_target.clone()));
-                            assert_eq!(session_id, session_id2);
-                            let data = Arc::new(MiningData {
-                                block_header: data.block_header.clone(),
-                                version: data.version.clone(),
-                                target,
-                                pow_len: data.pow_len,
-                                block_height: data.block_height,
-                                fixed_nonce_atoms: data.fixed_nonce_atoms.clone(),
-                            });
-                            let (inst_handle, inst) = TimeWriter::new();
-                            server_id_guard.insert(Arc::as_ptr(&data), (inst.clone(), (data_id, server_id, session_id, parent_target)));
-                            core::mem::drop(server_id_guard);
-                            new_reqs.insert(k, (data.clone(), ack_cnt, inst_handle, session_id));
-                            if reqs_out.send((data, inst)).await.is_err() {
-                                error!("Failed to send to reqs_out");
-                                break;
-                            }
+                    #[cfg(feature = "verifier")]
+                    {
+                        let mut guard = diff_tracker.lock().unwrap();
+                        gauge!(
+                            "nbx_miner_proxy_difficulty",
+                        ).set((guard.current_diff10 / 10) as f64);
+                        // Update 50% over target interval to not interfere with proof based updates
+                        // that much.
+                        if guard.last_updated.elapsed() >= guard.target_interval * 3 / 2 {
+                            guard.update_difficulty();
                         }
-                        debug!("Difficulty updated");
-                        requests = new_reqs;
+
+                        if last_updated != guard.last_updated {
+                            last_updated = guard.last_updated;
+                            let new_target = guard.current_target.clone();
+                            debug!("Update difficulty to min {}", target_to_difficulty(new_target.clone()));
+                            core::mem::drop(guard);
+                            let mut new_reqs = BTreeMap::new();
+                            for (k, (data, ack_cnt, _inst_handle, session_id)) in requests {
+                                let mut server_id_guard = server_id_map.lock().unwrap();
+                                let Some((_, (data_id, server_id, session_id2, parent_target))) = server_id_guard.get(&Arc::as_ptr(&data)).cloned() else {
+                                    error!("Cannot lookup server_id");
+                                    continue;
+                                };
+                                let target = to_bn(core::cmp::max(parent_target.clone(), new_target.clone()));
+                                assert_eq!(session_id, session_id2);
+                                let data = Arc::new(MiningData {
+                                    block_header: data.block_header.clone(),
+                                    version: data.version.clone(),
+                                    target,
+                                    pow_len: data.pow_len,
+                                    block_height: data.block_height,
+                                    fixed_nonce_atoms: data.fixed_nonce_atoms.clone(),
+                                });
+                                let (inst_handle, inst) = TimeWriter::new();
+                                server_id_guard.insert(Arc::as_ptr(&data), (inst.clone(), (data_id, server_id, session_id, parent_target)));
+                                core::mem::drop(server_id_guard);
+                                new_reqs.insert(k, (data.clone(), ack_cnt, inst_handle, session_id));
+                                if reqs_out.send((data, inst)).await.is_err() {
+                                    error!("Failed to send to reqs_out");
+                                    break;
+                                }
+                            }
+                            debug!("Difficulty updated");
+                            requests = new_reqs;
+                        }
                     }
 
                     let tip_cnt = requests
