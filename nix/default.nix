@@ -85,7 +85,7 @@ let
   ica // {
     pname = "nbx-miner";
     CARGO_PROFILE = profile;
-    cargoExtraArgs = "-p nbx-miner --bin nbx-proxy --features nbx-miner/jemalloc,nbx-miner/verifier,nbx-miner/force-preverify,nbx-miner/prom-exporter ${extraArgs}";
+    cargoExtraArgs = "-p nbx-miner --bin nbx-proxy --features nbx-miner/jemalloc,nbx-miner/verifier,nbx-miner/force-preverify,nbx-miner/prom-exporter,nbx-miner/server-tls-key-load ${extraArgs}";
     buildInputs = [ hoonc.hoonc ];
     preBuild = "mkdir -p assets && cp ${jam-pkg.verifier-jam.out} './assets/verifier.jam'";
   });

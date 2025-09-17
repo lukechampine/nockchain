@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 use std::future::Future;
 use std::io::{self, Cursor};
 use std::net::{Ipv4Addr, SocketAddr};
+use std::path::Path;
 use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
@@ -166,17 +167,37 @@ pub async fn tls_connect(
 pub trait AsyncReadWrite: AsyncRead + AsyncWrite {}
 impl<T: AsyncRead + AsyncWrite> AsyncReadWrite for T {}
 
-#[derive(Clone, Copy)]
 pub struct TlsServerConfig {
-    server_chain_pem: &'static [u8],
-    server_key_pem: &'static [u8],
+    cert_chain: Vec<CertificateDer<'static>>,
+    priv_key: PrivateKeyDer<'static>,
+}
+
+impl TlsServerConfig {
+    /// Loads TLS server config from a file.
+    pub async fn from_path(key: impl AsRef<Path>, chain: impl AsRef<Path>) -> io::Result<Self> {
+        let server_chain_pem = tokio::fs::read(chain).await?;
+        let server_key_pem = tokio::fs::read(key).await?;
+        let (cert_chain, priv_key) =
+            load_cert_chain(server_chain_pem.as_ref(), server_key_pem.as_ref());
+        Ok(Self {
+            cert_chain: cert_chain
+                .into_iter()
+                .map(CertificateDer::into_owned)
+                .collect(),
+            priv_key: priv_key.clone_key(),
+        })
+    }
 }
 
 impl Default for TlsServerConfig {
     fn default() -> Self {
+        let server_chain_pem = include_bytes!("../tls/server_chain.pem");
+        let server_key_pem = include_bytes!("../tls/server.key");
+        let (cert_chain, priv_key) =
+            load_cert_chain(server_chain_pem.as_ref(), server_key_pem.as_ref());
         Self {
-            server_chain_pem: include_bytes!("../tls/server_chain.pem"),
-            server_key_pem: include_bytes!("../tls/server.key"),
+            cert_chain,
+            priv_key,
         }
     }
 }
@@ -184,15 +205,13 @@ impl Default for TlsServerConfig {
 pub async fn tls_accept(
     tcp: TcpStream,
     TlsServerConfig {
-        server_chain_pem,
-        server_key_pem,
+        cert_chain,
+        priv_key,
     }: &TlsServerConfig,
 ) -> std::io::Result<server::TlsStream<TcpStream>> {
-    let (cert_chain, priv_key) = load_cert_chain(server_chain_pem, server_key_pem);
-
     let config = ServerConfig::builder()
         .with_no_client_auth()
-        .with_single_cert(cert_chain, priv_key)
+        .with_single_cert(cert_chain.clone(), priv_key.clone_key())
         .unwrap();
 
     let acceptor = TlsAcceptor::from(Arc::new(config));

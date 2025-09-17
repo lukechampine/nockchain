@@ -51,7 +51,17 @@ pub struct MiningConfig {
         default_value = "[::1]:0"
     )]
     miner_bind: SocketAddr,
+    #[cfg(feature = "server-tls-key-load")]
+    #[arg(long, help = "Path to custom TLS private key")]
+    miner_tls_key: Option<String>,
+    #[cfg(feature = "server-tls-key-load")]
+    #[arg(long, help = "Path to custom TLS certificate chain")]
+    miner_tls_chain: Option<String>,
     #[cfg(all(feature = "verifier", not(feature = "force-preverify")))]
+    #[arg(
+        long,
+        help = "Whether to pre-verify client proofs before accepting them as valid"
+    )]
     miner_preverify: bool,
     #[cfg(feature = "miner-save-attempts")]
     #[arg(long, help = "Which mining attempts to save", default_value = "none")]
@@ -62,6 +72,10 @@ impl Default for MiningConfig {
     fn default() -> Self {
         Self {
             miner_bind: (Ipv6Addr::LOCALHOST, 0).into(),
+            #[cfg(feature = "server-tls-key-load")]
+            miner_tls_key: None,
+            #[cfg(feature = "server-tls-key-load")]
+            miner_tls_chain: None,
             #[cfg(all(feature = "verifier", not(feature = "force-preverify")))]
             miner_preverify: cfg!(feature = "force-preverify"),
             #[cfg(feature = "miner-save-attempts")]
@@ -289,7 +303,17 @@ pub async fn mining_server<
     let mut clients = Clients::default();
     let mut client_cnt = 0;
 
+    #[cfg(feature = "server-tls-key-load")]
+    let tls = match (cfg.miner_tls_key, cfg.miner_tls_chain) {
+        (Some(key), Some(chain)) => TlsServerConfig::from_path(key, chain).await.map_err(NockAppError::IoError)?,
+        (None, None) => TlsServerConfig::default(),
+        _ => panic!("Unsupported TLS configuration. Must pass either both --miner-tls-key,--miner-tls-chain, or neither.")
+    };
+
+    #[cfg(not(feature = "server-tls-key-load"))]
     let tls = TlsServerConfig::default();
+
+    let tls = Arc::new(tls);
 
     let mut jwt_keys = vec![];
 
@@ -326,6 +350,7 @@ pub async fn mining_server<
                     err_cnt = 0;
                     let accept_tx = accept_tx.clone();
                     let jwt_keys = jwt_keys.clone();
+                    let tls = tls.clone();
                     handshake_set.spawn(async move {
                         let s = match tokio::time::timeout(
                             Duration::from_secs(10),
