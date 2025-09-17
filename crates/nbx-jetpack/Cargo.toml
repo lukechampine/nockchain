@@ -33,3 +33,8 @@ pollster = { workspace = true, optional = true }
 wgpu = { workspace = true, optional = true }
 naga = { workspace = true, optional = true }
 nbx-shaders = { workspace = true, optional = true }
+
+[lints.clippy]
+disallowed-types = "deny"
+disallowed-macros = "deny"
+disallowed-methods = "deny"
