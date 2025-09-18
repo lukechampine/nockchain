@@ -10,6 +10,8 @@ use clap::Args;
 use either::Either;
 use gdt_cpus::CoreType;
 use nbx_jetpack::log::*;
+use rand::seq::SliceRandom;
+use rand::{thread_rng, Rng};
 use rustls::crypto::ring::default_provider;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, Mutex};
@@ -31,20 +33,18 @@ struct ClientExtras {
     live: Arc<AtomicBool>,
 }
 
-const POOL_CAPACITY: usize = 3;
-
 struct PoolEntry {
     server_name: Option<String>,
     err_cnt: Arc<AtomicUsize>,
     spawn_cnt: usize,
-    last_spawned: Instant,
+    last_died: Instant,
     extras: Option<ClientExtras>,
     handle: Option<tokio::task::AbortHandle>,
 }
 
 impl PoolEntry {
     fn spawn_time(&self) -> Instant {
-        self.last_spawned
+        self.last_died
             + Duration::from_secs(
                 (1u64 << core::cmp::min(5, self.err_cnt.load(Ordering::Relaxed))) - 1,
             )
@@ -71,6 +71,7 @@ async fn resolve_all(seeds: &[String]) -> std::io::Result<BTreeMap<SocketAddr, O
 
 pub fn client_loops(
     miner_connect: Vec<String>,
+    num_concurrent_connections: usize,
     client_name: &String,
     mining_tx: mpsc::Sender<MiningDataOut>,
     ack_tx: mpsc::Sender<MiningAckOut>,
@@ -83,7 +84,7 @@ pub fn client_loops(
     let mut client_extras = vec![];
     let client_name = Arc::<str>::from(&(**client_name));
 
-    for id in 0..POOL_CAPACITY {
+    for id in 0..num_concurrent_connections {
         let (tx, rx) = mpsc::channel(64);
         let live = Arc::new(AtomicBool::new(false));
         client_extras.push(ClientExtras {
@@ -119,7 +120,7 @@ async fn client_pool(
     let mut ticker = tokio::time::interval(Duration::from_secs(60));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
-    let mut resolved = BTreeMap::new();
+    let mut resolved: BTreeMap<SocketAddr, Option<String>> = BTreeMap::new();
 
     let tls_ip = Arc::new(TlsClientConfig::pinned_default());
     // TODO: feature flag to not force the server name
@@ -133,20 +134,6 @@ async fn client_pool(
     let jwt = None;
 
     loop {
-        if resolved.is_empty() {
-            resolved = resolve_all(&client_connect).await.unwrap_or_default();
-            for (a, server_name) in resolved.iter() {
-                pool.entry(*a).or_insert_with(|| PoolEntry {
-                    server_name: server_name.clone(),
-                    err_cnt: Arc::new(AtomicUsize::new(0)),
-                    last_spawned: Instant::now(),
-                    spawn_cnt: 0,
-                    extras: None,
-                    handle: None,
-                });
-            }
-        }
-
         let mut backoff = None;
         while !client_extras.is_empty() {
             let mut candidates = pool
@@ -157,8 +144,6 @@ async fn client_pool(
             let Some((a, c)) = candidates.get_mut(0) else {
                 break;
             };
-            // We just checked this
-            let sn = resolved.get(a).unwrap().clone();
             let now = Instant::now();
             let spawn_time = c.spawn_time();
             if spawn_time > now {
@@ -169,6 +154,15 @@ async fn client_pool(
                 backoff = Some(spawn_time);
                 break;
             }
+            // Re-query again, because we want to randomize our choice
+            candidates.retain(|v| v.1.spawn_time() <= now);
+            candidates.shuffle(&mut thread_rng());
+            // The retain call here already includes the first element, which matches the condition
+            // due to the backoff check.
+            let (a, c) = &mut candidates[0];
+
+            // We just checked this
+            let sn = resolved.get(a).unwrap().clone();
             let tls = if let Some(sn) = &sn {
                 debug!("Connecting to {sn} on {a}");
                 tls_dns.clone()
@@ -178,9 +172,8 @@ async fn client_pool(
             };
             // We know we are not empty
             let extras = client_extras.pop().unwrap();
-            c.last_spawned = now;
             c.spawn_cnt += 1;
-            let jh = tasks.spawn(client_loop(
+            let jh = tasks.spawn(client_conn(
                 **a,
                 tls,
                 extras.id,
@@ -221,13 +214,26 @@ async fn client_pool(
                 }
             } => {}
             _ = ticker.tick() => {
-                resolved.clear();
+                debug!("Tick");
+                resolved = resolve_all(&client_connect).await.unwrap_or_default();
+                for (a, server_name) in resolved.iter() {
+                    trace!("Resolved {a} on domain {server_name:?}");
+                    pool.entry(*a).or_insert_with(|| PoolEntry {
+                        server_name: server_name.clone(),
+                        err_cnt: Arc::new(AtomicUsize::new(0)),
+                        last_died: Instant::now(),
+                        spawn_cnt: 0,
+                        extras: None,
+                        handle: None,
+                    });
+                }
             }
             Some(r) = tasks.join_next_with_id() => {
                 let id = r.map(|v| v.0).unwrap_or_else(|e| e.id());
                 let addr = spawned.remove(&id).unwrap();
                 let e = pool.get_mut(&addr).unwrap();
                 e.handle = None;
+                e.last_died = Instant::now();
                 let extras = e.extras.take().unwrap();
                 extras.live.store(false, Ordering::Relaxed);
                 client_extras.push(extras);
@@ -238,6 +244,7 @@ async fn client_pool(
             .iter()
             .inspect(|(a, e)| {
                 gauge!("nbx_miner_client_loop_connected_count", "server_addr" => a.to_string(), "server_name" => e.server_name.clone().unwrap_or_default()).set(e.spawn_cnt as f64);
+                gauge!("nbx_miner_client_loop_err_cnt", "server_addr" => a.to_string(), "server_name" => e.server_name.clone().unwrap_or_default()).set(e.err_cnt.load(Ordering::Relaxed) as f64);
             })
             .filter(|(addr, e)| !resolved.contains_key(addr) && e.handle.is_none())
             .map(|(addr, _)| *addr)
@@ -250,7 +257,7 @@ async fn client_pool(
     }
 }
 
-async fn client_loop(
+async fn client_conn(
     addr: SocketAddr,
     tls: Arc<TlsClientConfig>,
     server_id: usize,
@@ -268,20 +275,38 @@ async fn client_loop(
     let mut results = results.try_lock().unwrap();
     let server_proto_name = addr.to_string();
 
-    let stream = match TcpStream::connect(addr).await {
-        Ok(stream) => stream,
-        Err(e) => {
+    let stream = match tokio::time::timeout(Duration::from_secs(10), TcpStream::connect(addr)).await
+    {
+        Ok(Ok(stream)) => stream,
+        Ok(Err(e)) => {
             error!("Unable to connect to {addr}: {e}.");
+            let c = err_cnt.fetch_add(1, Ordering::Relaxed);
+            gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string()).set((c + 1) as f64);
+            return;
+        }
+        Err(_) => {
+            error!("Timeout connecting to {addr}");
             let c = err_cnt.fetch_add(1, Ordering::Relaxed);
             gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string()).set((c + 1) as f64);
             return;
         }
     };
 
-    let stream = match tls_connect(stream, &tls, server_name.clone()).await {
-        Ok(stream) => stream,
-        Err(e) => {
+    let stream = match tokio::time::timeout(
+        Duration::from_secs(10),
+        tls_connect(stream, &tls, server_name.clone()),
+    )
+    .await
+    {
+        Ok(Ok(stream)) => stream,
+        Ok(Err(e)) => {
             error!("Unable to establish TLS on {addr}: {e}.");
+            let c = err_cnt.fetch_add(1, Ordering::Relaxed);
+            gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string()).set((c + 1) as f64);
+            return;
+        }
+        Err(_) => {
+            error!("Timeout establishing TLS on {addr}");
             let c = err_cnt.fetch_add(1, Ordering::Relaxed);
             gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string()).set((c + 1) as f64);
             return;
@@ -290,18 +315,42 @@ async fn client_loop(
 
     let mut handshaked = false;
 
+    let handshake = match tokio::time::timeout(
+        Duration::from_secs(20),
+        proto::client_handshake(
+            stream,
+            server_id,
+            &server_proto_name,
+            client_name.clone(),
+            jwt.clone(),
+        ),
+    )
+    .await
+    {
+        Ok(Ok(h)) => h,
+        Ok(Err(e)) => {
+            error!("Handshake failed: {e}.");
+            let c = err_cnt.fetch_add(1, Ordering::Relaxed);
+            gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string()).set((c + 1) as f64);
+            return;
+        }
+        Err(_) => {
+            error!("Handshake timeout.");
+            let c = err_cnt.fetch_add(1, Ordering::Relaxed);
+            gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string()).set((c + 1) as f64);
+            return;
+        }
+    };
+
     live.fetch_or(true, Ordering::SeqCst);
+    err_cnt.store(0, Ordering::Relaxed);
+
     let res = proto::client(
-        stream,
-        server_id,
-        &server_proto_name,
-        client_name.clone(),
-        jwt.clone(),
+        handshake,
         &mut results,
         data.clone(),
         ack.clone(),
         miner_metadata.clone(),
-        &mut handshaked,
     )
     .await;
 
@@ -312,10 +361,6 @@ async fn client_loop(
         let c = err_cnt.fetch_add(1, Ordering::Relaxed);
         gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string())
             .set((c + 1) as f64);
-    }
-
-    if handshaked {
-        err_cnt.store(0, Ordering::Relaxed);
     }
 }
 
@@ -330,6 +375,12 @@ pub struct ClientConfig {
     #[cfg(not(feature = "force-tls"))]
     #[arg(long, help = "Use TLS for the miner")]
     pub miner_connect_tls: bool,
+    #[arg(
+        long,
+        help = "How many concurrent connections to maintain",
+        default_value = "3"
+    )]
+    pub miner_num_concurrent_connections: usize,
     #[arg(long, help = "Number of threads to mine with defaults to one less than the number of cpus available.", default_value = None)]
     pub num_threads: Option<u64>,
     #[arg(

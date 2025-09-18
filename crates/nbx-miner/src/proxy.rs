@@ -32,6 +32,12 @@ pub struct ProxyConfig {
         value_delimiter = ','
     )]
     pub miner_connect: Vec<String>,
+    #[arg(
+        long,
+        help = "How many concurrent connections to maintain",
+        default_value = "3"
+    )]
+    pub miner_num_concurrent_connections: usize,
     #[arg(long, help = "What's the client name to send in the protocol")]
     pub client_name: String,
     #[arg(long, help = "Whether to forward non-block proofs upstream")]
@@ -131,6 +137,7 @@ pub async fn run_proxy(cfg: ProxyConfig) {
     let (ack_tx, mut ack_rx) = mpsc::channel(cfg.miner_connect.len());
     let (_client_tasks, server_extras) = client_loops(
         cfg.miner_connect,
+        cfg.miner_num_concurrent_connections,
         &cfg.client_name,
         mining_tx,
         ack_tx,

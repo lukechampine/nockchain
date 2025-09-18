@@ -272,21 +272,24 @@ async fn binrecv_limited<T: Decode<()>, const PARSE_ERR: bool, const MAX_READ: u
     Ok(res)
 }
 
-pub async fn client<S: AsyncRead + AsyncWrite>(
-    stream: S,
+#[derive(Debug)]
+pub struct ClientHandshake<S> {
+    pub stream: S,
+    pub server_sub: Arc<str>,
+    pub server_name: Arc<str>,
+    pub server_id_str: Arc<str>,
+    pub server_id: usize,
+    pub nonce: u32,
+}
+
+pub async fn client_handshake<S: AsyncRead + AsyncWrite + Unpin>(
+    mut stream: S,
     server_id: usize,
     server_name: &str,
     client_name: Arc<str>,
     jwt: Option<Arc<str>>,
-    mining_out: &mut mpsc::Receiver<MiningResultIn>,
-    mining_data: mpsc::Sender<MiningDataOut>,
-    ack: mpsc::Sender<MiningAckOut>,
-    metadata: Vec<BTreeMap<String, Arc<str>>>,
-    handshaked: &mut bool,
-) -> io::Result<()> {
-    let stream = pin!(stream);
-
-    let (mut read, mut write) = split(stream);
+) -> io::Result<ClientHandshake<S>> {
+    let (mut read, mut write) = split(&mut stream);
 
     let server_name: Arc<str> = server_name.into();
     let server_id_str: Arc<str> = Arc::from(&*server_id.to_string());
@@ -345,7 +348,31 @@ pub async fn client<S: AsyncRead + AsyncWrite>(
     )
     .await?;
 
-    *handshaked = true;
+    Ok(ClientHandshake {
+        stream,
+        server_sub,
+        server_name,
+        server_id_str,
+        server_id,
+        nonce,
+    })
+}
+
+pub async fn client<S: AsyncRead + AsyncWrite + Unpin>(
+    ClientHandshake {
+        stream,
+        server_sub,
+        server_name,
+        server_id_str,
+        server_id,
+        nonce,
+    }: ClientHandshake<S>,
+    mining_out: &mut mpsc::Receiver<MiningResultIn>,
+    mining_data: mpsc::Sender<MiningDataOut>,
+    ack: mpsc::Sender<MiningAckOut>,
+    metadata: Vec<BTreeMap<String, Arc<str>>>,
+) -> io::Result<()> {
+    let (mut read, mut write) = split(stream);
 
     #[cfg(feature = "stealthy")]
     let channel_mon = std::future::pending::<()>();
