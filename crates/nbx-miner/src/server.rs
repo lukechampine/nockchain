@@ -44,6 +44,8 @@ use crate::shared::{
     tls_accept, MiningData, MiningResult, MiningWire, Telemetry, TimeWriter, TlsServerConfig,
 };
 
+pub const TELEMETRY_PROOFRATE_INTERVAL: Duration = Duration::from_secs(60);
+
 #[derive(Clone, Debug, Args)]
 pub struct MiningConfig {
     #[arg(
@@ -160,10 +162,18 @@ impl AbortReason {
     }
 }
 
-#[derive(Default)]
 pub(crate) struct Clients<M> {
     handles: BTreeMap<usize, (AbortHandle, M)>,
     ids: HashMap<Id, usize>,
+}
+
+impl<M> Default for Clients<M> {
+    fn default() -> Self {
+        Self {
+            handles: Default::default(),
+            ids: Default::default(),
+        }
+    }
 }
 
 impl<M> Clients<M> {
@@ -465,12 +475,13 @@ pub async fn mining_server<
             v = accept_rx.recv() => {
                 let Some((handshake, a)) = v else { continue };
                 let sub = handshake.client_sub.clone();
+                let perms = handshake.perms;
                 debug!("Accepted client_id={client_cnt}, client_name={}, client_sub={sub} on {a}", handshake.client_name);
                 replay_mining_data.retain(|(_, v)| v.get().is_none());
                 let cmd = futures::stream::iter(replay_mining_data.clone()).chain(BroadcastStream::new(mining_data_tx.subscribe()).filter_map(|v| async move { v.ok() }));
                 let srv = server(handshake, cmd, client_cnt, tx.clone());
                 let srv = client_set.spawn(srv);
-                clients.add(client_cnt, srv, sub);
+                clients.add(client_cnt, srv, (sub, perms));
                 client_cnt += 1;
             },
             v = client_set.join_next_with_id() => {
@@ -489,7 +500,7 @@ pub async fn mining_server<
             data = rx.recv() => {
                 let ClientDataRead { data, client_id } = data.expect("Result senders died");
 
-                let Some(sub) = clients.lookup(client_id).cloned() else {
+                let Some((sub, perms)) = clients.lookup(client_id).cloned() else {
                     error!("Unable to lookup client, client_id={client_id}");
                     continue;
                 };
@@ -613,6 +624,22 @@ pub async fn mining_server<
                         }
                     }
                     ClientDataReadType::Telemetry(t) => {
+                        if perms.telemetry_metrics {
+                            match &t {
+                                Telemetry::Proofrate {
+                                    machines
+                                } => {
+                                    for (k, p) in machines {
+                                        gauge!(
+                                            "nbx_miner_server_telemetry_proofs_per_minute",
+                                            "client_sub" => sub.clone(),
+                                            "machine_id" => k.clone(),
+                                        ).set(*p as f64);
+                                    }
+                                }
+                            }
+                        }
+
                         if process_telemetry(t, client_id, sub).await.is_err() {
                             clients.abort(client_id, AbortReason::TelemetryError);
                             continue;

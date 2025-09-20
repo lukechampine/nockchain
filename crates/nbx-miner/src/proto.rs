@@ -80,6 +80,13 @@ pub struct PostHello {
     jwt: Option<Arc<str>>,
 }
 
+#[derive(Encode, Decode, Clone, Copy, Debug, Default)]
+pub struct Permissions {
+    pub non_share_proofs: bool,
+    pub telemetry_metrics: bool,
+    pub telemetry: bool,
+}
+
 #[derive(Encode, Decode, Clone, Debug)]
 pub struct SetMinerMetadata {
     miners: Vec<BTreeMap<String, Arc<str>>>,
@@ -161,6 +168,7 @@ pub struct MiningAckOut {
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, FromRepr)]
+#[allow(non_camel_case_types)]
 pub enum MinerResponse {
     METADATA = 0,
     RESULT = 1,
@@ -299,6 +307,7 @@ pub struct ClientHandshake<S> {
     pub server_id_str: Arc<str>,
     pub server_id: usize,
     pub session_id: u32,
+    pub perms: Permissions,
 }
 
 pub async fn client_handshake<S: AsyncRead + AsyncWrite + Unpin>(
@@ -359,7 +368,7 @@ pub async fn client_handshake<S: AsyncRead + AsyncWrite + Unpin>(
     )
     .await?;
 
-    let resp: () = binrecv_client(
+    let perms: Permissions = binrecv_client(
         &mut read,
         server_sub.clone(),
         server_name.clone(),
@@ -374,6 +383,7 @@ pub async fn client_handshake<S: AsyncRead + AsyncWrite + Unpin>(
         server_id_str,
         server_id,
         session_id,
+        perms,
     })
 }
 
@@ -385,6 +395,7 @@ pub async fn client<S: AsyncRead + AsyncWrite + Unpin>(
         server_id_str,
         server_id,
         session_id,
+        perms: _,
     }: ClientHandshake<S>,
     data_out: &mut mpsc::Receiver<ClientDataWrite>,
     mining_data: mpsc::Sender<MiningDataOut>,
@@ -565,8 +576,7 @@ pub struct ServerHandshake<S> {
     pub stream: S,
     pub client_sub: Arc<str>,
     pub client_name: Arc<str>,
-    pub non_share_proofs: bool,
-    pub telemetry: bool,
+    pub perms: Permissions,
 }
 
 pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
@@ -618,6 +628,7 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
                 iss: "nbx".into(),
                 non_share_proofs: true,
                 telemetry: true,
+                telemetry_metrics: true,
             }
         }
         (jwt, jwt_keys) => {
@@ -646,13 +657,18 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
 
     let client_sub: Arc<str> = (&*claims.sub).into();
     let client_name: Arc<str> = (*client_name).into();
+    let perms = Permissions {
+        non_share_proofs: claims.non_share_proofs,
+        telemetry: claims.telemetry,
+        telemetry_metrics: claims.telemetry_metrics,
+    };
 
     binsend(
         &mut stream,
         client_sub.clone(),
         client_name.clone(),
         "handshake_finish",
-        (),
+        perms,
     )
     .await?;
 
@@ -662,8 +678,7 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
         stream,
         client_sub,
         client_name,
-        non_share_proofs: claims.non_share_proofs,
-        telemetry: claims.telemetry,
+        perms,
     })
 }
 
@@ -677,8 +692,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
         stream,
         client_sub,
         client_name,
-        non_share_proofs,
-        telemetry,
+        perms,
     } = handshake;
     debug!("Client ID {client_id} joined with subject '{client_sub}' and name '{client_name}'");
 
@@ -870,6 +884,18 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                     )
                     .await?;
 
+                    if !res.target_hit && !perms.non_share_proofs {
+                        counter!(
+                            "nbx_miner_proto_server_unauthenticated_non_share_proof_count",
+                            "client_id" => client_id_str.clone(),
+                            "client_sub" => client_sub.clone(),
+                            "client_name" => client_name.clone(),
+                        )
+                        .increment(1);
+                        trace!("client_id={client_id}, client_sub={client_sub}, client_name={client_name} sent non-share proof without the capability. Ignoring.");
+                        continue;
+                    }
+
                     let mut guard = tracker.lock().await;
                     let Some(data) = guard.valid_data(res.data_id) else {
                         trace!(
@@ -912,7 +938,9 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                     )
                     .record((res.attempt_millis as f64) / 1000.0);
 
-                    if res.gpu_enqueue_millis > 0
+                    // FIXME: let's not expose this until we figure out better GPU readings and
+                    // metrics isolation from public binaries.
+                    /*if res.gpu_enqueue_millis > 0
                         || res.gpu_submit_millis > 0
                         || res.gpu_wait_millis > 0
                     {
@@ -939,19 +967,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                             "client_name" => client_name.clone(),
                         )
                         .record((res.gpu_wait_millis as f64) / 1000.0);
-                    }
-
-                    if !res.target_hit && !non_share_proofs {
-                        counter!(
-                            "nbx_miner_proto_server_unauthenticated_non_share_proof_count",
-                            "client_id" => client_id_str.clone(),
-                            "client_sub" => client_sub.clone(),
-                            "client_name" => client_name.clone(),
-                        )
-                        .increment(1);
-                        trace!("client_id={client_id}, client_sub={client_sub}, client_name={client_name} sent non-share proof without the capability. Ignoring.");
-                        continue;
-                    }
+                    }*/
 
                     let poke = res.poke.map(cue);
                     let effect = res.effect.map(cue);
@@ -977,7 +993,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                         .map_err(|_| io::ErrorKind::BrokenPipe)?;
                 }
                 MinerResponse::TELEMETRY_PROOFRATE => {
-                    if !telemetry {
+                    if !perms.telemetry {
                         counter!(
                             "nbx_miner_proto_server_unauthenticated_telemetry_count",
                             "client_id" => client_id_str.clone(),
@@ -992,13 +1008,23 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                         ));
                     }
 
-                    let res: TelemetryProofrate = binrecv_server(
+                    let TelemetryProofrate { machines } = binrecv_server(
                         &mut read,
                         client_sub.clone(),
                         client_name.clone(),
                         "telemetry_proofrate",
                     )
                     .await?;
+
+                    results_out
+                        .send(ClientDataRead {
+                            client_id,
+                            data: ClientDataReadType::Telemetry(shared::Telemetry::Proofrate {
+                                machines,
+                            }),
+                        })
+                        .await
+                        .map_err(|_| io::ErrorKind::BrokenPipe)?;
                 }
             }
         }

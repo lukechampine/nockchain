@@ -19,10 +19,10 @@ use crate::proto::{
     ClientDataWrite, ClientDataWriteType, MiningAckOut, MiningDataOut, MiningResultIn,
     RECENTLY_EXPIRED_DURATION,
 };
-use crate::server::{mining_server, MiningConfig};
+use crate::server::{mining_server, MiningConfig, TELEMETRY_PROOFRATE_INTERVAL};
 use crate::shared::{
     difficulty_to_target, parse_bn, target_to_difficulty, to_bn, MiningData, MiningResult,
-    TargetMetrics, TimeWriter,
+    TargetMetrics, Telemetry, TimeWriter,
 };
 
 #[derive(Clone, Debug, Args)]
@@ -141,7 +141,7 @@ pub async fn run_proxy(cfg: ProxyConfig) {
     let (_client_tasks, server_extras) = client_loops(
         cfg.miner_connect,
         cfg.miner_num_concurrent_connections,
-        &cfg.client_name,
+        (&*cfg.client_name).into(),
         mining_tx,
         ack_tx,
         Default::default(),
@@ -266,7 +266,17 @@ pub async fn run_proxy(cfg: ProxyConfig) {
         }
     };
 
-    let process_telemetry = |_, _, _| async move { Ok(()) };
+    let telemetry_proofrate = SyncMutex::new(BTreeMap::<_, BTreeMap<_, _>>::new());
+
+    let process_telemetry = |telemetry, _, client_sub| {
+        let mut pr = telemetry_proofrate.lock().unwrap();
+        match telemetry {
+            Telemetry::Proofrate { machines } => {
+                pr.entry(client_sub).or_default().extend(machines);
+            }
+        }
+        async move { Ok(()) }
+    };
 
     let (reqs_out, reqs_in) = mpsc::channel(1);
     let server = mining_server(
@@ -279,6 +289,8 @@ pub async fn run_proxy(cfg: ProxyConfig) {
 
     let main_iter = async {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
+        let mut telemetry_interval = tokio::time::interval(TELEMETRY_PROOFRATE_INTERVAL);
+        telemetry_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
             counter!("nbx_miner_proxy_main_loop_ticks_total").increment(1);
@@ -330,6 +342,42 @@ pub async fn run_proxy(cfg: ProxyConfig) {
                         r.1 = Instant::now();
                     }
                 }
+                _ = telemetry_interval.tick() => {
+                    counter!("nbx_miner_proxy_main_loop_telemetry_interval_total").increment(1);
+                    let pr = {
+                        core::mem::take(&mut *telemetry_proofrate.lock().unwrap())
+                    };
+                    if !pr.is_empty() {
+                        // In case there are duplicate machine IDs, yes, we are merging them together.
+                        let machines = pr.into_values().flatten().collect::<BTreeMap<_, _>>();
+                        let telemetry = Telemetry::Proofrate { machines };
+
+                        for (server_id, e) in server_extras.iter().enumerate() {
+                            let shared = e.shared();
+                            if !shared.live || shared.session_id == 0 || !shared.perms.telemetry {
+                                continue;
+                            }
+
+                            gauge!(
+                                "nbx_miner_proxy_channel_mining_res_capacity",
+                                "server_id" => server_id.to_string(),
+                            ).set(e.mining_res.capacity() as f64);
+
+                            if let Err(e) = e.mining_res.try_send(
+                                ClientDataWrite {
+                                    session_id: shared.session_id,
+                                    data: ClientDataWriteType::Telemetry(telemetry.clone()),
+                                }
+                            ) {
+                                counter!(
+                                    "nbx_miner_proxy_send_mining_res_fail_total",
+                                    "server_id" => server_id.to_string(),
+                                ).increment(1);
+                                error!("Unable to send telemetry to {server_id}: {e:?}");
+                            };
+                        }
+                    }
+                }
                 _ = interval.tick() => {
                     counter!("nbx_miner_proxy_main_loop_interval_total").increment(1);
                     let max_height = requests.values().map(|v| v.0.block_height).max().unwrap_or(0);
@@ -338,7 +386,7 @@ pub async fn run_proxy(cfg: ProxyConfig) {
                     ).set(max_height as f64);
 
                     // Maintain only live servers
-                    requests.retain(|(sid, _), _| server_extras[*sid].live.load(Ordering::SeqCst));
+                    requests.retain(|(sid, _), _| server_extras[*sid].shared().live);
                     {
                         server_id_map.lock().unwrap().retain(|_, (v, _)| v.get().filter(|v| v.elapsed() > RECENTLY_EXPIRED_DURATION).is_none());
                     }

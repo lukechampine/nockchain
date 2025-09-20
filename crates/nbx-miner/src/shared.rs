@@ -106,8 +106,11 @@ pub struct JwtClaims {
     pub non_share_proofs: bool,
     #[serde(default)]
     pub telemetry: bool,
+    #[serde(default)]
+    pub telemetry_metrics: bool,
 }
 
+#[derive(Clone)]
 pub enum Telemetry {
     Proofrate { machines: BTreeMap<Arc<str>, u32> },
 }

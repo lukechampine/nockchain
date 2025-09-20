@@ -1,9 +1,9 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 use std::future::pending;
 use std::net::SocketAddr;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex as SyncMutex};
 use std::time::{Duration, Instant};
 
 use clap::Args;
@@ -19,21 +19,34 @@ use tokio::task::{Id, JoinSet};
 use tokio::time::sleep;
 
 use crate::metrics::gauge;
-use crate::proto::{self, ClientDataWrite, MiningAckOut, MiningDataOut, MiningResultIn};
+use crate::proto::{
+    self, ClientDataWrite, MiningAckOut, MiningDataOut, MiningResultIn, Permissions,
+};
 use crate::shared::{tls_connect, TlsClientConfig};
+
+#[derive(Default, Clone, Copy)]
+pub struct SharedExtras {
+    pub live: bool,
+    pub session_id: u32,
+    pub perms: Permissions,
+}
 
 pub struct ServerExtras {
     pub mining_res: mpsc::Sender<ClientDataWrite>,
-    pub live: Arc<AtomicBool>,
-    pub session_id: Arc<AtomicU32>,
+    pub shared: Arc<SyncMutex<SharedExtras>>,
+}
+
+impl ServerExtras {
+    pub fn shared(&self) -> SharedExtras {
+        *self.shared.lock().unwrap()
+    }
 }
 
 #[derive(Clone)]
 struct ClientExtras {
     id: usize,
     mining_res: Arc<Mutex<mpsc::Receiver<ClientDataWrite>>>,
-    live: Arc<AtomicBool>,
-    session_id: Arc<AtomicU32>,
+    shared: Arc<SyncMutex<SharedExtras>>,
 }
 
 struct PoolEntry {
@@ -75,7 +88,7 @@ async fn resolve_all(seeds: &[String]) -> std::io::Result<BTreeMap<SocketAddr, O
 pub fn client_loops(
     miner_connect: Vec<String>,
     num_concurrent_connections: usize,
-    client_name: &String,
+    client_name: Arc<str>,
     mining_tx: mpsc::Sender<MiningDataOut>,
     ack_tx: mpsc::Sender<MiningAckOut>,
     miner_metadata: Vec<BTreeMap<String, Arc<str>>>,
@@ -85,22 +98,18 @@ pub fn client_loops(
     let mut client_tasks = JoinSet::new();
     let mut server_extras = vec![];
     let mut client_extras = vec![];
-    let client_name = Arc::<str>::from(&(**client_name));
 
     for id in 0..num_concurrent_connections {
         let (tx, rx) = mpsc::channel(64);
-        let live = Arc::new(AtomicBool::new(false));
-        let session_id = Arc::new(AtomicU32::new(0));
+        let shared = Arc::new(SyncMutex::new(SharedExtras::default()));
         client_extras.push(ClientExtras {
             id,
             mining_res: Arc::new(Mutex::new(rx)),
-            live: live.clone(),
-            session_id: session_id.clone(),
+            shared: shared.clone(),
         });
         server_extras.push(ServerExtras {
             mining_res: tx,
-            live,
-            session_id,
+            shared,
         });
     }
 
@@ -244,8 +253,7 @@ async fn client_pool(
                 e.handle = None;
                 e.last_died = Instant::now();
                 let extras = e.extras.take().unwrap();
-                extras.live.store(false, Ordering::Relaxed);
-                extras.session_id.store(0, Ordering::Relaxed);
+                *extras.shared.lock().unwrap() = Default::default();
                 client_extras.push(extras);
             }
         }
@@ -276,8 +284,7 @@ async fn client_conn(
     ClientExtras {
         id: server_id,
         mining_res,
-        live,
-        session_id,
+        shared,
     }: ClientExtras,
     err_cnt: Arc<AtomicUsize>,
     data: mpsc::Sender<MiningDataOut>,
@@ -353,8 +360,12 @@ async fn client_conn(
         }
     };
 
-    session_id.store(handshake.session_id, Ordering::Relaxed);
-    live.fetch_or(true, Ordering::SeqCst);
+    {
+        let mut shared = shared.lock().unwrap();
+        shared.live = true;
+        shared.session_id = handshake.session_id;
+        shared.perms = handshake.perms;
+    }
     err_cnt.store(0, Ordering::Relaxed);
 
     let res = proto::client(
@@ -366,7 +377,7 @@ async fn client_conn(
     )
     .await;
 
-    live.fetch_and(false, Ordering::SeqCst);
+    shared.lock().unwrap().live = false;
 
     if let Err(e) = res {
         error!("Connection finished: {e}.");

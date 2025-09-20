@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ibig::UBig;
@@ -23,7 +24,10 @@ use crate::poker::{PokerAttemptRes, PokerHandle};
 use crate::proto::{
     ClientDataWrite, ClientDataWriteType, MiningAckOut, MiningDataOut, MiningResultIn,
 };
-use crate::shared::{digest_to_target, MiningData, MiningResult, MiningWire, TargetMetrics};
+use crate::server::TELEMETRY_PROOFRATE_INTERVAL;
+use crate::shared::{
+    digest_to_target, MiningData, MiningResult, MiningWire, TargetMetrics, Telemetry,
+};
 
 struct MiningRequest {
     data: MiningData,
@@ -58,6 +62,7 @@ pub async fn run_client(cfg: ClientConfig) {
         .map(|v| v.logical_core_ids(num_threads as _));
 
     let client_name = cfg.client_name.unwrap_or_default();
+    let client_name = Arc::<str>::from(&(*client_name));
 
     let (mining_attempt_results, mut mining_attempts) = mpsc::channel(num_threads as usize);
 
@@ -92,7 +97,7 @@ pub async fn run_client(cfg: ClientConfig) {
     let (_client_tasks, server_extras) = client_loops(
         cfg.miner_connect,
         cfg.miner_num_concurrent_connections,
-        &client_name,
+        client_name.clone(),
         mining_tx,
         ack_tx,
         miner_metadata,
@@ -118,6 +123,10 @@ pub async fn run_client(cfg: ClientConfig) {
         .with_previous(TargetMetrics::new(Duration::from_secs(60), "miss", "1m")
         .with_previous(TargetMetrics::new(Duration::from_secs(600), "miss", "10m")
         .with_previous(TargetMetrics::new(Duration::from_secs(3600), "miss", "60m"))));
+
+    let mut counted_proofs = 0;
+    let mut telemetry_interval = tokio::time::interval(TELEMETRY_PROOFRATE_INTERVAL);
+    telemetry_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
         counter!("nbx_miner_client_main_loop_ticks_total").increment(1);
@@ -161,7 +170,7 @@ pub async fn run_client(cfg: ClientConfig) {
 
                 let tip_cnt = requests
                     .iter()
-                    .filter(|((sid, _), _)| if server_extras[*sid].live.load(Ordering::SeqCst) { live_cnt += 1; true } else { false })
+                    .filter(|((sid, _), _)| if server_extras[*sid].shared().live { live_cnt += 1; true } else { false })
                     .filter(|(_, v)| v.data.block_height == max_height)
                     .count();
 
@@ -175,6 +184,37 @@ pub async fn run_client(cfg: ClientConfig) {
 
                 hit_metrics.measure_down();
                 miss_metrics.measure_down();
+            }
+            _ = telemetry_interval.tick() => {
+                let telemetry = Telemetry::Proofrate {
+                    machines: [(client_name.clone(), counted_proofs)].into_iter().collect(),
+                };
+                counted_proofs = 0;
+
+                for (server_id, e) in server_extras.iter().enumerate() {
+                    let shared = e.shared();
+                    if !shared.live || shared.session_id == 0 || !shared.perms.telemetry {
+                        continue;
+                    }
+
+                    gauge!(
+                        "nbx_miner_client_channel_mining_res_capacity",
+                        "server_id" => server_id.to_string(),
+                    ).set(e.mining_res.capacity() as f64);
+
+                    if let Err(e) = e.mining_res.try_send(
+                        ClientDataWrite {
+                            session_id: shared.session_id,
+                            data: ClientDataWriteType::Telemetry(telemetry.clone()),
+                        }
+                    ) {
+                        counter!(
+                            "nbx_miner_client_send_mining_res_fail_total",
+                            "server_id" => server_id.to_string(),
+                        ).increment(1);
+                        error!("Unable to send telemetry to {server_id}: {e:?}");
+                    };
+                }
             }
             r = mining_attempts.recv() => {
                 counter!("nbx_miner_client_main_loop_mining_attempts_total").increment(1);
@@ -198,6 +238,8 @@ pub async fn run_client(cfg: ClientConfig) {
                         };
 
                         let dig = digest_to_target(dig);
+
+                        counted_proofs += 1;
 
                         if target_hit {
                             hit_metrics.measure(dig);
@@ -281,7 +323,7 @@ fn start_mining_attempt(
 
     let mut filtered = requests
         .iter_mut()
-        .filter(|((sid, _), _)| server_extras[*sid].live.load(Ordering::SeqCst))
+        .filter(|((sid, _), _)| server_extras[*sid].shared().live)
         .inspect(|_| live_cnt += 1)
         .filter(|(_, v)| v.data.block_height == max_height)
         .collect::<Vec<_>>();
