@@ -35,8 +35,8 @@ pub fn name_valid(name: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
-fn pow_valid(work: u32, nonce: u32, pow_difficulty: u32) -> bool {
-    let hash = Sha3_256::digest((((work as u64) << 32) | (nonce as u64)).to_le_bytes());
+fn pow_valid(work: u64, nonce: u64, pow_difficulty: u32) -> bool {
+    let hash = Sha3_256::digest((((work as u128) << 64) | (nonce as u128)).to_le_bytes());
     let mut leading_zeros = 0;
     for e in hash {
         leading_zeros += e.leading_zeros();
@@ -70,14 +70,14 @@ pub struct Hello {
 pub struct HelloResp {
     protocol: u32,
     nonce_resp: u32,
-    pow_nonce: u32,
+    pow_nonce: u64,
     pow_difficulty: u32,
 }
 
 #[derive(Encode, Decode, Clone, Debug)]
 pub struct PostHello {
     client_hwid: Arc<str>,
-    proof: u32,
+    proof: u64,
     jwt: Option<Arc<str>>,
 }
 
@@ -355,7 +355,7 @@ pub async fn client_handshake<S: AsyncRead + AsyncWrite + Unpin>(
     }
 
     let start = Instant::now();
-    let proof = (0..u32::MAX)
+    let proof = (0..u64::MAX)
         .filter(|i| pow_valid(*i, resp.pow_nonce, resp.pow_difficulty))
         .next()
         .ok_or(io::ErrorKind::InvalidInput)?;
@@ -625,7 +625,7 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
     let resp = HelloResp {
         protocol: PROTOCOL,
         nonce_resp: req.client_session_id + 1,
-        pow_nonce: random::<u32>(),
+        pow_nonce: random::<u64>(),
         pow_difficulty: PROTO_POW_DIFFICULTY,
     };
 
