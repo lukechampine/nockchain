@@ -26,6 +26,7 @@ use x509_parser::prelude::*;
 use zkvm_jetpack::form::{Belt, PRIME};
 use zkvm_jetpack::noun::noun_ext::NounExt;
 
+use crate::device::DeviceInfo;
 use crate::proto::name_valid;
 
 #[derive(Debug)]
@@ -112,7 +113,12 @@ pub struct JwtClaims {
 
 #[derive(Clone)]
 pub enum Telemetry {
-    Proofrate { machines: BTreeMap<Arc<str>, u32> },
+    Proofrate {
+        machines: BTreeMap<Arc<str>, u32>,
+    },
+    HwInfo {
+        machines: BTreeMap<Arc<str>, DeviceInfo>,
+    },
 }
 
 fn make_root_store(pem_buf: &[u8]) -> RootCertStore {

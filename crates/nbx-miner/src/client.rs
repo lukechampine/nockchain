@@ -19,6 +19,7 @@ use zkvm_jetpack::form::{Belt, PRIME};
 use zkvm_jetpack::noun::noun_ext::NounExt as OtherNounExt;
 
 use crate::client_base::{client_loops, ClientConfig, ServerExtras};
+use crate::device::Device;
 use crate::metrics::{counter, gauge, histogram};
 use crate::poker::{PokerAttemptRes, PokerHandle};
 use crate::proto::{
@@ -61,8 +62,8 @@ pub async fn run_client(cfg: ClientConfig) {
         .pin_threads
         .map(|v| v.logical_core_ids(num_threads as _));
 
-    let client_name = cfg.client_name.unwrap_or_default();
-    let client_name = Arc::<str>::from(&(*client_name));
+    let device = Device::new(cfg.client_name, false);
+    let hwid = device.hwid.clone();
 
     let (mining_attempt_results, mut mining_attempts) = mpsc::channel(num_threads as usize);
 
@@ -73,7 +74,6 @@ pub async fn run_client(cfg: ClientConfig) {
     let test_jets = nockapp::kernel::boot::parse_test_jets(test_jets_str.as_str());
 
     let mut miners = tokio::task::JoinSet::new();
-    let mut miner_metadata = vec![];
     for i in 0..(num_threads as usize) {
         let core_id = pin_threads.as_ref().map(|v| v[i]);
 
@@ -85,8 +85,6 @@ pub async fn run_client(cfg: ClientConfig) {
             mining_attempt_results.clone(),
             MiningWire::Candidate.to_wire(),
         ));
-
-        miner_metadata.push(BTreeMap::new());
     }
     let mut miners = miners.join_all().await;
     miners.sort_by_key(|v| v.id());
@@ -97,10 +95,9 @@ pub async fn run_client(cfg: ClientConfig) {
     let (_client_tasks, server_extras) = client_loops(
         cfg.miner_connect,
         cfg.miner_num_concurrent_connections,
-        client_name.clone(),
+        device,
         mining_tx,
         ack_tx,
-        miner_metadata,
     );
 
     let mut requests = BTreeMap::new();
@@ -187,7 +184,7 @@ pub async fn run_client(cfg: ClientConfig) {
             }
             _ = telemetry_interval.tick() => {
                 let telemetry = Telemetry::Proofrate {
-                    machines: [(client_name.clone(), counted_proofs)].into_iter().collect(),
+                    machines: [(hwid.clone(), counted_proofs)].into_iter().collect(),
                 };
                 counted_proofs = 0;
 

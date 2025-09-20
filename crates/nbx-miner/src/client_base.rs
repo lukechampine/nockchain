@@ -18,6 +18,7 @@ use tokio::sync::{mpsc, Mutex};
 use tokio::task::{Id, JoinSet};
 use tokio::time::sleep;
 
+use crate::device::Device;
 use crate::metrics::gauge;
 use crate::proto::{
     self, ClientDataWrite, MiningAckOut, MiningDataOut, MiningResultIn, Permissions,
@@ -88,10 +89,9 @@ async fn resolve_all(seeds: &[String]) -> std::io::Result<BTreeMap<SocketAddr, O
 pub fn client_loops(
     miner_connect: Vec<String>,
     num_concurrent_connections: usize,
-    client_name: Arc<str>,
+    device: Device,
     mining_tx: mpsc::Sender<MiningDataOut>,
     ack_tx: mpsc::Sender<MiningAckOut>,
-    miner_metadata: Vec<BTreeMap<String, Arc<str>>>,
 ) -> (JoinSet<()>, Vec<ServerExtras>) {
     let _ = default_provider().install_default();
 
@@ -115,11 +115,10 @@ pub fn client_loops(
 
     client_tasks.spawn(client_pool(
         miner_connect,
-        client_name,
+        device.into(),
         client_extras,
         mining_tx,
         ack_tx,
-        miner_metadata,
     ));
 
     (client_tasks, server_extras)
@@ -127,11 +126,10 @@ pub fn client_loops(
 
 async fn client_pool(
     client_connect: Vec<String>,
-    client_name: Arc<str>,
+    device: Arc<Device>,
     mut client_extras: Vec<ClientExtras>,
     mining_tx: mpsc::Sender<MiningDataOut>,
     ack_tx: mpsc::Sender<MiningAckOut>,
-    miner_metadata: Vec<BTreeMap<String, Arc<str>>>,
 ) {
     let mut spawned: HashMap<Id, SocketAddr> = HashMap::new();
     let mut pool: HashMap<SocketAddr, PoolEntry> = HashMap::new();
@@ -197,13 +195,12 @@ async fn client_pool(
                 **a,
                 tls,
                 sn,
-                client_name.clone(),
+                device.clone(),
                 jwt.clone(),
                 extras.clone(),
                 c.err_cnt.clone(),
                 mining_tx.clone(),
                 ack_tx.clone(),
-                miner_metadata.clone(),
             ));
             spawned.insert(jh.id(), **a);
             c.handle = Some(jh);
@@ -279,7 +276,7 @@ async fn client_conn(
     addr: SocketAddr,
     tls: Arc<TlsClientConfig>,
     server_name: Option<String>,
-    client_name: Arc<str>,
+    device: Arc<Device>,
     jwt: Option<Arc<str>>,
     ClientExtras {
         id: server_id,
@@ -289,7 +286,6 @@ async fn client_conn(
     err_cnt: Arc<AtomicUsize>,
     data: mpsc::Sender<MiningDataOut>,
     ack: mpsc::Sender<MiningAckOut>,
-    miner_metadata: Vec<BTreeMap<String, Arc<str>>>,
 ) {
     // This is the only place we access it, and the arc is handed exclusively.
     let mut results = mining_res.try_lock().unwrap();
@@ -335,13 +331,7 @@ async fn client_conn(
 
     let handshake = match tokio::time::timeout(
         Duration::from_secs(20),
-        proto::client_handshake(
-            stream,
-            server_id,
-            &server_proto_name,
-            client_name.clone(),
-            jwt.clone(),
-        ),
+        proto::client_handshake(stream, server_id, &server_proto_name, device, jwt.clone()),
     )
     .await
     {
@@ -368,14 +358,7 @@ async fn client_conn(
     }
     err_cnt.store(0, Ordering::Relaxed);
 
-    let res = proto::client(
-        handshake,
-        &mut results,
-        data.clone(),
-        ack.clone(),
-        miner_metadata.clone(),
-    )
-    .await;
+    let res = proto::client(handshake, &mut results, data.clone(), ack.clone()).await;
 
     shared.lock().unwrap().live = false;
 
@@ -411,7 +394,10 @@ pub struct ClientConfig {
         help = "Pin miner threads to given CPU cores. Format: sequence=starting_core, exact=core1,core2,core3, or performance"
     )]
     pub pin_threads: Option<PinThreads>,
-    #[arg(long, help = "What's the client name to send in the protocol")]
+    #[arg(
+        long,
+        help = "What's the client name to send in the protocol. Affects machine ID."
+    )]
     pub client_name: Option<String>,
     #[cfg(not(feature = "force-send-only-targets"))]
     #[arg(long, help = "Whether to forward non-block proofs upstream")]

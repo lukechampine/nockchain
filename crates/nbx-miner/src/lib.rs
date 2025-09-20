@@ -1,6 +1,7 @@
 #[cfg(feature = "client")]
 pub mod client;
 pub mod client_base;
+pub mod device;
 #[cfg(feature = "client")]
 pub mod poker;
 pub mod proto;

@@ -18,6 +18,7 @@ use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinSet;
 use zkvm_jetpack::form::Belt;
 
+use crate::device::{Device, DeviceInfo};
 use crate::metrics::{counter, gauge, histogram};
 use crate::shared::{self, JwtClaims};
 
@@ -27,9 +28,9 @@ pub const RECENTLY_EXPIRED_DURATION: Duration = Duration::from_secs(20);
 pub const PROTO_POW_DIFFICULTY: u32 = 18;
 pub const JWT_MAX_LENGTH: usize = 1024;
 
-pub fn name_valid(client_name: &str) -> bool {
-    client_name.len() <= NAME_MAX_LENGTH
-        && client_name
+pub fn name_valid(name: &str) -> bool {
+    name.len() <= NAME_MAX_LENGTH
+        && name
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
@@ -75,7 +76,7 @@ pub struct HelloResp {
 
 #[derive(Encode, Decode, Clone, Debug)]
 pub struct PostHello {
-    client_name: Arc<str>,
+    client_hwid: Arc<str>,
     proof: u32,
     jwt: Option<Arc<str>>,
 }
@@ -88,8 +89,8 @@ pub struct Permissions {
 }
 
 #[derive(Encode, Decode, Clone, Debug)]
-pub struct SetMinerMetadata {
-    miners: Vec<BTreeMap<String, Arc<str>>>,
+pub struct TelemetryHwInfo {
+    machines: BTreeMap<Arc<str>, DeviceInfo>,
 }
 
 #[derive(Encode, Decode, Clone, Debug)]
@@ -170,9 +171,16 @@ pub struct MiningAckOut {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, FromRepr)]
 #[allow(non_camel_case_types)]
 pub enum MinerResponse {
-    METADATA = 0,
-    RESULT = 1,
-    TELEMETRY_PROOFRATE = 2,
+    RESULT = 0,
+    TELEMETRY = 1,
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, FromRepr)]
+#[allow(non_camel_case_types)]
+pub enum TelemetryResponse {
+    HWINFO = 1,
+    PROOFRATE = 2,
 }
 
 fn cue(d: Vec<u8>) -> NounSlab {
@@ -229,7 +237,7 @@ async fn binsend(
 }
 
 async fn binrecv<T: Decode<()>, const PARSE_ERR: bool>(
-    mut stream: impl AsyncRead + Unpin,
+    stream: impl AsyncRead + Unpin,
     target_sub: Arc<str>,
     target_name: Arc<str>,
     msg_type: &'static str,
@@ -308,13 +316,14 @@ pub struct ClientHandshake<S> {
     pub server_id: usize,
     pub session_id: u32,
     pub perms: Permissions,
+    pub device: Arc<Device>,
 }
 
 pub async fn client_handshake<S: AsyncRead + AsyncWrite + Unpin>(
     mut stream: S,
     server_id: usize,
     server_name: &str,
-    client_name: Arc<str>,
+    device: Arc<Device>,
     jwt: Option<Arc<str>>,
 ) -> io::Result<ClientHandshake<S>> {
     let (mut read, mut write) = split(&mut stream);
@@ -361,7 +370,7 @@ pub async fn client_handshake<S: AsyncRead + AsyncWrite + Unpin>(
         server_name.clone(),
         "post_hello",
         PostHello {
-            client_name,
+            client_hwid: device.hwid.clone(),
             proof,
             jwt,
         },
@@ -384,6 +393,7 @@ pub async fn client_handshake<S: AsyncRead + AsyncWrite + Unpin>(
         server_id,
         session_id,
         perms,
+        device,
     })
 }
 
@@ -395,12 +405,12 @@ pub async fn client<S: AsyncRead + AsyncWrite + Unpin>(
         server_id_str,
         server_id,
         session_id,
-        perms: _,
+        perms,
+        device,
     }: ClientHandshake<S>,
     data_out: &mut mpsc::Receiver<ClientDataWrite>,
     mining_data: mpsc::Sender<MiningDataOut>,
     ack: mpsc::Sender<MiningAckOut>,
-    metadata: Vec<BTreeMap<String, Arc<str>>>,
 ) -> io::Result<()> {
     let (mut read, mut write) = split(stream);
 
@@ -486,15 +496,23 @@ pub async fn client<S: AsyncRead + AsyncWrite + Unpin>(
     };
 
     let sender = async {
-        write.write_u8(MinerResponse::METADATA as _).await?;
-        binsend(
-            &mut write,
-            server_sub.clone(),
-            server_name.clone(),
-            "miner_metadata",
-            SetMinerMetadata { miners: metadata },
-        )
-        .await?;
+        // TODO: inject this inside the loop
+        if perms.telemetry {
+            write.write_u8(MinerResponse::TELEMETRY as _).await?;
+            write.write_u8(TelemetryResponse::HWINFO as _).await?;
+            binsend(
+                &mut write,
+                server_sub.clone(),
+                server_name.clone(),
+                "telemetry_hwinfo",
+                TelemetryHwInfo {
+                    machines: [(device.hwid.clone(), device.info.clone())]
+                        .into_iter()
+                        .collect(),
+                },
+            )
+            .await?;
+        }
 
         while let Some(ClientDataWrite { session_id, data }) = data_out.recv().await {
             // Broadcast may contain previous session's datapoints. Skip them.
@@ -545,19 +563,34 @@ pub async fn client<S: AsyncRead + AsyncWrite + Unpin>(
                         })
                         .await;
                 }
-                ClientDataWriteType::Telemetry(shared::Telemetry::Proofrate { machines }) => {
-                    let telemetry = TelemetryProofrate { machines };
-                    write
-                        .write_u8(MinerResponse::TELEMETRY_PROOFRATE as _)
-                        .await?;
-                    binsend(
-                        &mut write,
-                        server_sub.clone(),
-                        server_name.clone(),
-                        "telemetry_proofrate",
-                        telemetry,
-                    )
-                    .await?;
+                ClientDataWriteType::Telemetry(telemetry) => {
+                    write.write_u8(MinerResponse::TELEMETRY as _).await?;
+                    match telemetry {
+                        shared::Telemetry::Proofrate { machines } => {
+                            let telemetry = TelemetryProofrate { machines };
+                            write.write_u8(TelemetryResponse::PROOFRATE as _).await?;
+                            binsend(
+                                &mut write,
+                                server_sub.clone(),
+                                server_name.clone(),
+                                "telemetry_proofrate",
+                                telemetry,
+                            )
+                            .await?;
+                        }
+                        shared::Telemetry::HwInfo { machines } => {
+                            let telemetry = TelemetryHwInfo { machines };
+                            write.write_u8(TelemetryResponse::HWINFO as _).await?;
+                            binsend(
+                                &mut write,
+                                server_sub.clone(),
+                                server_name.clone(),
+                                "telemetry_hwinfo",
+                                telemetry,
+                            )
+                            .await?;
+                        }
+                    }
                 }
             }
         }
@@ -575,7 +608,7 @@ pub async fn client<S: AsyncRead + AsyncWrite + Unpin>(
 pub struct ServerHandshake<S> {
     pub stream: S,
     pub client_sub: Arc<str>,
-    pub client_name: Arc<str>,
+    pub client_hwid: Arc<str>,
     pub perms: Permissions,
 }
 
@@ -600,7 +633,7 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
 
     let PostHello {
         proof,
-        client_name,
+        client_hwid,
         jwt,
     } = binrecv_limited::<_, false, { NAME_MAX_LENGTH as u32 + JWT_MAX_LENGTH as u32 + 16 }>(
         &mut stream,
@@ -614,7 +647,7 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
         return Err(io::ErrorKind::InvalidData.into());
     }
 
-    if !name_valid(&client_name) {
+    if !name_valid(&client_hwid) {
         return Err(io::ErrorKind::InvalidData.into());
     }
 
@@ -656,7 +689,7 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
     };
 
     let client_sub: Arc<str> = (&*claims.sub).into();
-    let client_name: Arc<str> = (*client_name).into();
+    let client_hwid: Arc<str> = (*client_hwid).into();
     let perms = Permissions {
         non_share_proofs: claims.non_share_proofs,
         telemetry: claims.telemetry,
@@ -666,18 +699,18 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
     binsend(
         &mut stream,
         client_sub.clone(),
-        client_name.clone(),
+        client_hwid.clone(),
         "handshake_finish",
         perms,
     )
     .await?;
 
-    debug!("Client with subject '{client_sub}' and name '{client_name}' completed handshake");
+    debug!("Client with subject '{client_sub}' and HWID '{client_hwid}' completed handshake");
 
     Ok(ServerHandshake {
         stream,
         client_sub,
-        client_name,
+        client_hwid,
         perms,
     })
 }
@@ -691,10 +724,10 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
     let ServerHandshake {
         stream,
         client_sub,
-        client_name,
+        client_hwid,
         perms,
     } = handshake;
-    debug!("Client ID {client_id} joined with subject '{client_sub}' and name '{client_name}'");
+    debug!("Client ID {client_id} joined with subject '{client_sub}' and HWID '{client_hwid}'");
 
     let mut mining_data = pin!(mining_data);
 
@@ -777,7 +810,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                 "nbx_miner_proto_server_channel_capacity",
                 "channel_name" => "results_out",
                 "client_sub" => client_sub.clone(),
-                "client_name" => client_name.clone(),
+                "client_hwid" => client_hwid.clone(),
                 "client_id" => client_id_str.clone(),
             )
             .set(results_out.capacity() as f64);
@@ -806,7 +839,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                             "nbx_miner_proto_server_block_height",
                             "client_id" => client_id_str.clone(),
                             "client_sub" => client_sub.clone(),
-                            "client_name" => client_name.clone(),
+                            "client_hwid" => client_hwid.clone(),
                         ).set(data.block_height as f64);
 
                         let data_id = guard.add_data(data.clone(), expiration.clone());
@@ -841,7 +874,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
             binsend(
                 &mut write,
                 client_sub.clone(),
-                client_name.clone(),
+                client_hwid.clone(),
                 "mining_data",
                 set_data,
             )
@@ -850,7 +883,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                 "nbx_miner_proto_server_set_data_count",
                 "client_id" => client_id_str.clone(),
                 "client_sub" => client_sub.clone(),
-                "client_name" => client_name.clone(),
+                "client_hwid" => client_hwid.clone(),
             )
             .increment(1);
         }
@@ -865,21 +898,11 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                 return Err(io::ErrorKind::InvalidData.into());
             };
             match cmd {
-                MinerResponse::METADATA => {
-                    // TODO: remove, or change to fixed metadata
-                    let _: SetMinerMetadata = binrecv_server(
-                        &mut read,
-                        client_sub.clone(),
-                        client_name.clone(),
-                        "miner_metadata",
-                    )
-                    .await?;
-                }
                 MinerResponse::RESULT => {
                     let res: MiningResult = binrecv_server(
                         &mut read,
                         client_sub.clone(),
-                        client_name.clone(),
+                        client_hwid.clone(),
                         "mining_result",
                     )
                     .await?;
@@ -889,10 +912,10 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                             "nbx_miner_proto_server_unauthenticated_non_share_proof_count",
                             "client_id" => client_id_str.clone(),
                             "client_sub" => client_sub.clone(),
-                            "client_name" => client_name.clone(),
+                            "client_hwid" => client_hwid.clone(),
                         )
                         .increment(1);
-                        trace!("client_id={client_id}, client_sub={client_sub}, client_name={client_name} sent non-share proof without the capability. Ignoring.");
+                        trace!("client_id={client_id}, client_sub={client_sub}, client_hwid={client_hwid} sent non-share proof without the capability. Ignoring.");
                         continue;
                     }
 
@@ -907,7 +930,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                             "nbx_miner_proto_server_data_id_outdated_or_invalid_count",
                             "client_id" => client_id_str.clone(),
                             "client_sub" => client_sub.clone(),
-                            "client_name" => client_name.clone(),
+                            "client_hwid" => client_hwid.clone(),
                         )
                         .increment(1);
                         counter!("nbx_miner_proto_global_server_data_id_outdated_or_invalid_count")
@@ -920,7 +943,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                         "nbx_miner_proto_server_data_id_valid_count",
                         "client_id" => client_id_str.clone(),
                         "client_sub" => client_sub.clone(),
-                        "client_name" => client_name.clone(),
+                        "client_hwid" => client_hwid.clone(),
                     )
                     .increment(1);
                     counter!(
@@ -934,7 +957,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                         "nbx_miner_proto_server_attempt_seconds",
                         "client_id" => client_id_str.clone(),
                         "client_sub" => client_sub.clone(),
-                        "client_name" => client_name.clone(),
+                        "client_hwid" => client_hwid.clone(),
                     )
                     .record((res.attempt_millis as f64) / 1000.0);
 
@@ -948,7 +971,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                             "nbx_miner_proto_server_gpu_submit_seconds",
                             "client_id" => client_id_str.clone(),
                             "client_sub" => client_sub.clone(),
-                            "client_name" => client_name.clone(),
+                            "client_hwid" => client_hwid.clone(),
                         )
                         .record((res.gpu_submit_millis as f64) / 1000.0);
 
@@ -956,7 +979,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                             "nbx_miner_proto_server_gpu_enqueue_seconds",
                             "client_id" => client_id_str.clone(),
                             "client_sub" => client_sub.clone(),
-                            "client_name" => client_name.clone(),
+                            "client_hwid" => client_hwid.clone(),
                         )
                         .record((res.gpu_enqueue_millis as f64) / 1000.0);
 
@@ -964,7 +987,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                             "nbx_miner_proto_server_gpu_wait_seconds",
                             "client_id" => client_id_str.clone(),
                             "client_sub" => client_sub.clone(),
-                            "client_name" => client_name.clone(),
+                            "client_hwid" => client_hwid.clone(),
                         )
                         .record((res.gpu_wait_millis as f64) / 1000.0);
                     }*/
@@ -992,37 +1015,53 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                         .await
                         .map_err(|_| io::ErrorKind::BrokenPipe)?;
                 }
-                MinerResponse::TELEMETRY_PROOFRATE => {
+                MinerResponse::TELEMETRY => {
                     if !perms.telemetry {
                         counter!(
                             "nbx_miner_proto_server_unauthenticated_telemetry_count",
                             "client_id" => client_id_str.clone(),
                             "client_sub" => client_sub.clone(),
-                            "client_name" => client_name.clone(),
+                            "client_hwid" => client_hwid.clone(),
                         )
                         .increment(1);
-                        trace!("client_id={client_id}, client_sub={client_sub}, client_name={client_name} sent telemetry without being allowed to do it. Aborting.");
+                        trace!("client_id={client_id}, client_sub={client_sub}, client_hwid={client_hwid} sent telemetry without being allowed to do it. Aborting.");
                         return Err(io::Error::new(
                             io::ErrorKind::PermissionDenied,
                             "Telemetry not allowed",
                         ));
                     }
 
-                    let TelemetryProofrate { machines } = binrecv_server(
-                        &mut read,
-                        client_sub.clone(),
-                        client_name.clone(),
-                        "telemetry_proofrate",
-                    )
-                    .await?;
+                    let cmd = read.read_u8().await?;
+                    let Some(cmd) = TelemetryResponse::from_repr(cmd) else {
+                        error!("Invalid telemetry cmd: {cmd:x}. Exiting");
+                        return Err(io::ErrorKind::InvalidData.into());
+                    };
+
+                    let data = match cmd {
+                        TelemetryResponse::PROOFRATE => {
+                            let TelemetryProofrate { machines } = binrecv_server(
+                                &mut read,
+                                client_sub.clone(),
+                                client_hwid.clone(),
+                                "telemetry_proofrate",
+                            )
+                            .await?;
+                            ClientDataReadType::Telemetry(shared::Telemetry::Proofrate { machines })
+                        }
+                        TelemetryResponse::HWINFO => {
+                            let TelemetryHwInfo { machines } = binrecv_server(
+                                &mut read,
+                                client_sub.clone(),
+                                client_hwid.clone(),
+                                "telemetry_hwinfo",
+                            )
+                            .await?;
+                            ClientDataReadType::Telemetry(shared::Telemetry::HwInfo { machines })
+                        }
+                    };
 
                     results_out
-                        .send(ClientDataRead {
-                            client_id,
-                            data: ClientDataReadType::Telemetry(shared::Telemetry::Proofrate {
-                                machines,
-                            }),
-                        })
+                        .send(ClientDataRead { client_id, data })
                         .await
                         .map_err(|_| io::ErrorKind::BrokenPipe)?;
                 }

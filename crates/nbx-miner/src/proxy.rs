@@ -1,6 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
-use std::net::SocketAddr;
-use std::sync::atomic::Ordering;
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex as SyncMutex};
 use std::time::{Duration, Instant};
 
@@ -14,15 +12,17 @@ use zkvm_jetpack::form::{Belt, PRIME};
 use zkvm_jetpack::noun::noun_ext::NounExt as OtherNounExt;
 
 use crate::client_base::client_loops;
+use crate::device::{Device, DeviceInfo};
 use crate::metrics::{counter, gauge, histogram};
 use crate::proto::{
     ClientDataWrite, ClientDataWriteType, MiningAckOut, MiningDataOut, MiningResultIn,
     RECENTLY_EXPIRED_DURATION,
 };
 use crate::server::{mining_server, MiningConfig, TELEMETRY_PROOFRATE_INTERVAL};
+#[cfg(feature = "verifier")]
+use crate::shared::{difficulty_to_target, to_bn};
 use crate::shared::{
-    difficulty_to_target, parse_bn, target_to_difficulty, to_bn, MiningData, MiningResult,
-    TargetMetrics, Telemetry, TimeWriter,
+    parse_bn, target_to_difficulty, MiningData, MiningResult, TargetMetrics, Telemetry, TimeWriter,
 };
 
 #[derive(Clone, Debug, Args)]
@@ -41,8 +41,11 @@ pub struct ProxyConfig {
         default_value = "3"
     )]
     pub miner_num_concurrent_connections: usize,
-    #[arg(long, help = "What's the client name to send in the protocol")]
-    pub client_name: String,
+    #[arg(
+        long,
+        help = "What's the client name to send in the protocol. Affects machine ID."
+    )]
+    pub client_name: Option<String>,
     #[arg(long, help = "Whether to forward non-block proofs upstream")]
     pub forward_non_block: bool,
     #[arg(
@@ -55,6 +58,11 @@ pub struct ProxyConfig {
     #[arg(long, help = "Minimum difficulty for the proxy", default_value = "1")]
     #[cfg(feature = "verifier")]
     pub min_share_difficulty: u64,
+    #[arg(
+        long,
+        help = "Disable forwarding telemetry (hardware info + proofrate)"
+    )]
+    pub miner_no_telemetry: bool,
 }
 
 const ROLLING_TIMING_CNT: usize = 20;
@@ -66,7 +74,7 @@ struct DifficultyTracker {
     current_diff10: u64,
     min_difficulty: u64,
     current_target: UBig,
-    rolling_timings: VecDeque<(Instant, u64)>,
+    rolling_timings: std::collections::VecDeque<(Instant, u64)>,
     accumulated_work: u64,
     target_interval: Duration,
     last_updated: Instant,
@@ -136,15 +144,16 @@ pub async fn run_proxy(cfg: ProxyConfig) {
         .await
         .expect("Unable to bind proxy listener");
 
+    let device = Device::new(cfg.client_name.clone(), true);
+
     let (mining_tx, mut mining_rx) = mpsc::channel(cfg.miner_connect.len());
     let (ack_tx, mut ack_rx) = mpsc::channel(cfg.miner_connect.len());
     let (_client_tasks, server_extras) = client_loops(
         cfg.miner_connect,
         cfg.miner_num_concurrent_connections,
-        (&*cfg.client_name).into(),
+        device,
         mining_tx,
         ack_tx,
-        Default::default(),
     );
 
     let mut requests = BTreeMap::new();
@@ -266,13 +275,22 @@ pub async fn run_proxy(cfg: ProxyConfig) {
         }
     };
 
-    let telemetry_proofrate = SyncMutex::new(BTreeMap::<_, BTreeMap<_, _>>::new());
+    #[derive(Default)]
+    struct TelemetryStore {
+        proofrate: BTreeMap<Arc<str>, BTreeMap<Arc<str>, u32>>,
+        hwinfo: BTreeMap<Arc<str>, BTreeMap<Arc<str>, DeviceInfo>>,
+    }
 
-    let process_telemetry = |telemetry, _, client_sub| {
-        let mut pr = telemetry_proofrate.lock().unwrap();
-        match telemetry {
+    let telemetry = SyncMutex::new(TelemetryStore::default());
+
+    let process_telemetry = |in_telemetry, _, client_sub| {
+        let mut tl = telemetry.lock().unwrap();
+        match in_telemetry {
             Telemetry::Proofrate { machines } => {
-                pr.entry(client_sub).or_default().extend(machines);
+                tl.proofrate.entry(client_sub).or_default().extend(machines);
+            }
+            Telemetry::HwInfo { machines } => {
+                tl.hwinfo.entry(client_sub).or_default().extend(machines);
             }
         }
         async move { Ok(()) }
@@ -344,17 +362,25 @@ pub async fn run_proxy(cfg: ProxyConfig) {
                 }
                 _ = telemetry_interval.tick() => {
                     counter!("nbx_miner_proxy_main_loop_telemetry_interval_total").increment(1);
-                    let pr = {
-                        core::mem::take(&mut *telemetry_proofrate.lock().unwrap())
+                    let tl = {
+                        core::mem::take(&mut *telemetry.lock().unwrap())
                     };
-                    if !pr.is_empty() {
+                    let mut out_tl = vec![];
+                    if !tl.proofrate.is_empty() {
                         // In case there are duplicate machine IDs, yes, we are merging them together.
-                        let machines = pr.into_values().flatten().collect::<BTreeMap<_, _>>();
-                        let telemetry = Telemetry::Proofrate { machines };
+                        let machines = tl.proofrate.into_values().flatten().collect::<BTreeMap<_, _>>();
+                        out_tl.push(Telemetry::Proofrate { machines });
+                    }
+                    if !tl.hwinfo.is_empty() {
+                        // In case there are duplicate machine IDs, yes, we are merging them together.
+                        let machines = tl.hwinfo.into_values().flatten().collect::<BTreeMap<_, _>>();
+                        out_tl.push(Telemetry::HwInfo { machines });
+                    }
 
+                    for tl in out_tl {
                         for (server_id, e) in server_extras.iter().enumerate() {
                             let shared = e.shared();
-                            if !shared.live || shared.session_id == 0 || !shared.perms.telemetry {
+                            if !shared.live || shared.session_id == 0 || !shared.perms.telemetry || !cfg.miner_no_telemetry {
                                 continue;
                             }
 
@@ -366,7 +392,7 @@ pub async fn run_proxy(cfg: ProxyConfig) {
                             if let Err(e) = e.mining_res.try_send(
                                 ClientDataWrite {
                                     session_id: shared.session_id,
-                                    data: ClientDataWriteType::Telemetry(telemetry.clone()),
+                                    data: ClientDataWriteType::Telemetry(tl.clone()),
                                 }
                             ) {
                                 counter!(

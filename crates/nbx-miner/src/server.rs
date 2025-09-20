@@ -476,7 +476,7 @@ pub async fn mining_server<
                 let Some((handshake, a)) = v else { continue };
                 let sub = handshake.client_sub.clone();
                 let perms = handshake.perms;
-                debug!("Accepted client_id={client_cnt}, client_name={}, client_sub={sub} on {a}", handshake.client_name);
+                debug!("Accepted client_id={client_cnt}, client_hwid={}, client_sub={sub} on {a}", handshake.client_hwid);
                 replay_mining_data.retain(|(_, v)| v.get().is_none());
                 let cmd = futures::stream::iter(replay_mining_data.clone()).chain(BroadcastStream::new(mining_data_tx.subscribe()).filter_map(|v| async move { v.ok() }));
                 let srv = server(handshake, cmd, client_cnt, tx.clone());
@@ -636,6 +636,14 @@ pub async fn mining_server<
                                             "machine_id" => k.clone(),
                                         ).set(*p as f64);
                                     }
+                                }
+                                Telemetry::HwInfo {
+                                    machines
+                                } => {
+                                    counter!(
+                                        "nbx_miner_server_telemetry_hwinfo_count_total",
+                                        "client_sub" => sub.clone(),
+                                    ).increment(machines.len() as u64);
                                 }
                             }
                         }
