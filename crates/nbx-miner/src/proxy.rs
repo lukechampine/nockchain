@@ -15,7 +15,10 @@ use zkvm_jetpack::noun::noun_ext::NounExt as OtherNounExt;
 
 use crate::client_base::client_loops;
 use crate::metrics::{counter, gauge, histogram};
-use crate::proto::{MiningAckOut, MiningDataOut, MiningResultIn, RECENTLY_EXPIRED_DURATION};
+use crate::proto::{
+    ClientDataWrite, ClientDataWriteType, MiningAckOut, MiningDataOut, MiningResultIn,
+    RECENTLY_EXPIRED_DURATION,
+};
 use crate::server::{mining_server, MiningConfig};
 use crate::shared::{
     difficulty_to_target, parse_bn, target_to_difficulty, to_bn, MiningData, MiningResult,
@@ -246,10 +249,9 @@ pub async fn run_proxy(cfg: ProxyConfig) {
             )
             .set(mining_res.capacity() as f64);
 
-            if let Err(e) = mining_res.try_send(MiningResultIn {
-                data_id,
+            if let Err(e) = mining_res.try_send(ClientDataWrite {
                 session_id,
-                data,
+                data: ClientDataWriteType::MiningResult(MiningResultIn { data_id, data }),
             }) {
                 counter!(
                     "nbx_miner_proxy_send_mining_res_fail_total",
@@ -264,8 +266,16 @@ pub async fn run_proxy(cfg: ProxyConfig) {
         }
     };
 
+    let process_telemetry = |_, _, _| async move { Ok(()) };
+
     let (reqs_out, reqs_in) = mpsc::channel(1);
-    let server = mining_server(cfg.server, server_listener, reqs_in, process_target);
+    let server = mining_server(
+        cfg.server,
+        server_listener,
+        reqs_in,
+        process_target,
+        process_telemetry,
+    );
 
     let main_iter = async {
         let mut interval = tokio::time::interval(Duration::from_secs(1));

@@ -20,7 +20,9 @@ use zkvm_jetpack::noun::noun_ext::NounExt as OtherNounExt;
 use crate::client_base::{client_loops, ClientConfig, ServerExtras};
 use crate::metrics::{counter, gauge, histogram};
 use crate::poker::{PokerAttemptRes, PokerHandle};
-use crate::proto::{MiningAckOut, MiningDataOut, MiningResultIn};
+use crate::proto::{
+    ClientDataWrite, ClientDataWriteType, MiningAckOut, MiningDataOut, MiningResultIn,
+};
 use crate::shared::{digest_to_target, MiningData, MiningResult, MiningWire, TargetMetrics};
 
 struct MiningRequest {
@@ -88,7 +90,11 @@ pub async fn run_client(cfg: ClientConfig) {
     let (ack_tx, mut ack_rx) = mpsc::channel(cfg.miner_connect.len());
 
     let (_client_tasks, server_extras) = client_loops(
-        cfg.miner_connect, cfg.miner_num_concurrent_connections, &client_name, mining_tx, ack_tx,
+        cfg.miner_connect,
+        cfg.miner_num_concurrent_connections,
+        &client_name,
+        mining_tx,
+        ack_tx,
         miner_metadata,
     );
 
@@ -207,20 +213,24 @@ pub async fn run_client(cfg: ClientConfig) {
                         ).set(extra.mining_res.capacity() as f64);
 
                         if target_hit || forward_non_block {
-                            if let Err(e) = extra.mining_res.try_send(MiningResultIn {
-                                data_id,
-                                session_id,
-                                data: MiningResult {
-                                    miner_id: id,
-                                    attempt_millis: duration_millis,
-                                    gpu_enqueue_millis: gpu_enqueue_ms as _,
-                                    gpu_submit_millis: gpu_submit_ms as _,
-                                    gpu_wait_millis: gpu_finish_ms as _,
-                                    target_hit,
-                                    poke,
-                                    effect,
+                            if let Err(e) = extra.mining_res.try_send(
+                                ClientDataWrite {
+                                    session_id,
+                                    data: ClientDataWriteType::MiningResult(MiningResultIn {
+                                        data_id,
+                                        data: MiningResult {
+                                            miner_id: id,
+                                            attempt_millis: duration_millis,
+                                            gpu_enqueue_millis: gpu_enqueue_ms as _,
+                                            gpu_submit_millis: gpu_submit_ms as _,
+                                            gpu_wait_millis: gpu_finish_ms as _,
+                                            target_hit,
+                                            poke,
+                                            effect,
+                                        }
+                                    })
                                 }
-                            }) {
+                            ) {
                                 counter!(
                                     "nbx_miner_client_send_mining_res_fail_total",
                                     "server_id" => server_id.to_string(),

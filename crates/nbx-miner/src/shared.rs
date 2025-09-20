@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::future::Future;
 use std::io::{self, Cursor};
 use std::net::{Ipv4Addr, SocketAddr};
@@ -104,6 +104,12 @@ pub struct JwtClaims {
     pub iss: String,
     #[serde(default)]
     pub non_share_proofs: bool,
+    #[serde(default)]
+    pub telemetry: bool,
+}
+
+pub enum Telemetry {
+    Proofrate { machines: BTreeMap<Arc<str>, u32> },
 }
 
 fn make_root_store(pem_buf: &[u8]) -> RootCertStore {

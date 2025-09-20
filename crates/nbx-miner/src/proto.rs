@@ -62,7 +62,7 @@ fn verify_jwt(jwt: &str, keys: &[DecodingKey]) -> Result<TokenData<JwtClaims>, E
 #[derive(Encode, Decode, Clone, Copy, Debug)]
 pub struct Hello {
     protocol: u32,
-    nonce: u32,
+    client_session_id: u32,
 }
 
 #[derive(Encode, Decode, Clone, Copy, Debug)]
@@ -83,6 +83,12 @@ pub struct PostHello {
 #[derive(Encode, Decode, Clone, Debug)]
 pub struct SetMinerMetadata {
     miners: Vec<BTreeMap<String, Arc<str>>>,
+}
+
+#[derive(Encode, Decode, Clone, Debug)]
+struct TelemetryProofrate {
+    // Proofs per minute
+    machines: BTreeMap<Arc<str>, u32>,
 }
 
 #[derive(Encode, Decode, Clone, Debug)]
@@ -117,15 +123,27 @@ pub struct MiningResult {
 
 pub struct MiningResultIn {
     pub data_id: u32,
-    pub session_id: u32,
     pub data: shared::MiningResult,
 }
 
-pub struct MiningResultOut {
-    pub miner_metadata: Arc<BTreeMap<String, Arc<str>>>,
+pub enum ClientDataWriteType {
+    MiningResult(MiningResultIn),
+    Telemetry(shared::Telemetry),
+}
+
+pub struct ClientDataWrite {
+    pub session_id: u32,
+    pub data: ClientDataWriteType,
+}
+
+pub enum ClientDataReadType {
+    MiningResult(shared::MiningResult, Arc<shared::MiningData>),
+    Telemetry(shared::Telemetry),
+}
+
+pub struct ClientDataRead {
     pub client_id: usize,
-    pub data: shared::MiningResult,
-    pub in_data: Arc<shared::MiningData>,
+    pub data: ClientDataReadType,
 }
 
 pub struct MiningDataOut {
@@ -146,6 +164,7 @@ pub struct MiningAckOut {
 pub enum MinerResponse {
     METADATA = 0,
     RESULT = 1,
+    TELEMETRY_PROOFRATE = 2,
 }
 
 fn cue(d: Vec<u8>) -> NounSlab {
@@ -279,7 +298,7 @@ pub struct ClientHandshake<S> {
     pub server_name: Arc<str>,
     pub server_id_str: Arc<str>,
     pub server_id: usize,
-    pub nonce: u32,
+    pub session_id: u32,
 }
 
 pub async fn client_handshake<S: AsyncRead + AsyncWrite + Unpin>(
@@ -296,7 +315,7 @@ pub async fn client_handshake<S: AsyncRead + AsyncWrite + Unpin>(
     let server_sub: Arc<str> = "".into();
 
     // Initial handshake
-    let nonce = random::<u32>();
+    let session_id = random::<u32>();
     binsend(
         &mut write,
         server_sub.clone(),
@@ -304,7 +323,7 @@ pub async fn client_handshake<S: AsyncRead + AsyncWrite + Unpin>(
         "hello",
         Hello {
             protocol: PROTOCOL,
-            nonce,
+            client_session_id: session_id,
         },
     )
     .await?;
@@ -313,7 +332,7 @@ pub async fn client_handshake<S: AsyncRead + AsyncWrite + Unpin>(
     if resp.protocol != PROTOCOL {
         return Err(io::ErrorKind::Unsupported.into());
     }
-    if resp.nonce_resp != nonce + 1 {
+    if resp.nonce_resp != session_id + 1 {
         return Err(io::ErrorKind::BrokenPipe.into());
     }
 
@@ -354,7 +373,7 @@ pub async fn client_handshake<S: AsyncRead + AsyncWrite + Unpin>(
         server_name,
         server_id_str,
         server_id,
-        nonce,
+        session_id,
     })
 }
 
@@ -365,9 +384,9 @@ pub async fn client<S: AsyncRead + AsyncWrite + Unpin>(
         server_name,
         server_id_str,
         server_id,
-        nonce,
+        session_id,
     }: ClientHandshake<S>,
-    mining_out: &mut mpsc::Receiver<MiningResultIn>,
+    data_out: &mut mpsc::Receiver<ClientDataWrite>,
     mining_data: mpsc::Sender<MiningDataOut>,
     ack: mpsc::Sender<MiningAckOut>,
     metadata: Vec<BTreeMap<String, Arc<str>>>,
@@ -423,7 +442,7 @@ pub async fn client<S: AsyncRead + AsyncWrite + Unpin>(
             if mining_data
                 .send(MiningDataOut {
                     server_id,
-                    session_id: nonce,
+                    session_id,
                     expire: datas.expire,
                     new_datas: datas
                         .new_datas
@@ -466,58 +485,70 @@ pub async fn client<S: AsyncRead + AsyncWrite + Unpin>(
         )
         .await?;
 
-        while let Some(MiningResultIn {
-            data_id,
-            session_id,
-            data,
-        }) = mining_out.recv().await
-        {
-            let miner_id: Arc<str> = Arc::from(&*data.miner_id.to_string());
+        while let Some(ClientDataWrite { session_id, data }) = data_out.recv().await {
             // Broadcast may contain previous session's datapoints. Skip them.
-            if session_id != nonce {
+            if session_id != session_id {
                 counter!(
                     "nbx_miner_proto_client_session_id_mismatch_count",
                     "server_name" => server_name.clone(),
                     "server_id" => server_id_str.clone(),
-                    "miner_id" => miner_id.clone(),
                 )
                 .increment(1);
                 continue;
             }
-            let rdata = MiningResult {
-                data_id,
-                miner_id: data.miner_id as u32,
-                attempt_millis: data.attempt_millis,
-                gpu_enqueue_millis: data.gpu_enqueue_millis,
-                gpu_submit_millis: data.gpu_submit_millis,
-                gpu_wait_millis: data.gpu_wait_millis,
-                target_hit: data.target_hit,
-                poke: data.poke.as_ref().map(NounSlab::jam).map(Vec::from),
-                effect: data.effect.as_ref().map(NounSlab::jam).map(Vec::from),
-            };
-            gauge!(
-                "nbx_miner_proto_client_data_id",
-                "server_name" => server_name.clone(),
-                "server_id" => server_id_str.clone(),
-                "miner_id" => miner_id.clone(),
-            )
-            .set(rdata.data_id as f64);
-            write.write_u8(MinerResponse::RESULT as _).await?;
-            binsend(
-                &mut write,
-                server_sub.clone(),
-                server_name.clone(),
-                "mining_result",
-                rdata,
-            )
-            .await?;
-            let _ = ack
-                .send(MiningAckOut {
-                    server_id,
-                    miner_id: data.miner_id,
-                    data_id,
-                })
-                .await;
+            match data {
+                ClientDataWriteType::MiningResult(MiningResultIn { data_id, data }) => {
+                    let miner_id: Arc<str> = Arc::from(&*data.miner_id.to_string());
+                    let rdata = MiningResult {
+                        data_id,
+                        miner_id: data.miner_id as u32,
+                        attempt_millis: data.attempt_millis,
+                        gpu_enqueue_millis: data.gpu_enqueue_millis,
+                        gpu_submit_millis: data.gpu_submit_millis,
+                        gpu_wait_millis: data.gpu_wait_millis,
+                        target_hit: data.target_hit,
+                        poke: data.poke.as_ref().map(NounSlab::jam).map(Vec::from),
+                        effect: data.effect.as_ref().map(NounSlab::jam).map(Vec::from),
+                    };
+                    gauge!(
+                        "nbx_miner_proto_client_data_id",
+                        "server_name" => server_name.clone(),
+                        "server_id" => server_id_str.clone(),
+                        "miner_id" => miner_id.clone(),
+                    )
+                    .set(rdata.data_id as f64);
+                    write.write_u8(MinerResponse::RESULT as _).await?;
+                    binsend(
+                        &mut write,
+                        server_sub.clone(),
+                        server_name.clone(),
+                        "mining_result",
+                        rdata,
+                    )
+                    .await?;
+                    let _ = ack
+                        .send(MiningAckOut {
+                            server_id,
+                            miner_id: data.miner_id,
+                            data_id,
+                        })
+                        .await;
+                }
+                ClientDataWriteType::Telemetry(shared::Telemetry::Proofrate { machines }) => {
+                    let telemetry = TelemetryProofrate { machines };
+                    write
+                        .write_u8(MinerResponse::TELEMETRY_PROOFRATE as _)
+                        .await?;
+                    binsend(
+                        &mut write,
+                        server_sub.clone(),
+                        server_name.clone(),
+                        "telemetry_proofrate",
+                        telemetry,
+                    )
+                    .await?;
+                }
+            }
         }
         io::Result::Ok(())
     };
@@ -535,6 +566,7 @@ pub struct ServerHandshake<S> {
     pub client_sub: Arc<str>,
     pub client_name: Arc<str>,
     pub non_share_proofs: bool,
+    pub telemetry: bool,
 }
 
 pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
@@ -549,7 +581,7 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
     }
     let resp = HelloResp {
         protocol: PROTOCOL,
-        nonce_resp: req.nonce + 1,
+        nonce_resp: req.client_session_id + 1,
         pow_nonce: random::<u32>(),
         pow_difficulty: PROTO_POW_DIFFICULTY,
     };
@@ -585,6 +617,7 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
                 aud: "nbx-proto".into(),
                 iss: "nbx".into(),
                 non_share_proofs: true,
+                telemetry: true,
             }
         }
         (jwt, jwt_keys) => {
@@ -630,6 +663,7 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
         client_sub,
         client_name,
         non_share_proofs: claims.non_share_proofs,
+        telemetry: claims.telemetry,
     })
 }
 
@@ -637,13 +671,14 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
     handshake: ServerHandshake<S>,
     mining_data: impl Stream<Item = (Arc<shared::MiningData>, Arc<OnceLock<Instant>>)>,
     client_id: usize,
-    results_out: mpsc::Sender<MiningResultOut>,
+    results_out: mpsc::Sender<ClientDataRead>,
 ) -> io::Result<()> {
     let ServerHandshake {
         stream,
         client_sub,
         client_name,
         non_share_proofs,
+        telemetry,
     } = handshake;
     debug!("Client ID {client_id} joined with subject '{client_sub}' and name '{client_name}'");
 
@@ -810,8 +845,6 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
     };
 
     let receiver = async {
-        let miner = Arc::new(BTreeMap::new());
-
         while let Ok(cmd) = read.read_u8().await {
             let Some(cmd) = MinerResponse::from_repr(cmd) else {
                 error!("Invalid cmd: {cmd:x}. Exiting");
@@ -924,23 +957,48 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                     let effect = res.effect.map(cue);
 
                     results_out
-                        .send(MiningResultOut {
-                            miner_metadata: miner.clone(),
+                        .send(ClientDataRead {
                             client_id,
-                            data: shared::MiningResult {
-                                miner_id: res.miner_id as usize,
-                                attempt_millis: res.attempt_millis,
-                                gpu_enqueue_millis: res.gpu_enqueue_millis,
-                                gpu_submit_millis: res.gpu_submit_millis,
-                                gpu_wait_millis: res.gpu_wait_millis,
-                                target_hit: res.target_hit,
-                                poke,
-                                effect,
-                            },
-                            in_data: data,
+                            data: ClientDataReadType::MiningResult(
+                                shared::MiningResult {
+                                    miner_id: res.miner_id as usize,
+                                    attempt_millis: res.attempt_millis,
+                                    gpu_enqueue_millis: res.gpu_enqueue_millis,
+                                    gpu_submit_millis: res.gpu_submit_millis,
+                                    gpu_wait_millis: res.gpu_wait_millis,
+                                    target_hit: res.target_hit,
+                                    poke,
+                                    effect,
+                                },
+                                data,
+                            ),
                         })
                         .await
                         .map_err(|_| io::ErrorKind::BrokenPipe)?;
+                }
+                MinerResponse::TELEMETRY_PROOFRATE => {
+                    if !telemetry {
+                        counter!(
+                            "nbx_miner_proto_server_unauthenticated_telemetry_count",
+                            "client_id" => client_id_str.clone(),
+                            "client_sub" => client_sub.clone(),
+                            "client_name" => client_name.clone(),
+                        )
+                        .increment(1);
+                        trace!("client_id={client_id}, client_sub={client_sub}, client_name={client_name} sent telemetry without being allowed to do it. Aborting.");
+                        return Err(io::Error::new(
+                            io::ErrorKind::PermissionDenied,
+                            "Telemetry not allowed",
+                        ));
+                    }
+
+                    let res: TelemetryProofrate = binrecv_server(
+                        &mut read,
+                        client_sub.clone(),
+                        client_name.clone(),
+                        "telemetry_proofrate",
+                    )
+                    .await?;
                 }
             }
         }

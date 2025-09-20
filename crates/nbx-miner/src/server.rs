@@ -39,9 +39,9 @@ use tokio_stream::wrappers::BroadcastStream;
 use zkvm_jetpack::form::{Belt, PRIME};
 use zkvm_jetpack::noun::noun_ext::NounExt as ZNounExt;
 
-use crate::proto::{server, server_handshake, MiningResultOut};
+use crate::proto::{server, server_handshake, ClientDataRead, ClientDataReadType};
 use crate::shared::{
-    tls_accept, MiningData, MiningResult, MiningWire, TimeWriter, TlsServerConfig,
+    tls_accept, MiningData, MiningResult, MiningWire, Telemetry, TimeWriter, TlsServerConfig,
 };
 
 #[derive(Clone, Debug, Args)]
@@ -134,6 +134,7 @@ pub(crate) enum AbortReason {
     ValidatorFailure(&'static str),
     ProofValidation(String),
     ProofRejected,
+    TelemetryError,
 }
 
 impl AbortReason {
@@ -143,6 +144,7 @@ impl AbortReason {
             Self::ValidatorFailure(v) => error!("abort::validation_failure: {v}. client_id={client_id}"),
             Self::ProofValidation(v) => error!("abort::proof_validation: validator rejected the proof, why={v}. client_id={client_id}"),
             Self::ProofRejected => error!("abort::proof_rejected: Mined PoW was not accepted. client_id={client_id}"),
+            Self::TelemetryError => error!("abort::telemetry_error: Telemetry error. client_id={client_id}"),
         }
     }
 
@@ -153,6 +155,7 @@ impl AbortReason {
             Self::ValidatorFailure(_) => counter!("nbx_miner_server_abort_count", "mode" => "validator_failure").increment(1),
             Self::ProofValidation(_) => counter!("nbx_miner_server_abort_count", "mode" => "proof_validation").increment(1),
             Self::ProofRejected => counter!("nbx_miner_server_abort_count", "mode" => "proof_rejected").increment(1),
+            Self::TelemetryError => counter!("nbx_miner_server_abort_count", "mode" => "telemetry_error").increment(1),
         }
     }
 }
@@ -204,7 +207,10 @@ pub async fn mining_driver(
             async move { fut.await.map(|_| ()) }
         };
 
-    let server = mining_server(cfg, listener, reqs_in, process_target);
+    let process_telemetry =
+        |_telemetry: Telemetry, _client_id: usize, _sub: Arc<str>| async move { Result::Ok(()) };
+
+    let server = mining_server(cfg, listener, reqs_in, process_target, process_telemetry);
     let mut server = pin!(server);
     let mut cur_mining_data: Option<(Arc<MiningData>, _)> = None;
     let mut randbelt = Belt(0);
@@ -288,13 +294,16 @@ pub async fn mining_driver(
 }
 
 pub async fn mining_server<
-    F: FnMut(MiningResult, usize, Arc<str>, Arc<MiningData>, NounSlab) -> Fut,
-    Fut: Future<Output = Result>,
+    F1: FnMut(MiningResult, usize, Arc<str>, Arc<MiningData>, NounSlab) -> Fut1,
+    F2: FnMut(Telemetry, usize, Arc<str>) -> Fut2,
+    Fut1: Future<Output = Result>,
+    Fut2: Future<Output = Result>,
 >(
     cfg: MiningConfig,
     listener: TcpListener,
     mut reqs_in: mpsc::Receiver<(Arc<MiningData>, Arc<OnceLock<Instant>>)>,
-    mut process_target: F,
+    mut process_target: F1,
+    mut process_telemetry: F2,
 ) -> Result {
     let (tx, mut rx) = mpsc::channel(1024);
     let mining_data_tx = broadcast::channel(16).0;
@@ -478,126 +487,136 @@ pub async fn mining_server<
                 }
             }
             data = rx.recv() => {
-                let MiningResultOut { data, client_id, in_data, .. } = data.expect("Result senders died");
+                let ClientDataRead { data, client_id } = data.expect("Result senders died");
 
                 let Some(sub) = clients.lookup(client_id).cloned() else {
                     error!("Unable to lookup client, client_id={client_id}");
                     continue;
                 };
 
-                let run_cnt_res = run_cnt;
-                run_cnt += 1;
+                match data {
+                    ClientDataReadType::MiningResult(data, in_data) => {
+                        let run_cnt_res = run_cnt;
+                        run_cnt += 1;
 
-                trace!("Target hit? {}", data.target_hit);
+                        trace!("Target hit? {}", data.target_hit);
 
-                if data.target_hit {
-                    let Some((poke, effect_slab)) = data.poke.as_ref().zip(data.effect.as_ref()) else {
-                        error!("Successful result without poke and proof");
-                        continue;
-                    };
-                    let effect = unsafe { effect_slab.root() };
-                    let Ok(effect) = effect.as_cell().map(|v| v.head()) else {
-                        clients.abort(client_id, AbortReason::NounValidation("Expected exactly one effect"));
-                        continue;
-                    };
-                    let Ok([head, res, tail]) = effect.uncell() else {
-                        clients.abort(client_id, AbortReason::NounValidation("Expected three elements in mining result"));
-                        continue;
-                    };
-                    if head.eq_bytes("mine-result") {
-                        if !unsafe { res.raw_equals(&D(0)) } {
-                            error!("Successful result with improper res value ({res:?})");
-                            continue;
-                        }
-                    } else {
-                        error!("Successful result with improper head");
-                        continue;
-                    }
-                    if save_mine_attempts.should_save_lucky() {
-                        save_mine_attempt(&poke, &effect_slab, &run_id, run_cnt_res).await;
-                    }
-                    let Ok([_, poke]) = tail.uncell() else {
-                        clients.abort(client_id, AbortReason::NounValidation("Expected two elements in tail"));
-                        continue;
-                    };
-                    let mut poke_slab = NounSlab::new();
-                    poke_slab.copy_into(poke);
-
-                    let Ok([_, _, _, _, _, nonce]) = poke.uncell() else {
-                        clients.abort(client_id, AbortReason::NounValidation("Expected 6 elements in the poke result"));
-                        continue;
-                    };
-
-                    // Verify that the start of the nonce contains the fixed belts
-                    let Ok(nonce_noun) = nonce.uncell::<5>() else {
-                        clients.abort(client_id, AbortReason::NounValidation("Nonce has invalid number of elements"));
-                        continue;
-                    };
-                    let mut nonce = [Belt(0); 5];
-                    let mut cnt = 0;
-                    for n in nonce_noun {
-                        let Ok(n) = n.as_atom().and_then(|v| v.as_u64()) else {
-                            error!("Nonce has invalid element {n:?}");
-                            break;
-                        };
-                        nonce[cnt] = Belt(n);
-                        cnt += 1;
-                    }
-                    if cnt != 5 {
-                        clients.abort(client_id, AbortReason::NounValidation("Nonce has invalid element"));
-                        continue;
-                    }
-                    if nonce.iter().zip(in_data.fixed_nonce_atoms.iter()).any(|(a, b)| a != b) {
-                        error!("Mined nonce {nonce:?} does not start with fixed belts {:?}", in_data.fixed_nonce_atoms);
-                        clients.abort(client_id, AbortReason::NounValidation("Mined nonce does not start with fixed belts"));
-                        continue;
-                    }
-
-                    #[cfg(feature = "verifier")]
-                    if let Some(verifier) = &verifier {
-                        let mut verif_slab = NounSlab::<NockJammer>::new();
-                        let target = unsafe { in_data.target.root() };
-                        let verif_poke = T(&mut verif_slab, &[D(tas!(b"verify")), poke, *target, D(in_data.pow_len)]);
-                        verif_slab.copy_into(verif_poke);
-                        match verifier.poke(MiningWire::Mined.to_wire(), verif_slab).await {
-                            Err(e) => {
-                                error!("Unable to poke verifier {e:?}");
-                                clients.abort(client_id, AbortReason::ValidatorFailure("Unable to poke verifier"));
+                        if data.target_hit {
+                            let Some((poke, effect_slab)) = data.poke.as_ref().zip(data.effect.as_ref()) else {
+                                error!("Successful result without poke and proof");
                                 continue;
-                            }
-                            Ok(r) => {
-                                let result = unsafe { r.root() };
-                                let Ok(result) = result.as_cell() else {
-                                    clients.abort(client_id, AbortReason::ValidatorFailure("Expected result to be a cell"));
-                                    continue;
-                                };
-                                let effect = result.head();
-                                let Ok([outcome, why]) = effect.uncell() else {
-                                    clients.abort(client_id, AbortReason::ValidatorFailure("Expected effect to be a tuple"));
-                                    continue;
-                                };
-
-                                if !outcome.eq_bytes("good") {
-                                    let why = why.as_atom().ok();
-                                    let why = why.as_ref().map(|v| v.as_ne_bytes()).and_then(|v| std::str::from_utf8(v).ok()).unwrap_or("");
-                                    clients.abort(client_id, AbortReason::ProofValidation(why.to_string()));
+                            };
+                            let effect = unsafe { effect_slab.root() };
+                            let Ok(effect) = effect.as_cell().map(|v| v.head()) else {
+                                clients.abort(client_id, AbortReason::NounValidation("Expected exactly one effect"));
+                                continue;
+                            };
+                            let Ok([head, res, tail]) = effect.uncell() else {
+                                clients.abort(client_id, AbortReason::NounValidation("Expected three elements in mining result"));
+                                continue;
+                            };
+                            if head.eq_bytes("mine-result") {
+                                if !unsafe { res.raw_equals(&D(0)) } {
+                                    error!("Successful result with improper res value ({res:?})");
                                     continue;
                                 }
+                            } else {
+                                error!("Successful result with improper head");
+                                continue;
+                            }
+                            if save_mine_attempts.should_save_lucky() {
+                                save_mine_attempt(&poke, &effect_slab, &run_id, run_cnt_res).await;
+                            }
+                            let Ok([_, poke]) = tail.uncell() else {
+                                clients.abort(client_id, AbortReason::NounValidation("Expected two elements in tail"));
+                                continue;
+                            };
+                            let mut poke_slab = NounSlab::new();
+                            poke_slab.copy_into(poke);
+
+                            let Ok([_, _, _, _, _, nonce]) = poke.uncell() else {
+                                clients.abort(client_id, AbortReason::NounValidation("Expected 6 elements in the poke result"));
+                                continue;
+                            };
+
+                            // Verify that the start of the nonce contains the fixed belts
+                            let Ok(nonce_noun) = nonce.uncell::<5>() else {
+                                clients.abort(client_id, AbortReason::NounValidation("Nonce has invalid number of elements"));
+                                continue;
+                            };
+                            let mut nonce = [Belt(0); 5];
+                            let mut cnt = 0;
+                            for n in nonce_noun {
+                                let Ok(n) = n.as_atom().and_then(|v| v.as_u64()) else {
+                                    error!("Nonce has invalid element {n:?}");
+                                    break;
+                                };
+                                nonce[cnt] = Belt(n);
+                                cnt += 1;
+                            }
+                            if cnt != 5 {
+                                clients.abort(client_id, AbortReason::NounValidation("Nonce has invalid element"));
+                                continue;
+                            }
+                            if nonce.iter().zip(in_data.fixed_nonce_atoms.iter()).any(|(a, b)| a != b) {
+                                error!("Mined nonce {nonce:?} does not start with fixed belts {:?}", in_data.fixed_nonce_atoms);
+                                clients.abort(client_id, AbortReason::NounValidation("Mined nonce does not start with fixed belts"));
+                                continue;
+                            }
+
+                            #[cfg(feature = "verifier")]
+                            if let Some(verifier) = &verifier {
+                                let mut verif_slab = NounSlab::<NockJammer>::new();
+                                let target = unsafe { in_data.target.root() };
+                                let verif_poke = T(&mut verif_slab, &[D(tas!(b"verify")), poke, *target, D(in_data.pow_len)]);
+                                verif_slab.copy_into(verif_poke);
+                                match verifier.poke(MiningWire::Mined.to_wire(), verif_slab).await {
+                                    Err(e) => {
+                                        error!("Unable to poke verifier {e:?}");
+                                        clients.abort(client_id, AbortReason::ValidatorFailure("Unable to poke verifier"));
+                                        continue;
+                                    }
+                                    Ok(r) => {
+                                        let result = unsafe { r.root() };
+                                        let Ok(result) = result.as_cell() else {
+                                            clients.abort(client_id, AbortReason::ValidatorFailure("Expected result to be a cell"));
+                                            continue;
+                                        };
+                                        let effect = result.head();
+                                        let Ok([outcome, why]) = effect.uncell() else {
+                                            clients.abort(client_id, AbortReason::ValidatorFailure("Expected effect to be a tuple"));
+                                            continue;
+                                        };
+
+                                        if !outcome.eq_bytes("good") {
+                                            let why = why.as_atom().ok();
+                                            let why = why.as_ref().map(|v| v.as_ne_bytes()).and_then(|v| std::str::from_utf8(v).ok()).unwrap_or("");
+                                            clients.abort(client_id, AbortReason::ProofValidation(why.to_string()));
+                                            continue;
+                                        }
+                                    }
+                                }
+                            }
+
+                            if process_target(data, client_id, sub, in_data, poke_slab).await.is_err() {
+                                clients.abort(client_id, AbortReason::ProofRejected);
+                                continue;
+                            };
+                        } else {
+                            trace!("didn't find block, starting new attempt. client={} miner={}", client_id, data.miner_id);
+                            let Some((poke, effect)) = data.poke.zip(data.effect) else {
+                                continue;
+                            };
+                            if save_mine_attempts.should_save_unlucky() {
+                                save_mine_attempt(&poke, &effect, &run_id, run_cnt_res).await;
                             }
                         }
                     }
-
-                    if process_target(data, client_id, sub, in_data, poke_slab).await.is_err() {
-                        clients.abort(client_id, AbortReason::ProofRejected);
-                        continue;
-                    };
-                } else {
-                    trace!("didn't find block, starting new attempt. client={} miner={}", client_id, data.miner_id);
-                    let Some((poke, effect)) = data.poke.zip(data.effect) else {
-                        continue;
-                    };
-                    if save_mine_attempts.should_save_unlucky() {
-                        save_mine_attempt(&poke, &effect, &run_id, run_cnt_res).await;
+                    ClientDataReadType::Telemetry(t) => {
+                        if process_telemetry(t, client_id, sub).await.is_err() {
+                            clients.abort(client_id, AbortReason::TelemetryError);
+                            continue;
+                        }
                     }
                 }
             }

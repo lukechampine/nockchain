@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::future::pending;
 use std::net::SocketAddr;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -19,18 +19,21 @@ use tokio::task::{Id, JoinSet};
 use tokio::time::sleep;
 
 use crate::metrics::gauge;
-use crate::proto::{self, MiningAckOut, MiningDataOut, MiningResultIn};
+use crate::proto::{self, ClientDataWrite, MiningAckOut, MiningDataOut, MiningResultIn};
 use crate::shared::{tls_connect, TlsClientConfig};
 
 pub struct ServerExtras {
-    pub mining_res: mpsc::Sender<MiningResultIn>,
+    pub mining_res: mpsc::Sender<ClientDataWrite>,
     pub live: Arc<AtomicBool>,
+    pub session_id: Arc<AtomicU32>,
 }
 
+#[derive(Clone)]
 struct ClientExtras {
     id: usize,
-    mining_res: Arc<Mutex<mpsc::Receiver<MiningResultIn>>>,
+    mining_res: Arc<Mutex<mpsc::Receiver<ClientDataWrite>>>,
     live: Arc<AtomicBool>,
+    session_id: Arc<AtomicU32>,
 }
 
 struct PoolEntry {
@@ -87,19 +90,27 @@ pub fn client_loops(
     for id in 0..num_concurrent_connections {
         let (tx, rx) = mpsc::channel(64);
         let live = Arc::new(AtomicBool::new(false));
+        let session_id = Arc::new(AtomicU32::new(0));
         client_extras.push(ClientExtras {
             id,
             mining_res: Arc::new(Mutex::new(rx)),
             live: live.clone(),
+            session_id: session_id.clone(),
         });
         server_extras.push(ServerExtras {
             mining_res: tx,
             live,
+            session_id,
         });
     }
 
     client_tasks.spawn(client_pool(
-        miner_connect, client_name, client_extras, mining_tx, ack_tx, miner_metadata,
+        miner_connect,
+        client_name,
+        client_extras,
+        mining_tx,
+        ack_tx,
+        miner_metadata,
     ));
 
     (client_tasks, server_extras)
@@ -176,13 +187,11 @@ async fn client_pool(
             let jh = tasks.spawn(client_conn(
                 **a,
                 tls,
-                extras.id,
                 sn,
                 client_name.clone(),
                 jwt.clone(),
-                extras.live.clone(),
+                extras.clone(),
                 c.err_cnt.clone(),
-                extras.mining_res.clone(),
                 mining_tx.clone(),
                 ack_tx.clone(),
                 miner_metadata.clone(),
@@ -236,6 +245,7 @@ async fn client_pool(
                 e.last_died = Instant::now();
                 let extras = e.extras.take().unwrap();
                 extras.live.store(false, Ordering::Relaxed);
+                extras.session_id.store(0, Ordering::Relaxed);
                 client_extras.push(extras);
             }
         }
@@ -260,19 +270,22 @@ async fn client_pool(
 async fn client_conn(
     addr: SocketAddr,
     tls: Arc<TlsClientConfig>,
-    server_id: usize,
     server_name: Option<String>,
     client_name: Arc<str>,
     jwt: Option<Arc<str>>,
-    live: Arc<AtomicBool>,
+    ClientExtras {
+        id: server_id,
+        mining_res,
+        live,
+        session_id,
+    }: ClientExtras,
     err_cnt: Arc<AtomicUsize>,
-    results: Arc<Mutex<mpsc::Receiver<MiningResultIn>>>,
     data: mpsc::Sender<MiningDataOut>,
     ack: mpsc::Sender<MiningAckOut>,
     miner_metadata: Vec<BTreeMap<String, Arc<str>>>,
 ) {
     // This is the only place we access it, and the arc is handed exclusively.
-    let mut results = results.try_lock().unwrap();
+    let mut results = mining_res.try_lock().unwrap();
     let server_proto_name = addr.to_string();
 
     let stream = match tokio::time::timeout(Duration::from_secs(10), TcpStream::connect(addr)).await
@@ -313,8 +326,6 @@ async fn client_conn(
         }
     };
 
-    let mut handshaked = false;
-
     let handshake = match tokio::time::timeout(
         Duration::from_secs(20),
         proto::client_handshake(
@@ -342,6 +353,7 @@ async fn client_conn(
         }
     };
 
+    session_id.store(handshake.session_id, Ordering::Relaxed);
     live.fetch_or(true, Ordering::SeqCst);
     err_cnt.store(0, Ordering::Relaxed);
 
