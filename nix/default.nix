@@ -76,7 +76,7 @@ let
   ica // {
     pname = "nbx-miner";
     CARGO_PROFILE = profile;
-    cargoExtraArgs = "-p nbx-miner --bin nbx-miner --features nbx-miner/jemalloc,nbx-miner/client ${extraArgs}";
+    cargoExtraArgs = "-p nbx-miner --bin nbx-miner --features nbx-miner/jemalloc,nbx-miner/client,nbx-miner/jwt-auth-client ${extraArgs}";
     buildInputs = [ hoonc.hoonc ];
     preBuild = "mkdir -p assets && cp ${jam-pkg.miner-jam.out} './assets/miner.jam'";
   });
@@ -85,7 +85,7 @@ let
   ica // {
     pname = "nbx-miner";
     CARGO_PROFILE = profile;
-    cargoExtraArgs = "-p nbx-miner --bin nbx-proxy --features nbx-miner/jemalloc,nbx-miner/verifier,nbx-miner/force-preverify,nbx-miner/prom-exporter,nbx-miner/server-tls-key-load ${extraArgs}";
+    cargoExtraArgs = "-p nbx-miner --bin nbx-proxy --features nbx-miner/jemalloc,nbx-miner/verifier,nbx-miner/force-preverify,nbx-miner/prom-exporter,nbx-miner/server-tls-key-load,nbx-miner/jwt-auth-server,nbx-miner/jwt-auth-client ${extraArgs}";
     buildInputs = [ hoonc.hoonc ];
     preBuild = "mkdir -p assets && cp ${jam-pkg.verifier-jam.out} './assets/verifier.jam'";
   });
