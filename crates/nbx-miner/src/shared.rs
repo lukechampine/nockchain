@@ -1,13 +1,15 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::future::Future;
 use std::io::{self, Cursor};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::Path;
 use std::pin::Pin;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use ibig::UBig;
+use metrics::gauge;
 use nbx_jetpack::log::*;
 use nockapp::noun::slab::{slab_equality, NounSlab};
 use nockapp::wire::Wire;
@@ -109,6 +111,8 @@ pub struct JwtClaims {
     pub telemetry: bool,
     #[serde(default)]
     pub telemetry_metrics: bool,
+    #[serde(default)]
+    pub max_conns_override: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -416,5 +420,66 @@ impl TargetMetrics {
         let now = Instant::now();
         self.measurements.push_back((now, target));
         self.measure_down();
+    }
+}
+
+#[derive(Default, Debug)]
+struct ConnTrackInner {
+    // map(sub, set(hwid))
+    conns: BTreeMap<Arc<str>, BTreeSet<Arc<str>>>,
+}
+
+#[derive(Clone, Default, Debug)]
+pub struct ConnTrack(Arc<Mutex<ConnTrackInner>>);
+
+impl ConnTrack {
+    pub fn connect(
+        &self,
+        sub: Arc<str>,
+        hwid: Arc<str>,
+        max_sub_conns: usize,
+    ) -> Option<ConnHandle> {
+        let mut track = self.0.lock().unwrap();
+        let mut sub_entry = track.conns.entry(sub.clone()).or_default();
+
+        // Within limit and not connected
+        if sub_entry.len() < max_sub_conns && sub_entry.insert(hwid.clone()) {
+            Some(ConnHandle {
+                track: self.clone(),
+                sub,
+                hwid,
+            })
+        } else {
+            None
+        }
+    }
+
+    pub fn emit_metrics(&self) {
+        let track = self.0.lock().unwrap();
+        gauge!("nbx_miner_conntrack_active").set(track.conns.len() as f64);
+        for (s, v) in &track.conns {
+            gauge!("nbx_miner_conntrack_sub_active", "sub" => s.clone()).set(v.len() as f64);
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ConnHandle {
+    track: ConnTrack,
+    sub: Arc<str>,
+    hwid: Arc<str>,
+}
+
+impl Drop for ConnHandle {
+    fn drop(&mut self) {
+        let mut track = self.track.0.lock().unwrap();
+        let Entry::Occupied(mut sub) = track.conns.entry(self.sub.clone()) else {
+            panic!("Not occupied when expected occupied");
+        };
+        let sub_value = sub.get_mut();
+        assert!(sub_value.remove(&self.hwid));
+        if sub_value.is_empty() {
+            sub.remove();
+        }
     }
 }

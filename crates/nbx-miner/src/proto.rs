@@ -27,6 +27,7 @@ pub const NAME_MAX_LENGTH: usize = 16;
 pub const RECENTLY_EXPIRED_DURATION: Duration = Duration::from_secs(20);
 pub const PROTO_POW_DIFFICULTY: u32 = 18;
 pub const JWT_MAX_LENGTH: usize = 1024;
+pub const DEFAULT_MAX_CONNS_FROM_SUB: usize = 10;
 
 pub fn name_valid(name: &str) -> bool {
     name.len() <= NAME_MAX_LENGTH
@@ -610,11 +611,13 @@ pub struct ServerHandshake<S> {
     pub client_sub: Arc<str>,
     pub client_hwid: Arc<str>,
     pub perms: Permissions,
+    pub conn: shared::ConnHandle,
 }
 
 pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
     mut stream: S,
     jwt_keys: Arc<[DecodingKey]>,
+    conntrack: shared::ConnTrack,
 ) -> io::Result<ServerHandshake<S>> {
     // Initial handshake. We only have 8 bytes in the hello packet, but then there's extra padding
     let req: Hello =
@@ -662,6 +665,7 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
                 non_share_proofs: true,
                 telemetry: true,
                 telemetry_metrics: true,
+                max_conns_override: Some(usize::MAX),
             }
         }
         (jwt, jwt_keys) => {
@@ -690,6 +694,19 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
 
     let client_sub: Arc<str> = (&*claims.sub).into();
     let client_hwid: Arc<str> = (*client_hwid).into();
+
+    let Some(conn) = conntrack.connect(
+        client_sub.clone(),
+        client_hwid.clone(),
+        claims
+            .max_conns_override
+            .unwrap_or(DEFAULT_MAX_CONNS_FROM_SUB),
+    ) else {
+        let err = io::Error::new(io::ErrorKind::ConnectionRefused, "Too many connections");
+        let _ = binsend_err(stream, "".into(), "".into(), "error".into(), &err).await;
+        return Err(err);
+    };
+
     let perms = Permissions {
         non_share_proofs: claims.non_share_proofs,
         telemetry: claims.telemetry,
@@ -712,6 +729,7 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
         client_sub,
         client_hwid,
         perms,
+        conn,
     })
 }
 
@@ -726,6 +744,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
         client_sub,
         client_hwid,
         perms,
+        conn: _conn,
     } = handshake;
     debug!("Client ID {client_id} joined with subject '{client_sub}' and HWID '{client_hwid}'");
 

@@ -41,7 +41,8 @@ use zkvm_jetpack::noun::noun_ext::NounExt as ZNounExt;
 
 use crate::proto::{server, server_handshake, ClientDataRead, ClientDataReadType};
 use crate::shared::{
-    tls_accept, MiningData, MiningResult, MiningWire, Telemetry, TimeWriter, TlsServerConfig,
+    tls_accept, ConnTrack, MiningData, MiningResult, MiningWire, Telemetry, TimeWriter,
+    TlsServerConfig,
 };
 
 pub const TELEMETRY_PROOFRATE_INTERVAL: Duration = Duration::from_secs(60);
@@ -348,6 +349,8 @@ pub async fn mining_server<
     }
 
     let jwt_keys: Arc<[DecodingKey]> = (&*jwt_keys).into();
+    let conntrack = ConnTrack::default();
+    let conntrack2 = conntrack.clone();
 
     let (accept_tx, mut accept_rx) = mpsc::channel(8);
     let accept_loop = async move {
@@ -386,6 +389,7 @@ pub async fn mining_server<
                     let accept_tx = accept_tx.clone();
                     let jwt_keys = jwt_keys.clone();
                     let tls = tls.clone();
+                    let conntrack = conntrack2.clone();
                     handshake_set.spawn(async move {
                         let s = match tokio::time::timeout(
                             Duration::from_secs(10),
@@ -406,7 +410,7 @@ pub async fn mining_server<
 
                         let handshake = match tokio::time::timeout(
                             Duration::from_secs(20),
-                            server_handshake(s, jwt_keys),
+                            server_handshake(s, jwt_keys, conntrack),
                         )
                         .await
                         {
@@ -470,6 +474,8 @@ pub async fn mining_server<
         }
     };
 
+    let mut metrics_interval = tokio::time::interval(Duration::from_secs(10));
+
     loop {
         tokio::select! {
             v = accept_rx.recv() => {
@@ -496,6 +502,9 @@ pub async fn mining_server<
                     error!("Accept loop removed");
                     break Err(NockAppError::IoError(io::ErrorKind::BrokenPipe.into()));
                 }
+            }
+            _ = metrics_interval.tick() => {
+                conntrack.emit_metrics();
             }
             data = rx.recv() => {
                 let ClientDataRead { data, client_id } = data.expect("Result senders died");
