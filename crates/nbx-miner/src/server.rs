@@ -236,11 +236,7 @@ pub async fn mining_driver(
         |_telemetry: Telemetry, _client_id: usize, _sub: Uuid| async move { Result::Ok(()) };
 
     let server = mining_server(
-        cfg,
-        listener,
-        reqs_in,
-        process_target,
-        process_telemetry,
+        cfg, listener, reqs_in, process_target, process_telemetry,
         #[cfg(feature = "db")]
         None,
     );
