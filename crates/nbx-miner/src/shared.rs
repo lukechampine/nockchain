@@ -456,10 +456,13 @@ impl ConnTrack {
 
     pub fn emit_metrics(&self) {
         let track = self.0.lock().unwrap();
-        gauge!("nbx_miner_conntrack_active").set(track.conns.len() as f64);
+        gauge!("nbx_miner_conntrack_subs").set(track.conns.len() as f64);
+        let mut total = 0;
         for (s, v) in &track.conns {
             gauge!("nbx_miner_conntrack_sub_active", "sub" => s.clone()).set(v.len() as f64);
+            total += v.len();
         }
+        gauge!("nbx_miner_conntrack_active").set(total as f64);
     }
 }
 

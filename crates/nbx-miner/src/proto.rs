@@ -5,6 +5,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use bincode::{Decode, Encode};
+use chacha::{ChaCha, KeyStream};
 use futures::{Stream, StreamExt};
 use jsonwebtoken::errors::{Error, ErrorKind};
 use jsonwebtoken::{decode, Algorithm, DecodingKey, TokenData, Validation};
@@ -22,12 +23,20 @@ use crate::device::{Device, DeviceInfo};
 use crate::metrics::{counter, gauge, histogram};
 use crate::shared::{self, JwtClaims};
 
-pub const PROTOCOL: u32 = u32::MAX - 6;
+pub const PROTOCOL: u32 = 6;
 pub const NAME_MAX_LENGTH: usize = 16;
 pub const RECENTLY_EXPIRED_DURATION: Duration = Duration::from_secs(20);
 pub const PROTO_POW_DIFFICULTY: u32 = 18;
 pub const JWT_MAX_LENGTH: usize = 1024;
 pub const DEFAULT_MAX_CONNS_FROM_SUB: usize = 10;
+
+// NOTE: This is not proper encryption measure (key is baked into binary). We are just doing this
+// to make wireshark analysis much more of a pain to perform. We ensure proper encryption through
+// TLS.
+pub const CHACHA_KEY: [u8; 32] = [
+    0xf9, 0xfb, 0x35, 0x60, 0x88, 0x44, 0xc6, 0xf9, 0xd8, 0xfe, 0x15, 0xe3, 0x22, 0x0e, 0x5b, 0xf5,
+    0x01, 0x2a, 0xa0, 0x9f, 0x9e, 0x27, 0xad, 0x0f, 0x6c, 0x20, 0xa5, 0x73, 0xa3, 0xd1, 0xe4, 0x94,
+];
 
 pub fn name_valid(name: &str) -> bool {
     name.len() <= NAME_MAX_LENGTH
@@ -193,14 +202,16 @@ fn cue(d: Vec<u8>) -> NounSlab {
 
 async fn binsend_err(
     mut stream: impl AsyncWrite + Unpin,
+    chacha: &mut ChaCha,
     target_sub: Arc<str>,
     target_name: Arc<str>,
     msg_type: &'static str,
     d: &io::Error,
 ) -> io::Result<()> {
     let t = Instant::now();
-    let d = bincode::encode_to_vec(d.to_string(), bincode::config::standard())
+    let mut d = bincode::encode_to_vec(d.to_string(), bincode::config::standard())
         .map_err(|_| io::ErrorKind::InvalidData)?;
+    chacha.xor_read(&mut d);
     stream.write_u32_le((d.len() as u32) | (1u32 << 31)).await?;
     stream.write_all(&d).await?;
     stream.flush().await?;
@@ -216,14 +227,16 @@ async fn binsend_err(
 
 async fn binsend(
     mut stream: impl AsyncWrite + Unpin,
+    chacha: &mut ChaCha,
     target_sub: Arc<str>,
     target_name: Arc<str>,
     msg_type: &'static str,
     d: impl Encode,
 ) -> io::Result<()> {
     let t = Instant::now();
-    let d = bincode::encode_to_vec(d, bincode::config::standard())
+    let mut d = bincode::encode_to_vec(d, bincode::config::standard())
         .map_err(|_| io::ErrorKind::InvalidData)?;
+    chacha.xor_read(&mut d);
     stream.write_u32_le(d.len() as _).await?;
     stream.write_all(&d).await?;
     stream.flush().await?;
@@ -239,34 +252,39 @@ async fn binsend(
 
 async fn binrecv<T: Decode<()>, const PARSE_ERR: bool>(
     stream: impl AsyncRead + Unpin,
+    chacha: &mut ChaCha,
     target_sub: Arc<str>,
     target_name: Arc<str>,
     msg_type: &'static str,
 ) -> io::Result<T> {
     // 16MB sanity limit
-    binrecv_limited::<T, PARSE_ERR, 0x1000000>(stream, target_sub, target_name, msg_type).await
+    binrecv_limited::<T, PARSE_ERR, 0x1000000>(stream, chacha, target_sub, target_name, msg_type)
+        .await
 }
 
 async fn binrecv_server<T: Decode<()>>(
     stream: impl AsyncRead + Unpin,
+    chacha: &mut ChaCha,
     target_sub: Arc<str>,
     target_name: Arc<str>,
     msg_type: &'static str,
 ) -> io::Result<T> {
-    binrecv::<T, false>(stream, target_sub, target_name, msg_type).await
+    binrecv::<T, false>(stream, chacha, target_sub, target_name, msg_type).await
 }
 
 async fn binrecv_client<T: Decode<()>>(
     stream: impl AsyncRead + Unpin,
+    chacha: &mut ChaCha,
     target_sub: Arc<str>,
     target_name: Arc<str>,
     msg_type: &'static str,
 ) -> io::Result<T> {
-    binrecv::<T, true>(stream, target_sub, target_name, msg_type).await
+    binrecv::<T, true>(stream, chacha, target_sub, target_name, msg_type).await
 }
 
 async fn binrecv_limited<T: Decode<()>, const PARSE_ERR: bool, const MAX_READ: u32>(
     mut stream: impl AsyncRead + Unpin,
+    chacha: &mut ChaCha,
     target_sub: Arc<str>,
     target_name: Arc<str>,
     msg_type: &'static str,
@@ -287,6 +305,7 @@ async fn binrecv_limited<T: Decode<()>, const PARSE_ERR: bool, const MAX_READ: u
 
     let mut buf = vec![0; len as usize];
     stream.read_exact(&mut buf).await?;
+    chacha.xor_read(&mut buf);
 
     if is_err {
         let (res, _) = bincode::decode_from_slice::<String, _>(&buf, bincode::config::standard())
@@ -333,10 +352,13 @@ pub async fn client_handshake<S: AsyncRead + AsyncWrite + Unpin>(
     let server_id_str: Arc<str> = Arc::from(&*server_id.to_string());
     let server_sub: Arc<str> = "".into();
 
+    let mut crypt = ChaCha::new_chacha8(&CHACHA_KEY, &0u64.to_le_bytes());
+
     // Initial handshake
     let session_id = random::<u32>();
     binsend(
         &mut write,
+        &mut crypt,
         server_sub.clone(),
         server_name.clone(),
         "hello",
@@ -346,8 +368,17 @@ pub async fn client_handshake<S: AsyncRead + AsyncWrite + Unpin>(
         },
     )
     .await?;
-    let resp: HelloResp =
-        binrecv_client(&mut read, server_sub.clone(), server_name.clone(), "hello").await?;
+
+    let mut crypt = ChaCha::new_chacha8(&CHACHA_KEY, &(session_id as u64).to_le_bytes());
+
+    let resp: HelloResp = binrecv_client(
+        &mut read,
+        &mut crypt,
+        server_sub.clone(),
+        server_name.clone(),
+        "hello",
+    )
+    .await?;
     if resp.protocol != PROTOCOL {
         return Err(io::ErrorKind::Unsupported.into());
     }
@@ -367,6 +398,7 @@ pub async fn client_handshake<S: AsyncRead + AsyncWrite + Unpin>(
 
     binsend(
         &mut write,
+        &mut crypt,
         server_sub.clone(),
         server_name.clone(),
         "post_hello",
@@ -380,6 +412,7 @@ pub async fn client_handshake<S: AsyncRead + AsyncWrite + Unpin>(
 
     let perms: Permissions = binrecv_client(
         &mut read,
+        &mut crypt,
         server_sub.clone(),
         server_name.clone(),
         "handshake_finish",
@@ -415,6 +448,9 @@ pub async fn client<S: AsyncRead + AsyncWrite + Unpin>(
 ) -> io::Result<()> {
     let (mut read, mut write) = split(stream);
 
+    let mut read_crypt = ChaCha::new_chacha8(&CHACHA_KEY, &(session_id as u64).to_le_bytes());
+    let mut write_crypt = ChaCha::new_chacha8(&CHACHA_KEY, &(session_id as u64).to_le_bytes());
+
     #[cfg(feature = "stealthy")]
     let channel_mon = std::future::pending::<()>();
 
@@ -443,6 +479,7 @@ pub async fn client<S: AsyncRead + AsyncWrite + Unpin>(
         loop {
             let datas: MiningDatas = binrecv_client(
                 &mut read,
+                &mut read_crypt,
                 server_sub.clone(),
                 server_name.clone(),
                 "mining_data",
@@ -503,6 +540,7 @@ pub async fn client<S: AsyncRead + AsyncWrite + Unpin>(
             write.write_u8(TelemetryResponse::HWINFO as _).await?;
             binsend(
                 &mut write,
+                &mut write_crypt,
                 server_sub.clone(),
                 server_name.clone(),
                 "telemetry_hwinfo",
@@ -550,6 +588,7 @@ pub async fn client<S: AsyncRead + AsyncWrite + Unpin>(
                     write.write_u8(MinerResponse::RESULT as _).await?;
                     binsend(
                         &mut write,
+                        &mut write_crypt,
                         server_sub.clone(),
                         server_name.clone(),
                         "mining_result",
@@ -572,6 +611,7 @@ pub async fn client<S: AsyncRead + AsyncWrite + Unpin>(
                             write.write_u8(TelemetryResponse::PROOFRATE as _).await?;
                             binsend(
                                 &mut write,
+                                &mut write_crypt,
                                 server_sub.clone(),
                                 server_name.clone(),
                                 "telemetry_proofrate",
@@ -584,6 +624,7 @@ pub async fn client<S: AsyncRead + AsyncWrite + Unpin>(
                             write.write_u8(TelemetryResponse::HWINFO as _).await?;
                             binsend(
                                 &mut write,
+                                &mut write_crypt,
                                 server_sub.clone(),
                                 server_name.clone(),
                                 "telemetry_hwinfo",
@@ -611,6 +652,7 @@ pub struct ServerHandshake<S> {
     pub client_sub: Arc<str>,
     pub client_hwid: Arc<str>,
     pub perms: Permissions,
+    pub session_id: u32,
     pub conn: shared::ConnHandle,
 }
 
@@ -619,12 +661,19 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
     jwt_keys: Arc<[DecodingKey]>,
     conntrack: shared::ConnTrack,
 ) -> io::Result<ServerHandshake<S>> {
+    let mut crypt = ChaCha::new_chacha8(&CHACHA_KEY, &0u64.to_le_bytes());
+
     // Initial handshake. We only have 8 bytes in the hello packet, but then there's extra padding
     let req: Hello =
-        binrecv_limited::<_, false, 16>(&mut stream, "".into(), "".into(), "hello").await?;
+        binrecv_limited::<_, false, 16>(&mut stream, &mut crypt, "".into(), "".into(), "hello")
+            .await?;
     if req.protocol != PROTOCOL {
         return Err(io::ErrorKind::Unsupported.into());
     }
+
+    let session_id = req.client_session_id;
+    let mut crypt = ChaCha::new_chacha8(&CHACHA_KEY, &(session_id as u64).to_le_bytes());
+
     let resp = HelloResp {
         protocol: PROTOCOL,
         nonce_resp: req.client_session_id + 1,
@@ -632,7 +681,7 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
         pow_difficulty: PROTO_POW_DIFFICULTY,
     };
 
-    binsend(&mut stream, "".into(), "".into(), "hello", resp).await?;
+    binsend(&mut stream, &mut crypt, "".into(), "".into(), "hello", resp).await?;
 
     let PostHello {
         proof,
@@ -640,6 +689,7 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
         jwt,
     } = binrecv_limited::<_, false, { NAME_MAX_LENGTH as u32 + JWT_MAX_LENGTH as u32 + 16 }>(
         &mut stream,
+        &mut crypt,
         "".into(),
         "".into(),
         "post_hello",
@@ -675,6 +725,7 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
                 Err(e) => {
                     let _ = binsend_err(
                         stream,
+                        &mut crypt,
                         "".into(),
                         "".into(),
                         "error".into(),
@@ -703,7 +754,15 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
             .unwrap_or(DEFAULT_MAX_CONNS_FROM_SUB),
     ) else {
         let err = io::Error::new(io::ErrorKind::ConnectionRefused, "Too many connections");
-        let _ = binsend_err(stream, "".into(), "".into(), "error".into(), &err).await;
+        let _ = binsend_err(
+            stream,
+            &mut crypt,
+            "".into(),
+            "".into(),
+            "error".into(),
+            &err,
+        )
+        .await;
         return Err(err);
     };
 
@@ -715,6 +774,7 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
 
     binsend(
         &mut stream,
+        &mut crypt,
         client_sub.clone(),
         client_hwid.clone(),
         "handshake_finish",
@@ -729,6 +789,7 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
         client_sub,
         client_hwid,
         perms,
+        session_id,
         conn,
     })
 }
@@ -744,6 +805,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
         client_sub,
         client_hwid,
         perms,
+        session_id,
         conn: _conn,
     } = handshake;
     debug!("Client ID {client_id} joined with subject '{client_sub}' and HWID '{client_hwid}'");
@@ -751,6 +813,8 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
     let mut mining_data = pin!(mining_data);
 
     let (mut read, mut write) = split(stream);
+    let mut read_crypt = ChaCha::new_chacha8(&CHACHA_KEY, &(session_id as u64).to_le_bytes());
+    let mut write_crypt = ChaCha::new_chacha8(&CHACHA_KEY, &(session_id as u64).to_le_bytes());
 
     let client_id_str: Arc<str> = Arc::from(&*client_id.to_string());
 
@@ -892,6 +956,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
 
             binsend(
                 &mut write,
+                &mut write_crypt,
                 client_sub.clone(),
                 client_hwid.clone(),
                 "mining_data",
@@ -920,6 +985,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                 MinerResponse::RESULT => {
                     let res: MiningResult = binrecv_server(
                         &mut read,
+                        &mut read_crypt,
                         client_sub.clone(),
                         client_hwid.clone(),
                         "mining_result",
@@ -1060,6 +1126,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                         TelemetryResponse::PROOFRATE => {
                             let TelemetryProofrate { machines } = binrecv_server(
                                 &mut read,
+                                &mut read_crypt,
                                 client_sub.clone(),
                                 client_hwid.clone(),
                                 "telemetry_proofrate",
@@ -1070,6 +1137,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                         TelemetryResponse::HWINFO => {
                             let TelemetryHwInfo { machines } = binrecv_server(
                                 &mut read,
+                                &mut read_crypt,
                                 client_sub.clone(),
                                 client_hwid.clone(),
                                 "telemetry_hwinfo",

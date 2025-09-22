@@ -916,6 +916,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
+name = "chacha"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a4d0c4741f6b1d67dc11a9926348a2bbe4fcdb9693dd56ff9bd1f9bf8a13c30"
+dependencies = [
+ "keystream",
+]
+
+[[package]]
 name = "chrono"
 version = "0.4.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3232,6 +3241,12 @@ name = "kernels"
 version = "0.1.0"
 
 [[package]]
+name = "keystream"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c33070833c9ee02266356de0c43f723152bd38bd96ddf52c82b3af10c9138b28"
+
+[[package]]
 name = "khronos-egl"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4163,6 +4178,7 @@ dependencies = [
  "anyhow",
  "bincode",
  "bitvec",
+ "chacha",
  "clap",
  "either",
  "flume",
