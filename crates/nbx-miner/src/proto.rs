@@ -17,6 +17,7 @@ use strum::FromRepr;
 use tokio::io::{split, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinSet;
+use uuid::Uuid;
 use zkvm_jetpack::form::Belt;
 
 use crate::device::{Device, DeviceInfo};
@@ -203,7 +204,7 @@ fn cue(d: Vec<u8>) -> NounSlab {
 async fn binsend_err(
     mut stream: impl AsyncWrite + Unpin,
     chacha: &mut ChaCha,
-    target_sub: Arc<str>,
+    target_sub: Uuid,
     target_name: Arc<str>,
     msg_type: &'static str,
     d: &io::Error,
@@ -219,7 +220,7 @@ async fn binsend_err(
     stream.flush().await?;
     histogram!(
         "nbx_miner_binsend_seconds",
-        "target_sub" => target_sub,
+        "target_sub" => target_sub.to_string(),
         "target_name" => target_name,
         "msg_type" => msg_type,
     )
@@ -230,7 +231,7 @@ async fn binsend_err(
 async fn binsend(
     mut stream: impl AsyncWrite + Unpin,
     chacha: &mut ChaCha,
-    target_sub: Arc<str>,
+    target_sub: Uuid,
     target_name: Arc<str>,
     msg_type: &'static str,
     d: impl Encode,
@@ -246,7 +247,7 @@ async fn binsend(
     stream.flush().await?;
     histogram!(
         "nbx_miner_binsend_seconds",
-        "target_sub" => target_sub,
+        "target_sub" => target_sub.to_string(),
         "target_name" => target_name,
         "msg_type" => msg_type,
     )
@@ -257,7 +258,7 @@ async fn binsend(
 async fn binrecv<T: Decode<()>, const PARSE_ERR: bool>(
     stream: impl AsyncRead + Unpin,
     chacha: &mut ChaCha,
-    target_sub: Arc<str>,
+    target_sub: Uuid,
     target_name: Arc<str>,
     msg_type: &'static str,
 ) -> io::Result<T> {
@@ -269,7 +270,7 @@ async fn binrecv<T: Decode<()>, const PARSE_ERR: bool>(
 async fn binrecv_server<T: Decode<()>>(
     stream: impl AsyncRead + Unpin,
     chacha: &mut ChaCha,
-    target_sub: Arc<str>,
+    target_sub: Uuid,
     target_name: Arc<str>,
     msg_type: &'static str,
 ) -> io::Result<T> {
@@ -279,7 +280,7 @@ async fn binrecv_server<T: Decode<()>>(
 async fn binrecv_client<T: Decode<()>>(
     stream: impl AsyncRead + Unpin,
     chacha: &mut ChaCha,
-    target_sub: Arc<str>,
+    target_sub: Uuid,
     target_name: Arc<str>,
     msg_type: &'static str,
 ) -> io::Result<T> {
@@ -289,7 +290,7 @@ async fn binrecv_client<T: Decode<()>>(
 async fn binrecv_limited<T: Decode<()>, const PARSE_ERR: bool, const MAX_READ: u32>(
     mut stream: impl AsyncRead + Unpin,
     chacha: &mut ChaCha,
-    target_sub: Arc<str>,
+    target_sub: Uuid,
     target_name: Arc<str>,
     msg_type: &'static str,
 ) -> io::Result<T> {
@@ -324,7 +325,7 @@ async fn binrecv_limited<T: Decode<()>, const PARSE_ERR: bool, const MAX_READ: u
 
     histogram!(
         "nbx_miner_binrecv_seconds",
-        "target_sub" => target_sub,
+        "target_sub" => target_sub.to_string(),
         "target_name" => target_name,
         "msg_type" => msg_type,
     )
@@ -336,7 +337,7 @@ async fn binrecv_limited<T: Decode<()>, const PARSE_ERR: bool, const MAX_READ: u
 #[derive(Debug)]
 pub struct ClientHandshake<S> {
     pub stream: S,
-    pub server_sub: Arc<str>,
+    pub server_sub: Uuid,
     pub server_name: Arc<str>,
     pub server_id_str: Arc<str>,
     pub server_id: usize,
@@ -356,7 +357,7 @@ pub async fn client_handshake<S: AsyncRead + AsyncWrite + Unpin>(
 
     let server_name: Arc<str> = server_name.into();
     let server_id_str: Arc<str> = Arc::from(&*server_id.to_string());
-    let server_sub: Arc<str> = "".into();
+    let server_sub: Uuid = Uuid::default();
 
     let mut crypt = ChaCha::new_chacha8(&CHACHA_KEY, &0u64.to_le_bytes());
 
@@ -655,7 +656,7 @@ pub async fn client<S: AsyncRead + AsyncWrite + Unpin>(
 #[derive(Debug)]
 pub struct ServerHandshake<S> {
     pub stream: S,
-    pub client_sub: Arc<str>,
+    pub client_sub: Uuid,
     pub client_hwid: Arc<str>,
     pub perms: Permissions,
     pub session_id: u32,
@@ -670,9 +671,14 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
     let mut crypt = ChaCha::new_chacha8(&CHACHA_KEY, &0u64.to_le_bytes());
 
     // Initial handshake. We only have 8 bytes in the hello packet, but then there's extra padding
-    let req: Hello =
-        binrecv_limited::<_, false, 16>(&mut stream, &mut crypt, "".into(), "".into(), "hello")
-            .await?;
+    let req: Hello = binrecv_limited::<_, false, 16>(
+        &mut stream,
+        &mut crypt,
+        Uuid::default(),
+        "".into(),
+        "hello",
+    )
+    .await?;
     if req.protocol != PROTOCOL {
         return Err(io::ErrorKind::Unsupported.into());
     }
@@ -687,7 +693,15 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
         pow_difficulty: PROTO_POW_DIFFICULTY,
     };
 
-    binsend(&mut stream, &mut crypt, "".into(), "".into(), "hello", resp).await?;
+    binsend(
+        &mut stream,
+        &mut crypt,
+        Uuid::default(),
+        "".into(),
+        "hello",
+        resp,
+    )
+    .await?;
 
     let PostHello {
         proof,
@@ -696,7 +710,7 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
     } = binrecv_limited::<_, false, { NAME_MAX_LENGTH as u32 + JWT_MAX_LENGTH as u32 + 16 }>(
         &mut stream,
         &mut crypt,
-        "".into(),
+        Uuid::default(),
         "".into(),
         "post_hello",
     )
@@ -714,7 +728,7 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
         (a, b) if a.is_none() && b.is_empty() => {
             trace!("JWT validation skipped");
             JwtClaims {
-                sub: "".into(),
+                sub: Default::default(),
                 exp: 0,
                 aud: "nbx-proto".into(),
                 iss: "nbx".into(),
@@ -732,7 +746,7 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
                     let _ = binsend_err(
                         stream,
                         &mut crypt,
-                        "".into(),
+                        Uuid::default(),
                         "".into(),
                         "error".into(),
                         &io::Error::new(
@@ -749,11 +763,11 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
         }
     };
 
-    let client_sub: Arc<str> = (&*claims.sub).into();
+    let client_sub: Uuid = claims.sub;
     let client_hwid: Arc<str> = (*client_hwid).into();
 
     let Some(conn) = conntrack.connect(
-        client_sub.clone(),
+        client_sub,
         client_hwid.clone(),
         claims
             .max_conns_override
@@ -763,7 +777,7 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
         let _ = binsend_err(
             stream,
             &mut crypt,
-            "".into(),
+            Uuid::default(),
             "".into(),
             "error".into(),
             &err,
@@ -898,7 +912,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
             gauge!(
                 "nbx_miner_proto_server_channel_capacity",
                 "channel_name" => "results_out",
-                "client_sub" => client_sub.clone(),
+                "client_sub" => client_sub.to_string(),
                 "client_hwid" => client_hwid.clone(),
                 "client_id" => client_id_str.clone(),
             )
@@ -927,7 +941,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                         gauge!(
                             "nbx_miner_proto_server_block_height",
                             "client_id" => client_id_str.clone(),
-                            "client_sub" => client_sub.clone(),
+                            "client_sub" => client_sub.to_string(),
                             "client_hwid" => client_hwid.clone(),
                         ).set(data.block_height as f64);
 
@@ -972,7 +986,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
             counter!(
                 "nbx_miner_proto_server_set_data_count",
                 "client_id" => client_id_str.clone(),
-                "client_sub" => client_sub.clone(),
+                "client_sub" => client_sub.to_string(),
                 "client_hwid" => client_hwid.clone(),
             )
             .increment(1);
@@ -1002,7 +1016,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                         counter!(
                             "nbx_miner_proto_server_unauthenticated_non_share_proof_count",
                             "client_id" => client_id_str.clone(),
-                            "client_sub" => client_sub.clone(),
+                            "client_sub" => client_sub.to_string(),
                             "client_hwid" => client_hwid.clone(),
                         )
                         .increment(1);
@@ -1020,7 +1034,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                         counter!(
                             "nbx_miner_proto_server_data_id_outdated_or_invalid_count",
                             "client_id" => client_id_str.clone(),
-                            "client_sub" => client_sub.clone(),
+                            "client_sub" => client_sub.to_string(),
                             "client_hwid" => client_hwid.clone(),
                         )
                         .increment(1);
@@ -1033,13 +1047,13 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                     counter!(
                         "nbx_miner_proto_server_data_id_valid_count",
                         "client_id" => client_id_str.clone(),
-                        "client_sub" => client_sub.clone(),
+                        "client_sub" => client_sub.to_string(),
                         "client_hwid" => client_hwid.clone(),
                     )
                     .increment(1);
                     counter!(
                         "nbx_miner_proto_sub_server_data_id_valid_count",
-                        "client_sub" => client_sub.clone(),
+                        "client_sub" => client_sub.to_string(),
                     )
                     .increment(1);
                     counter!("nbx_miner_proto_global_server_data_id_valid_count").increment(1);
@@ -1047,7 +1061,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                     histogram!(
                         "nbx_miner_proto_server_attempt_seconds",
                         "client_id" => client_id_str.clone(),
-                        "client_sub" => client_sub.clone(),
+                        "client_sub" => client_sub.to_string(),
                         "client_hwid" => client_hwid.clone(),
                     )
                     .record((res.attempt_millis as f64) / 1000.0);
@@ -1061,7 +1075,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                         histogram!(
                             "nbx_miner_proto_server_gpu_submit_seconds",
                             "client_id" => client_id_str.clone(),
-                            "client_sub" => client_sub.clone(),
+                            "client_sub" => client_sub.to_string(),
                             "client_hwid" => client_hwid.clone(),
                         )
                         .record((res.gpu_submit_millis as f64) / 1000.0);
@@ -1069,7 +1083,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                         histogram!(
                             "nbx_miner_proto_server_gpu_enqueue_seconds",
                             "client_id" => client_id_str.clone(),
-                            "client_sub" => client_sub.clone(),
+                            "client_sub" => client_sub.to_string(),
                             "client_hwid" => client_hwid.clone(),
                         )
                         .record((res.gpu_enqueue_millis as f64) / 1000.0);
@@ -1077,7 +1091,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                         histogram!(
                             "nbx_miner_proto_server_gpu_wait_seconds",
                             "client_id" => client_id_str.clone(),
-                            "client_sub" => client_sub.clone(),
+                            "client_sub" => client_sub.to_string(),
                             "client_hwid" => client_hwid.clone(),
                         )
                         .record((res.gpu_wait_millis as f64) / 1000.0);
@@ -1111,7 +1125,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                         counter!(
                             "nbx_miner_proto_server_unauthenticated_telemetry_count",
                             "client_id" => client_id_str.clone(),
-                            "client_sub" => client_sub.clone(),
+                            "client_sub" => client_sub.to_string(),
                             "client_hwid" => client_hwid.clone(),
                         )
                         .increment(1);

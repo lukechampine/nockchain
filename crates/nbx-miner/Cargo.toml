@@ -79,7 +79,8 @@ webpki-roots.workspace = true
 sysinfo.workspace = true
 chacha.workspace = true
 itertools.workspace = true
-sqlx = { workspace = true, optional = true, features = ["postgres", "tls-rustls", "runtime-tokio"] }
+uuid = { workspace = true, features = ["serde"] }
+sqlx = { workspace = true, optional = true, features = ["postgres", "tls-rustls", "runtime-tokio", "uuid"] }
 serde_json = { workspace = true, optional = true }
 
 zkvm-jetpack.workspace = true

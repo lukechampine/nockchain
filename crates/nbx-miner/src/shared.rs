@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio_rustls::{client, server, TlsAcceptor, TlsConnector};
+use uuid::Uuid;
 use x509_parser::oid_registry::OID_X509_COMMON_NAME;
 use x509_parser::prelude::*;
 use zkvm_jetpack::form::{Belt, PRIME};
@@ -101,7 +102,7 @@ impl Wire for MiningWire {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JwtClaims {
-    pub sub: String,
+    pub sub: uuid::Uuid,
     pub exp: u64,
     pub aud: String,
     pub iss: String,
@@ -426,19 +427,14 @@ impl TargetMetrics {
 #[derive(Default, Debug)]
 struct ConnTrackInner {
     // map(sub, set(hwid))
-    conns: BTreeMap<Arc<str>, BTreeSet<Arc<str>>>,
+    conns: BTreeMap<Uuid, BTreeSet<Arc<str>>>,
 }
 
 #[derive(Clone, Default, Debug)]
 pub struct ConnTrack(Arc<Mutex<ConnTrackInner>>);
 
 impl ConnTrack {
-    pub fn connect(
-        &self,
-        sub: Arc<str>,
-        hwid: Arc<str>,
-        max_sub_conns: usize,
-    ) -> Option<ConnHandle> {
+    pub fn connect(&self, sub: Uuid, hwid: Arc<str>, max_sub_conns: usize) -> Option<ConnHandle> {
         let mut track = self.0.lock().unwrap();
         let mut sub_entry = track.conns.entry(sub.clone()).or_default();
 
@@ -459,7 +455,7 @@ impl ConnTrack {
         gauge!("nbx_miner_conntrack_subs").set(track.conns.len() as f64);
         let mut total = 0;
         for (s, v) in &track.conns {
-            gauge!("nbx_miner_conntrack_sub_active", "sub" => s.clone()).set(v.len() as f64);
+            gauge!("nbx_miner_conntrack_sub_active", "sub" => s.to_string()).set(v.len() as f64);
             total += v.len();
         }
         gauge!("nbx_miner_conntrack_active").set(total as f64);
@@ -469,7 +465,7 @@ impl ConnTrack {
 #[derive(Debug)]
 pub struct ConnHandle {
     track: ConnTrack,
-    sub: Arc<str>,
+    sub: Uuid,
     hwid: Arc<str>,
 }
 

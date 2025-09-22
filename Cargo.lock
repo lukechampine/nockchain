@@ -4263,6 +4263,7 @@ dependencies = [
  "tracing",
  "tracing-test",
  "tracy-client",
+ "uuid",
  "webpki-roots 1.0.2",
  "x509-parser",
  "zkvm-jetpack",
@@ -6719,6 +6720,7 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "url",
+ "uuid",
  "webpki-roots 0.26.11",
 ]
 
@@ -6799,6 +6801,7 @@ dependencies = [
  "stringprep",
  "thiserror 2.0.16",
  "tracing",
+ "uuid",
  "whoami",
 ]
 
@@ -6836,6 +6839,7 @@ dependencies = [
  "stringprep",
  "thiserror 2.0.16",
  "tracing",
+ "uuid",
  "whoami",
 ]
 
@@ -6861,6 +6865,7 @@ dependencies = [
  "thiserror 2.0.16",
  "tracing",
  "url",
+ "uuid",
 ]
 
 [[package]]
@@ -7829,6 +7834,7 @@ checksum = "f33196643e165781c20a5ead5582283a7dacbb87855d867fbc2df3f81eddc1be"
 dependencies = [
  "getrandom 0.3.3",
  "js-sys",
+ "serde",
  "wasm-bindgen",
 ]
 

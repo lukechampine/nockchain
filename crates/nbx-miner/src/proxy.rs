@@ -8,6 +8,7 @@ use nbx_jetpack::log::*;
 use nockapp::noun::slab::NounSlab;
 use nockapp::NockAppError;
 use tokio::sync::mpsc;
+use uuid::Uuid;
 use zkvm_jetpack::form::{Belt, PRIME};
 use zkvm_jetpack::noun::noun_ext::NounExt as OtherNounExt;
 
@@ -213,7 +214,7 @@ pub async fn run_proxy(cfg: ProxyConfig) {
     // Any pokes that passed server's verification steps.
     let process_target = |mut data: MiningResult,
                           _,
-                          sub: Arc<str>,
+                          sub: Uuid,
                           hwid: Arc<str>,
                           in_data: Arc<MiningData>,
                           poke_slab: NounSlab| {
@@ -252,7 +253,7 @@ pub async fn run_proxy(cfg: ProxyConfig) {
             counter!("nbx_miner_proxy_global_accumulated_work").increment(proxy_diff);
             counter!(
                 "nbx_miner_proxy_accumulated_work",
-                "client_sub" => sub.clone(),
+                "client_sub" => sub.to_string(),
                 "server_id" => server_id.to_string(),
             )
             .increment(proxy_diff);
@@ -308,8 +309,8 @@ pub async fn run_proxy(cfg: ProxyConfig) {
 
     #[derive(Default)]
     struct TelemetryStore {
-        proofrate: BTreeMap<Arc<str>, BTreeMap<Arc<str>, u32>>,
-        hwinfo: BTreeMap<Arc<str>, BTreeMap<Arc<str>, DeviceInfo>>,
+        proofrate: BTreeMap<Uuid, BTreeMap<Arc<str>, u32>>,
+        hwinfo: BTreeMap<Uuid, BTreeMap<Arc<str>, DeviceInfo>>,
     }
 
     let telemetry = SyncMutex::new(TelemetryStore::default());

@@ -201,6 +201,7 @@ jsonwebtoken = "9"
 sysinfo = "0.36"
 chacha = "0.4"
 sqlx = "0.8"
+uuid = "1"
 
 metrics = "0.24"
 metrics-util = "0.20.0"

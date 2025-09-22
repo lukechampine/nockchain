@@ -5,8 +5,10 @@ use ibig::UBig;
 use metrics::{counter, gauge};
 use nbx_jetpack::log::error;
 use nockchain_libp2p_io::tip5_util::ubig_to_base58;
-use sqlx::any::{install_default_drivers, AnyPoolOptions};
-use sqlx::AnyPool;
+use sqlx::any::install_default_drivers;
+use sqlx::postgres::PgPoolOptions as DbPoolOptions;
+use sqlx::types::Uuid;
+use sqlx::PgPool as DbPool;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 use crate::device::DeviceInfo;
@@ -14,26 +16,26 @@ use crate::server::AbortReason;
 
 enum DbMsg {
     Share {
-        client_sub: Arc<str>,
+        client_sub: Uuid,
         machine_id: Arc<str>,
         share_hash: String,
         work_done: u64,
     },
     TelemetryProofrate {
-        machines: BTreeMap<Arc<str>, BTreeMap<Arc<str>, u32>>,
+        machines: BTreeMap<Uuid, BTreeMap<Arc<str>, u32>>,
     },
     TelemetryHwinfo {
-        machines: BTreeMap<Arc<str>, BTreeMap<Arc<str>, DeviceInfo>>,
+        machines: BTreeMap<Uuid, BTreeMap<Arc<str>, DeviceInfo>>,
     },
     Abort {
-        client_sub: Arc<str>,
+        client_sub: Uuid,
         machine_id: Arc<str>,
         reason: AbortReason,
     },
 }
 
 pub(crate) struct Database {
-    pool: AnyPool,
+    pool: DbPool,
     msgs: Receiver<DbMsg>,
     src_name: Arc<str>,
 }
@@ -41,7 +43,7 @@ pub(crate) struct Database {
 impl Database {
     pub async fn new(db_url: &str, src_name: Arc<str>) -> sqlx::Result<(Self, DatabaseHandle)> {
         install_default_drivers();
-        let pool = AnyPoolOptions::new().connect(db_url).await?;
+        let pool = DbPoolOptions::new().connect(db_url).await?;
 
         let (msgs_tx, msgs_rx) = channel(4096);
 
@@ -67,7 +69,7 @@ impl Database {
                 DbMsg::Share { client_sub, machine_id, share_hash, work_done } => {
                     sqlx::query("INSERT INTO \"shares\" (src, sub, machine_id, share_hash, accumulated_work) VALUES ( $1, $2, $3, $4, $5 )")
                         .bind(&*src_name)
-                        .bind(&*client_sub)
+                        .bind(client_sub)
                         .bind(&*machine_id)
                         .bind(share_hash)
                         .bind(i64::try_from(work_done).unwrap_or(i64::MAX))
@@ -92,7 +94,7 @@ impl Database {
                     let mut q = sqlx::query(&query)
                         .bind(&*src_name);
                     for (sub, m) in machines {
-                        q = q.bind(sub.to_string());
+                        q = q.bind(sub);
                         for (mid, pr) in m {
                             q = q.bind(mid.to_string()).bind(pr as i64);
                         }
@@ -117,7 +119,7 @@ impl Database {
                     let mut q = sqlx::query(&query)
                         .bind(&*src_name);
                     for (sub, m) in machines {
-                        q = q.bind(sub.to_string());
+                        q = q.bind(sub);
                         for (mid, dev) in m {
                             q = q.bind(mid.to_string()).bind(dev.is_proxy).bind(serde_json::to_string(&dev).unwrap());
                         }
@@ -131,7 +133,7 @@ impl Database {
                 } => {
                     sqlx::query("INSERT INTO \"aborts\" (src, sub, machine_id, reason) VALUES ( $1, $2, $3, $4 )")
                         .bind(&*src_name)
-                        .bind(&*client_sub)
+                        .bind(client_sub)
                         .bind(&*machine_id)
                         .bind(reason.to_string())
                         .execute(&pool)
@@ -163,7 +165,7 @@ impl DatabaseHandle {
 
     pub fn submit_share(
         &self,
-        client_sub: Arc<str>,
+        client_sub: Uuid,
         machine_id: Arc<str>,
         share_hash: UBig,
         work_done: u64,
@@ -177,23 +179,17 @@ impl DatabaseHandle {
         });
     }
 
-    pub fn submit_telemetry_proofrate(
-        &self,
-        proofrate: BTreeMap<Arc<str>, BTreeMap<Arc<str>, u32>>,
-    ) {
+    pub fn submit_telemetry_proofrate(&self, proofrate: BTreeMap<Uuid, BTreeMap<Arc<str>, u32>>) {
         self.submit_msg(DbMsg::TelemetryProofrate {
             machines: proofrate,
         });
     }
 
-    pub fn submit_telemetry_hwinfo(
-        &self,
-        hwinfo: BTreeMap<Arc<str>, BTreeMap<Arc<str>, DeviceInfo>>,
-    ) {
+    pub fn submit_telemetry_hwinfo(&self, hwinfo: BTreeMap<Uuid, BTreeMap<Arc<str>, DeviceInfo>>) {
         self.submit_msg(DbMsg::TelemetryHwinfo { machines: hwinfo });
     }
 
-    pub fn submit_abort(&self, client_sub: Arc<str>, machine_id: Arc<str>, reason: AbortReason) {
+    pub fn submit_abort(&self, client_sub: Uuid, machine_id: Arc<str>, reason: AbortReason) {
         self.submit_msg(DbMsg::Abort {
             client_sub,
             machine_id,

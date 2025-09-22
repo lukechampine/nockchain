@@ -36,6 +36,7 @@ use tokio::sync::{broadcast, mpsc};
 use tokio::task::{AbortHandle, Id, JoinSet};
 use tokio::time::sleep;
 use tokio_stream::wrappers::BroadcastStream;
+use uuid::Uuid;
 use zkvm_jetpack::form::{Belt, PRIME};
 use zkvm_jetpack::noun::noun_ext::NounExt as ZNounExt;
 
@@ -219,7 +220,7 @@ pub async fn mining_driver(
 
     let process_target = |data: MiningResult,
                           client_id: usize,
-                          sub: Arc<str>,
+                          sub: Uuid,
                           hwid: Arc<str>,
                           _,
                           poke_slab: NounSlab| {
@@ -232,7 +233,7 @@ pub async fn mining_driver(
     };
 
     let process_telemetry =
-        |_telemetry: Telemetry, _client_id: usize, _sub: Arc<str>| async move { Result::Ok(()) };
+        |_telemetry: Telemetry, _client_id: usize, _sub: Uuid| async move { Result::Ok(()) };
 
     let server = mining_server(
         cfg,
@@ -326,8 +327,8 @@ pub async fn mining_driver(
 }
 
 pub async fn mining_server<
-    F1: FnMut(MiningResult, usize, Arc<str>, Arc<str>, Arc<MiningData>, NounSlab) -> Fut1,
-    F2: FnMut(Telemetry, usize, Arc<str>) -> Fut2,
+    F1: FnMut(MiningResult, usize, Uuid, Arc<str>, Arc<MiningData>, NounSlab) -> Fut1,
+    F2: FnMut(Telemetry, usize, Uuid) -> Fut2,
     Fut1: Future<Output = Result>,
     Fut2: Future<Output = Result>,
 >(
@@ -502,7 +503,7 @@ pub async fn mining_server<
         tokio::select! {
             v = accept_rx.recv() => {
                 let Some((handshake, a)) = v else { continue };
-                let sub = handshake.client_sub.clone();
+                let sub = handshake.client_sub;
                 let hwid = handshake.client_hwid.clone();
                 let perms = handshake.perms;
                 debug!("Accepted client_id={client_cnt}, client_hwid={}, client_sub={sub} on {a}", handshake.client_hwid);
@@ -553,14 +554,14 @@ pub async fn mining_server<
                             let Ok(effect) = effect.as_cell().map(|v| v.head()) else {
                                 let reason = AbortReason::NounValidation("Expected exactly one effect");
                                 #[cfg(feature = "db")]
-                                db.as_ref().map(|v| v.submit_abort(sub.clone(), hwid.clone(), reason.clone()));
+                                db.as_ref().map(|v| v.submit_abort(sub, hwid.clone(), reason.clone()));
                                 clients.abort(client_id, reason);
                                 continue;
                             };
                             let Ok([head, res, tail]) = effect.uncell() else {
                                 let reason = AbortReason::NounValidation("Expected three elements in mining result");
                                 #[cfg(feature = "db")]
-                                db.as_ref().map(|v| v.submit_abort(sub.clone(), hwid.clone(), reason.clone()));
+                                db.as_ref().map(|v| v.submit_abort(sub, hwid.clone(), reason.clone()));
                                 clients.abort(client_id, reason);
                                 continue;
                             };
@@ -579,7 +580,7 @@ pub async fn mining_server<
                             let Ok([_, poke]) = tail.uncell() else {
                                 let reason = AbortReason::NounValidation("Expected two elements in tail");
                                 #[cfg(feature = "db")]
-                                db.as_ref().map(|v| v.submit_abort(sub.clone(), hwid.clone(), reason.clone()));
+                                db.as_ref().map(|v| v.submit_abort(sub, hwid.clone(), reason.clone()));
                                 clients.abort(client_id, reason);
                                 continue;
                             };
@@ -589,7 +590,7 @@ pub async fn mining_server<
                             let Ok([_, _, _, _, _, nonce]) = poke.uncell() else {
                                 let reason = AbortReason::NounValidation("Expected 6 elements in the poke result");
                                 #[cfg(feature = "db")]
-                                db.as_ref().map(|v| v.submit_abort(sub.clone(), hwid.clone(), reason.clone()));
+                                db.as_ref().map(|v| v.submit_abort(sub, hwid.clone(), reason.clone()));
                                 clients.abort(client_id, reason);
                                 continue;
                             };
@@ -598,7 +599,7 @@ pub async fn mining_server<
                             let Ok(nonce_noun) = nonce.uncell::<5>() else {
                                 let reason = AbortReason::NounValidation("Nonce has invalid number of elements");
                                 #[cfg(feature = "db")]
-                                db.as_ref().map(|v| v.submit_abort(sub.clone(), hwid.clone(), reason.clone()));
+                                db.as_ref().map(|v| v.submit_abort(sub, hwid.clone(), reason.clone()));
                                 clients.abort(client_id, reason);
                                 continue;
                             };
@@ -615,7 +616,7 @@ pub async fn mining_server<
                             if cnt != 5 {
                                 let reason = AbortReason::NounValidation("Nonce has invalid element");
                                 #[cfg(feature = "db")]
-                                db.as_ref().map(|v| v.submit_abort(sub.clone(), hwid.clone(), reason.clone()));
+                                db.as_ref().map(|v| v.submit_abort(sub, hwid.clone(), reason.clone()));
                                 clients.abort(client_id, reason);
                                 continue;
                             }
@@ -623,7 +624,7 @@ pub async fn mining_server<
                                 error!("Mined nonce {nonce:?} does not start with fixed belts {:?}", in_data.fixed_nonce_atoms);
                                 let reason = AbortReason::NounValidation("Mined nonce does not start with fixed belts");
                                 #[cfg(feature = "db")]
-                                db.as_ref().map(|v| v.submit_abort(sub.clone(), hwid.clone(), reason.clone()));
+                                db.as_ref().map(|v| v.submit_abort(sub, hwid.clone(), reason.clone()));
                                 clients.abort(client_id, reason);
                                 continue;
                             }
@@ -639,7 +640,7 @@ pub async fn mining_server<
                                         error!("Unable to poke verifier {e:?}");
                                         let reason = AbortReason::ValidatorFailure("Unable to poke verifier");
                                         #[cfg(feature = "db")]
-                                        db.as_ref().map(|v| v.submit_abort(sub.clone(), hwid.clone(), reason.clone()));
+                                        db.as_ref().map(|v| v.submit_abort(sub, hwid.clone(), reason.clone()));
                                         clients.abort(client_id, reason);
                                         continue;
                                     }
@@ -648,7 +649,7 @@ pub async fn mining_server<
                                         let Ok(result) = result.as_cell() else {
                                             let reason = AbortReason::ValidatorFailure("Expected result to be a cell");
                                             #[cfg(feature = "db")]
-                                            db.as_ref().map(|v| v.submit_abort(sub.clone(), hwid.clone(), reason.clone()));
+                                            db.as_ref().map(|v| v.submit_abort(sub, hwid.clone(), reason.clone()));
                                             clients.abort(client_id, reason);
                                             continue;
                                         };
@@ -656,7 +657,7 @@ pub async fn mining_server<
                                         let Ok([outcome, why]) = effect.uncell() else {
                                             let reason = AbortReason::ValidatorFailure("Expected effect to be a tuple");
                                             #[cfg(feature = "db")]
-                                            db.as_ref().map(|v| v.submit_abort(sub.clone(), hwid.clone(), reason.clone()));
+                                            db.as_ref().map(|v| v.submit_abort(sub, hwid.clone(), reason.clone()));
                                             clients.abort(client_id, reason);
                                             continue;
                                         };
@@ -666,7 +667,7 @@ pub async fn mining_server<
                                             let why = why.as_ref().map(|v| v.as_ne_bytes()).and_then(|v| std::str::from_utf8(v).ok()).unwrap_or("");
                                             let reason = AbortReason::ProofValidation(why.to_string());
                                             #[cfg(feature = "db")]
-                                            db.as_ref().map(|v| v.submit_abort(sub.clone(), hwid.clone(), reason.clone()));
+                                            db.as_ref().map(|v| v.submit_abort(sub, hwid.clone(), reason.clone()));
                                             clients.abort(client_id, reason);
                                             continue;
                                         }
@@ -674,10 +675,10 @@ pub async fn mining_server<
                                 }
                             }
 
-                            if process_target(data, client_id, sub.clone(), hwid.clone(), in_data, poke_slab).await.is_err() {
+                            if process_target(data, client_id, sub, hwid.clone(), in_data, poke_slab).await.is_err() {
                                 let reason = AbortReason::ProofRejected;
                                 #[cfg(feature = "db")]
-                                db.as_ref().map(|v| v.submit_abort(sub.clone(), hwid.clone(), reason.clone()));
+                                db.as_ref().map(|v| v.submit_abort(sub, hwid.clone(), reason.clone()));
                                 clients.abort(client_id, reason);
                                 continue;
                             };
@@ -700,7 +701,7 @@ pub async fn mining_server<
                                     for (k, p) in machines {
                                         gauge!(
                                             "nbx_miner_server_telemetry_proofs_per_minute",
-                                            "client_sub" => sub.clone(),
+                                            "client_sub" => sub.to_string(),
                                             "machine_id" => k.clone(),
                                         ).set(*p as f64);
                                     }
@@ -710,16 +711,16 @@ pub async fn mining_server<
                                 } => {
                                     counter!(
                                         "nbx_miner_server_telemetry_hwinfo_count_total",
-                                        "client_sub" => sub.clone(),
+                                        "client_sub" => sub.to_string(),
                                     ).increment(machines.len() as u64);
                                 }
                             }
                         }
 
-                        if process_telemetry(t, client_id, sub.clone()).await.is_err() {
+                        if process_telemetry(t, client_id, sub).await.is_err() {
                             let reason = AbortReason::TelemetryError;
                             #[cfg(feature = "db")]
-                            db.as_ref().map(|v| v.submit_abort(sub.clone(), hwid.clone(), reason.clone()));
+                            db.as_ref().map(|v| v.submit_abort(sub, hwid.clone(), reason.clone()));
                             clients.abort(client_id, reason);
                             continue;
                         }
