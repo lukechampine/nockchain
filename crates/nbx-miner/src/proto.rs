@@ -211,7 +211,9 @@ async fn binsend_err(
     let t = Instant::now();
     let mut d = bincode::encode_to_vec(d.to_string(), bincode::config::standard())
         .map_err(|_| io::ErrorKind::InvalidData)?;
-    chacha.xor_read(&mut d);
+    chacha
+        .xor_read(&mut d)
+        .map_err(|_| io::ErrorKind::BrokenPipe)?;
     stream.write_u32_le((d.len() as u32) | (1u32 << 31)).await?;
     stream.write_all(&d).await?;
     stream.flush().await?;
@@ -236,7 +238,9 @@ async fn binsend(
     let t = Instant::now();
     let mut d = bincode::encode_to_vec(d, bincode::config::standard())
         .map_err(|_| io::ErrorKind::InvalidData)?;
-    chacha.xor_read(&mut d);
+    chacha
+        .xor_read(&mut d)
+        .map_err(|_| io::ErrorKind::BrokenPipe)?;
     stream.write_u32_le(d.len() as _).await?;
     stream.write_all(&d).await?;
     stream.flush().await?;
@@ -305,7 +309,9 @@ async fn binrecv_limited<T: Decode<()>, const PARSE_ERR: bool, const MAX_READ: u
 
     let mut buf = vec![0; len as usize];
     stream.read_exact(&mut buf).await?;
-    chacha.xor_read(&mut buf);
+    chacha
+        .xor_read(&mut buf)
+        .map_err(|_| io::ErrorKind::BrokenPipe);
 
     if is_err {
         let (res, _) = bincode::decode_from_slice::<String, _>(&buf, bincode::config::standard())

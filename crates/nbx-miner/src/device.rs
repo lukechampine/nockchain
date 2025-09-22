@@ -77,5 +77,7 @@ fn hwid(key: &str, dev: &DeviceInfo) -> Arc<str> {
     for cpu in &dev.cpu_models {
         state.update(cpu);
     }
-    format!("{:x}", state.finalize()).into()
+    let mut ret = format!("{:x}", state.finalize());
+    ret.truncate(NAME_MAX_LENGTH);
+    ret.into()
 }
