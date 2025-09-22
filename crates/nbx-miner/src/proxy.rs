@@ -22,7 +22,8 @@ use crate::server::{mining_server, MiningConfig, TELEMETRY_PROOFRATE_INTERVAL};
 #[cfg(feature = "verifier")]
 use crate::shared::{difficulty_to_target, to_bn};
 use crate::shared::{
-    parse_bn, target_to_difficulty, MiningData, MiningResult, TargetMetrics, Telemetry, TimeWriter,
+    digest_to_target, parse_bn, target_to_difficulty, MiningData, MiningResult, TargetMetrics,
+    Telemetry, TimeWriter,
 };
 
 #[derive(Clone, Debug, Args)]
@@ -63,6 +64,9 @@ pub struct ProxyConfig {
         help = "Disable forwarding telemetry (hardware info + proofrate)"
     )]
     pub miner_no_telemetry: bool,
+    #[cfg(feature = "db")]
+    #[arg(long, help = "URL to database. e.g.: postgres://localhost:3243/pool")]
+    pub database_url: Option<String>,
 }
 
 const ROLLING_TIMING_CNT: usize = 20;
@@ -146,17 +150,41 @@ pub async fn run_proxy(cfg: ProxyConfig) {
 
     let device = Device::new(cfg.client_name.clone(), true);
 
+    #[cfg(feature = "db")]
+    let (db_inst, db) = if let Some(db) = cfg.database_url {
+        debug!("Connecting to DB");
+        crate::db::Database::new(
+            &db,
+            cfg.client_name
+                .as_deref()
+                .or(device.info.hostname.as_deref())
+                .map(|v| Arc::<str>::from(v))
+                .unwrap_or_else(|| device.hwid.clone()),
+        )
+        .await
+        .map(|(a, b)| (Some(a), Some(b)))
+        .unwrap()
+    } else {
+        debug!("Skipping DB connection");
+        (None, None)
+    };
+
     let (mining_tx, mut mining_rx) = mpsc::channel(cfg.miner_connect.len());
     let (ack_tx, mut ack_rx) = mpsc::channel(cfg.miner_connect.len());
     let (_client_tasks, server_extras) = client_loops(
-        cfg.miner_connect, cfg.miner_num_concurrent_connections, device, mining_tx, ack_tx,
+        cfg.miner_connect,
+        cfg.miner_num_concurrent_connections,
+        device,
+        mining_tx,
+        ack_tx,
     );
 
     let mut requests = BTreeMap::new();
     let server_id_map = SyncMutex::new(BTreeMap::<_, (_, (u32, usize, u32, UBig))>::new());
     let forward_non_block = cfg.forward_non_block;
-    let mut last_updated = Instant::now();
 
+    #[cfg(feature = "verifier")]
+    let mut last_updated = Instant::now();
     #[cfg(feature = "verifier")]
     let diff_tracker = Arc::new(SyncMutex::new(DifficultyTracker {
         current_diff10: cfg.min_share_difficulty * 10,
@@ -186,6 +214,7 @@ pub async fn run_proxy(cfg: ProxyConfig) {
     let process_target = |mut data: MiningResult,
                           _,
                           sub: Arc<str>,
+                          hwid: Arc<str>,
                           in_data: Arc<MiningData>,
                           poke_slab: NounSlab| {
         let data_info = server_id_map
@@ -197,6 +226,8 @@ pub async fn run_proxy(cfg: ProxyConfig) {
         let diff_tracker = diff_tracker.clone();
         let hit_metrics = hit_metrics.clone();
         let miss_metrics = miss_metrics.clone();
+        #[cfg(feature = "db")]
+        let db = db.clone();
         async move {
             let Some(((data_id, server_id, session_id, parent_target), mining_res)) = data_info
             else {
@@ -221,7 +252,7 @@ pub async fn run_proxy(cfg: ProxyConfig) {
             counter!("nbx_miner_proxy_global_accumulated_work").increment(proxy_diff);
             counter!(
                 "nbx_miner_proxy_accumulated_work",
-                "client_sub" => sub,
+                "client_sub" => sub.clone(),
                 "server_id" => server_id.to_string(),
             )
             .increment(proxy_diff);
@@ -233,6 +264,10 @@ pub async fn run_proxy(cfg: ProxyConfig) {
             let dig = UBig::from_le_bytes(&dig.as_ne_bytes());
             #[cfg(target_endian = "big")]
             let dig = UBig::from_be_bytes(&dig.as_ne_bytes());
+
+            #[cfg(feature = "db")]
+            db.as_ref()
+                .map(|v| v.submit_share(sub.clone(), hwid.clone(), dig.clone(), proxy_diff));
 
             // Local server has verified that we hit the pool target. Now, we need to verify
             // whether we hit the parent target.
@@ -294,13 +329,21 @@ pub async fn run_proxy(cfg: ProxyConfig) {
 
     let (reqs_out, reqs_in) = mpsc::channel(1);
     let server = mining_server(
-        cfg.server, server_listener, reqs_in, process_target, process_telemetry,
+        cfg.server,
+        server_listener,
+        reqs_in,
+        process_target,
+        process_telemetry,
+        #[cfg(feature = "db")]
+        db.clone(),
     );
 
     let main_iter = async {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         let mut telemetry_interval = tokio::time::interval(TELEMETRY_PROOFRATE_INTERVAL);
         telemetry_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        #[cfg(feature = "db")]
+        let db = db.clone();
 
         loop {
             counter!("nbx_miner_proxy_main_loop_ticks_total").increment(1);
@@ -359,11 +402,15 @@ pub async fn run_proxy(cfg: ProxyConfig) {
                     };
                     let mut out_tl = vec![];
                     if !tl.proofrate.is_empty() {
+                        #[cfg(feature = "db")]
+                        db.as_ref().map(|v| v.submit_telemetry_proofrate(tl.proofrate.clone()));
                         // In case there are duplicate machine IDs, yes, we are merging them together.
                         let machines = tl.proofrate.into_values().flatten().collect::<BTreeMap<_, _>>();
                         out_tl.push(Telemetry::Proofrate { machines });
                     }
                     if !tl.hwinfo.is_empty() {
+                        #[cfg(feature = "db")]
+                        db.as_ref().map(|v| v.submit_telemetry_hwinfo(tl.hwinfo.clone()));
                         // In case there are duplicate machine IDs, yes, we are merging them together.
                         let machines = tl.hwinfo.into_values().flatten().collect::<BTreeMap<_, _>>();
                         out_tl.push(Telemetry::HwInfo { machines });
@@ -492,10 +539,22 @@ pub async fn run_proxy(cfg: ProxyConfig) {
         }
     };
 
-    tokio::select! {
-        r = server => {
-            error!("Server finished: {r:?}");
-        },
-        _ = main_iter => unreachable!(),
-    }
+    let main = async move {
+        tokio::select! {
+            r = server => {
+                error!("Server finished: {r:?}");
+            },
+            _ = main_iter => unreachable!(),
+        }
+        let _ = process_target;
+    };
+
+    #[cfg(feature = "db")]
+    tokio::join!(main, async move {
+        if let Some(db_inst) = db_inst {
+            db_inst.run().await;
+        }
+    });
+    #[cfg(not(feature = "db"))]
+    main.await;
 }

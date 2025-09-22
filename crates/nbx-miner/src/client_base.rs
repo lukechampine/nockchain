@@ -229,7 +229,6 @@ async fn client_pool(
                 }
             } => {}
             _ = ticker.tick() => {
-                debug!("Tick");
                 resolved = resolve_all(&client_connect).await.unwrap_or_default();
                 for (a, server_name) in resolved.iter() {
                     trace!("Resolved {a} on domain {server_name:?}");

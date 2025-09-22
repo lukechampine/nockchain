@@ -1,12 +1,14 @@
 use std::sync::Arc;
 
 use bincode::{Decode, Encode};
+use itertools::Itertools;
+use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
 use sysinfo::{MemoryRefreshKind, System};
 
 use crate::proto::NAME_MAX_LENGTH;
 
-#[derive(Clone, Debug, Encode, Decode)]
+#[derive(Clone, Debug, Encode, Decode, Serialize, Deserialize)]
 pub struct DeviceInfo {
     pub is_proxy: bool,
     pub client_name: Option<String>,
@@ -24,6 +26,7 @@ impl DeviceInfo {
             .cpus()
             .iter()
             .map(|v| v.brand().to_string())
+            .unique()
             .collect::<Vec<_>>();
         let ram_mb = sys.total_memory() / (1024 * 1024);
 

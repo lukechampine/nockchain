@@ -30,6 +30,10 @@ jwt-auth-server = []
 jwt-auth-client = []
 # Enable --miner-save-attempts command line option
 miner-save-attempts = []
+# Enable database driven share submission/ban list/etc.
+db = ["sqlx", "serde_json", "force-preverify"]
+# Enable sqlite db for testing
+db-sqlite = ["sqlx?/sqlite"]
 
 [[bin]]
 name = "nbx-proxy"
@@ -74,6 +78,9 @@ jsonwebtoken.workspace = true
 webpki-roots.workspace = true
 sysinfo.workspace = true
 chacha.workspace = true
+itertools.workspace = true
+sqlx = { workspace = true, optional = true, features = ["postgres", "tls-rustls", "runtime-tokio"] }
+serde_json = { workspace = true, optional = true }
 
 zkvm-jetpack.workspace = true
 nbx-jetpack.workspace = true
