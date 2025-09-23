@@ -82,6 +82,7 @@ sqlx = { workspace = true, optional = true, features = ["postgres", "tls-rustls"
 serde_json = { workspace = true, optional = true }
 toml.workspace = true
 rayon.workspace = true
+clap-serde-derive.workspace = true
 
 zkvm-jetpack.workspace = true
 nbx-jetpack.workspace = true

@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex as SyncMutex};
 use std::time::{Duration, Instant};
 
 use clap::Args;
+use clap_serde_derive::ClapSerde;
 use either::Either;
 use gdt_cpus::CoreType;
 use nbx_jetpack::log::*;
@@ -371,8 +372,7 @@ async fn client_conn(
     }
 }
 
-#[derive(Args, Clone, Debug, Serialize, Deserialize)]
-#[serde(default)]
+#[derive(ClapSerde, Deserialize, Serialize)]
 pub struct ClientConfig {
     #[arg(
         long,
@@ -380,13 +380,13 @@ pub struct ClientConfig {
         value_delimiter = ','
     )]
     pub miner_connect: Vec<String>,
+    #[default(3)]
     #[arg(
         long,
         help = "How many concurrent connections to maintain",
-        default_value = "3"
     )]
     pub miner_num_concurrent_connections: usize,
-    #[arg(long, help = "Number of threads to mine with defaults to one less than the number of cpus available.", default_value = None)]
+    #[arg(long, help = "Number of threads to mine with defaults to one less than the number of cpus available.")]
     pub num_threads: Option<u64>,
     #[arg(
         long,
@@ -411,22 +411,6 @@ pub struct ClientConfig {
         help = "JWT to use in order to authenticate to servers. Overrides NBX_AUTH_JWT environment variable."
     )]
     pub miner_auth_jwt: Option<Arc<str>>,
-}
-
-impl Default for ClientConfig {
-    fn default() -> Self {
-        Self {
-            miner_connect: vec!["pool-proxy.nockbox.org:4344".to_string()],
-            miner_num_concurrent_connections: 3,
-            num_threads: None,
-            pin_threads: None,
-            client_name: None,
-            #[cfg(feature = "gpu")]
-            gpus: vec![],
-            #[cfg(feature = "jwt-auth-client")]
-            miner_auth_jwt: None,
-        }
-    }
 }
 
 impl ClientConfig {

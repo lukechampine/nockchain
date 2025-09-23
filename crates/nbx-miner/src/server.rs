@@ -7,6 +7,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use clap::{Args, ValueEnum};
+use clap_serde_derive::ClapSerde;
 use futures::stream::StreamExt;
 use jsonwebtoken::DecodingKey;
 #[cfg(feature = "verifier")]
@@ -49,14 +50,11 @@ use crate::shared::{
 
 pub const TELEMETRY_PROOFRATE_INTERVAL: Duration = Duration::from_secs(60);
 
-#[derive(Clone, Debug, Args, Serialize, Deserialize)]
+#[derive(ClapSerde, Clone, Debug, Args, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MiningConfig {
-    #[arg(
-        long,
-        help = "Where to bind the mining server to",
-        default_value = "[::1]:0"
-    )]
+    #[default((Ipv6Addr::LOCALHOST, 0).into())]
+    #[arg(long, help = "Where to bind the mining server to [default: [::]:0]")]
     miner_bind: SocketAddr,
     #[cfg(feature = "server-tls-key-load")]
     #[arg(long, help = "Path to custom TLS private key")]
@@ -70,8 +68,9 @@ pub struct MiningConfig {
         help = "Whether to pre-verify client proofs before accepting them as valid"
     )]
     miner_preverify: bool,
+    #[default(SaveMineAttempts::None)]
     #[cfg(feature = "miner-save-attempts")]
-    #[arg(long, help = "Which mining attempts to save", default_value = "none")]
+    #[arg(long, help = "Which mining attempts to save [default: none]")]
     miner_save_attempts: SaveMineAttempts,
     #[cfg(feature = "jwt-auth-server")]
     #[arg(
@@ -79,24 +78,6 @@ pub struct MiningConfig {
         help = "JWT keys to verify client connections with. Multiple to allow failover. Used in addition to NBX_JWT_KEY[1-9] environment variables."
     )]
     miner_jwt_keys: Vec<String>,
-}
-
-impl Default for MiningConfig {
-    fn default() -> Self {
-        Self {
-            miner_bind: (Ipv6Addr::LOCALHOST, 0).into(),
-            #[cfg(feature = "server-tls-key-load")]
-            miner_tls_key: None,
-            #[cfg(feature = "server-tls-key-load")]
-            miner_tls_chain: None,
-            #[cfg(all(feature = "verifier", not(feature = "force-preverify")))]
-            miner_preverify: cfg!(feature = "force-preverify"),
-            #[cfg(feature = "miner-save-attempts")]
-            miner_save_attempts: Default::default(),
-            #[cfg(feature = "jwt-auth-server")]
-            miner_jwt_keys: Default::default(),
-        }
-    }
 }
 
 type Result<T = ()> = core::result::Result<T, NockAppError>;

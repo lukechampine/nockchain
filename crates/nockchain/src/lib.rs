@@ -456,17 +456,9 @@ pub async fn init_with_kernel<J: Jammer + Send + 'static>(
 
     let server = nbx_miner::server::bind(&mining_config.server).await?;
     let server_ip = server.local_addr()?;
-    let mut client = mining_config.client.clone();
-    if client.client_name.is_none() {
-        client.client_name = Some("_local".to_string());
-    }
-    client.miner_connect.push(server_ip.to_string());
     let mining_driver =
         crate::mining::create_mining_driver(mining_config, Some(mining_init_tx), server);
     nockapp.add_io_driver(mining_driver).await;
-    if client.num_threads() > 0 {
-        tokio::spawn(nbx_miner::client::run_client(client));
-    }
 
     let libp2p_driver = nockchain_libp2p_io::driver::make_libp2p_driver(
         keypair,

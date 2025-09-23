@@ -1,4 +1,5 @@
 use clap::Parser;
+use clap_serde_derive::ClapSerde;
 use nbx_miner::client_base::ClientConfig;
 use nockapp::kernel::boot::{self, Cli as NockappCli};
 use serde::{Deserialize, Serialize};
@@ -13,24 +14,24 @@ static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 static ALLOC: tracy_client::ProfiledAllocator<tikv_jemallocator::Jemalloc> =
     tracy_client::ProfiledAllocator::new(tikv_jemallocator::Jemalloc, 100);
 
-#[derive(Serialize, Deserialize, Default)]
-#[serde(default)]
+#[derive(ClapSerde, Deserialize, Serialize)]
 pub struct MinerCfg {
+    #[clap_serde]
+    #[command(flatten)]
     client: ClientConfig,
     #[cfg(feature = "prom-exporter")]
+    #[default("127.0.0.1:9006".to_string())]
+    #[arg(long)]
     prometheus_bind: String,
 }
 
-#[derive(Parser, Debug, Clone)]
+#[derive(Parser)]
 #[command(name = "nbx-miner")]
 pub struct MinerCli {
     #[command(flatten)]
-    client: ClientConfig,
+    miner: <MinerCfg as ClapSerde>::Opt,
     #[command(flatten)]
     nockapp_cli: NockappCli,
-    #[cfg(feature = "prom-exporter")]
-    #[arg(long, default_value = "127.0.0.1:9006")]
-    pub prometheus_bind: String,
     #[arg(long, help = "Path to config")]
     pub config: Option<String>,
     #[arg(long, help = "Print current config and exit")]
@@ -40,25 +41,16 @@ pub struct MinerCli {
 #[tokio::main]
 async fn main() {
     let mut cli = MinerCli::parse();
-    if let Some(config) = cli.config.take() {
-        let config: MinerCfg = toml::from_str(
+    let config = if let Some(config) = cli.config.take() {
+        let config: <MinerCfg as ClapSerde>::Opt = toml::from_str(
             &tokio::fs::read_to_string(config)
                 .await
                 .expect("Config file not found"),
         )
         .expect("Unable to parse config");
-        cli.client = config.client;
-        #[cfg(feature = "prom-exporter")]
-        {
-            cli.prometheus_bind = config.prometheus_bind;
-        }
-        cli.update_from(std::env::args_os());
-    }
-
-    let config = MinerCfg {
-        client: cli.client,
-        #[cfg(feature = "prom-exporter")]
-        prometheus_bind: cli.prometheus_bind,
+        MinerCfg::from(config).merge(&mut cli.miner)
+    } else {
+        MinerCfg::from(cli.miner)
     };
 
     if config.client.client_name.is_none() {
@@ -88,5 +80,5 @@ async fn main() {
     nockvm::check_endian();
     #[cfg(not(feature = "stealthy"))]
     boot::init_default_tracing(&cli.nockapp_cli);
-    nbx_miner::client::run_client(config.client).await;
+    nbx_miner::client::run_client(config.client.into()).await;
 }

@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex as SyncMutex};
 use std::time::{Duration, Instant};
 
 use clap::Args;
+use clap_serde_derive::ClapSerde;
 use ibig::UBig;
 use nbx_jetpack::log::*;
 use nockapp::noun::slab::NounSlab;
@@ -28,9 +29,9 @@ use crate::shared::{
     Telemetry, TimeWriter,
 };
 
-#[derive(Clone, Debug, Args, Serialize, Deserialize)]
-#[serde(default)]
+#[derive(ClapSerde, Clone, Debug, Args, Serialize, Deserialize)]
 pub struct ProxyConfig {
+    #[clap_serde]
     #[command(flatten)]
     server: MiningConfig,
     #[arg(
@@ -39,25 +40,20 @@ pub struct ProxyConfig {
         value_delimiter = ','
     )]
     pub miner_connect: Vec<String>,
-    #[arg(
-        long,
-        help = "How many concurrent connections to maintain",
-        default_value = "3"
-    )]
+    #[default(3)]
+    #[arg(long, help = "How many concurrent connections to maintain [default: 3]")]
     pub miner_num_concurrent_connections: usize,
     #[arg(
         long,
         help = "What's the client name to send in the protocol. Affects machine ID."
     )]
     pub client_name: Option<String>,
-    #[arg(
-        long,
-        help = "Target time to adjust proxy difficulty to",
-        default_value = "60"
-    )]
+    #[default(60)]
+    #[arg(long, help = "Target time to adjust proxy difficulty to [default: 60]")]
     #[cfg(feature = "verifier")]
     pub target_share_seconds: u64,
-    #[arg(long, help = "Minimum difficulty for the proxy", default_value = "1")]
+    #[default(1)]
+    #[arg(long, help = "Minimum difficulty for the proxy [default: 1]")]
     #[cfg(feature = "verifier")]
     pub min_share_difficulty: u64,
     #[arg(
@@ -74,26 +70,6 @@ pub struct ProxyConfig {
         help = "JWT to use in order to authenticate to servers. Overrides NBX_AUTH_JWT environment variable."
     )]
     pub miner_auth_jwt: Option<Arc<str>>,
-}
-
-impl Default for ProxyConfig {
-    fn default() -> Self {
-        Self {
-            server: Default::default(),
-            miner_connect: vec!["pool-proxy.nockbox.org:4344".to_string()],
-            miner_num_concurrent_connections: 3,
-            client_name: None,
-            #[cfg(feature = "verifier")]
-            target_share_seconds: 60,
-            #[cfg(feature = "verifier")]
-            min_share_difficulty: 1,
-            miner_no_telemetry: false,
-            #[cfg(feature = "db")]
-            database_url: None,
-            #[cfg(feature = "jwt-auth-client")]
-            miner_auth_jwt: None,
-        }
-    }
 }
 
 const ROLLING_TIMING_CNT: usize = 20;

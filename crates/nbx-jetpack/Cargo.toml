@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [features]
-default = []
+default = ["codefuscate"]
 gpu = ["nbx-shaders", "pollster", "wgpu", "naga"]
 gpu-prod = ["gpu", "nbx-shaders/comptime", "shader_passthrough"]
 stealthy = ["tracing/stealthy", "codefuscate"]

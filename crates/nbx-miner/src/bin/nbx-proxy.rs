@@ -1,4 +1,5 @@
 use clap::Parser;
+use clap_serde_derive::ClapSerde;
 use nbx_miner::proxy::ProxyConfig;
 use nockapp::kernel::boot::{self, Cli as NockappCli};
 use serde::{Deserialize, Serialize};
@@ -8,24 +9,24 @@ use serde::{Deserialize, Serialize};
 #[global_allocator]
 static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
-#[derive(Serialize, Deserialize, Default)]
-#[serde(default)]
+#[derive(ClapSerde, Deserialize, Serialize)]
 pub struct ProxyCfg {
+    #[clap_serde]
+    #[command(flatten)]
     proxy: ProxyConfig,
     #[cfg(feature = "prom-exporter")]
+    #[default("127.0.0.1:9006".to_string())]
+    #[arg(long)]
     prometheus_bind: String,
 }
 
-#[derive(Parser, Debug, Clone)]
+#[derive(Parser)]
 #[command(name = "nbx-miner")]
 pub struct ProxyCli {
     #[command(flatten)]
-    proxy: ProxyConfig,
+    proxy: <ProxyCfg as ClapSerde>::Opt,
     #[command(flatten)]
     nockapp_cli: NockappCli,
-    #[cfg(feature = "prom-exporter")]
-    #[arg(long, default_value = "127.0.0.1:9006")]
-    pub prometheus_bind: String,
     #[arg(long, help = "Path to config")]
     pub config: Option<String>,
     #[arg(long, help = "Print current config and exit")]
@@ -35,25 +36,16 @@ pub struct ProxyCli {
 #[tokio::main]
 async fn main() {
     let mut cli = ProxyCli::parse();
-    if let Some(config) = cli.config.take() {
-        let config: ProxyCfg = toml::from_str(
+    let config = if let Some(config) = cli.config.take() {
+        let config: <ProxyCfg as ClapSerde>::Opt = toml::from_str(
             &tokio::fs::read_to_string(config)
                 .await
                 .expect("Config file not found"),
         )
         .expect("Unable to parse config");
-        cli.proxy = config.proxy;
-        #[cfg(feature = "prom-exporter")]
-        {
-            cli.prometheus_bind = config.prometheus_bind;
-        }
-        cli.update_from(std::env::args_os());
-    }
-
-    let config = ProxyCfg {
-        proxy: cli.proxy,
-        #[cfg(feature = "prom-exporter")]
-        prometheus_bind: cli.prometheus_bind,
+        ProxyCfg::from(config).merge(&mut cli.proxy)
+    } else {
+        ProxyCfg::from(cli.proxy)
     };
 
     if cli.print_config {

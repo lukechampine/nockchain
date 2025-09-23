@@ -104,8 +104,6 @@ pub struct MiningConfig {
     pub mining_key_adv: Option<Vec<MiningKeyConfig>>,
     #[command(flatten)]
     pub server: nbx_miner::server::MiningConfig,
-    #[command(flatten)]
-    pub client: nbx_miner::client_base::ClientConfig,
 }
 
 impl MiningConfig {
