@@ -178,11 +178,7 @@ pub async fn run_proxy(cfg: ProxyConfig) {
     let (mining_tx, mut mining_rx) = mpsc::channel(cfg.miner_connect.len());
     let (ack_tx, mut ack_rx) = mpsc::channel(cfg.miner_connect.len());
     let (_client_tasks, server_extras) = client_loops(
-        cfg.miner_connect,
-        cfg.miner_num_concurrent_connections,
-        device,
-        mining_tx,
-        ack_tx,
+        cfg.miner_connect, cfg.miner_num_concurrent_connections, device, mining_tx, ack_tx,
         #[cfg(feature = "jwt-auth-client")]
         cfg.miner_auth_jwt,
         #[cfg(not(feature = "jwt-auth-client"))]

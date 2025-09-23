@@ -166,7 +166,7 @@ impl ThreadBackend for rayon::ThreadPool {
                                 continue;
                             }
                         }
-                        _ => ()
+                        _ => (),
                     }
                     // If we are not in hot loop waiting, do blocking wait.
                     return std::thread::Thread::mpsc_recv(rx);
@@ -191,7 +191,8 @@ impl ThreadBackend for std::thread::Thread {
         std::thread::Builder::new()
             .name("serf".to_string())
             .stack_size(SERF_THREAD_STACK_SIZE)
-            .spawn(thread).unwrap()
+            .spawn(thread)
+            .unwrap()
     }
 
     fn join(handle: Self::JoinHandle) -> Result<(), Box<dyn Any + Send + 'static>> {

@@ -3,10 +3,9 @@ extern crate tracing_base;
 #[cfg(feature = "stealthy")]
 extern crate noop_attr;
 
-pub use tracing_base::*;
-
 #[cfg(feature = "stealthy")]
 pub use noop_attr::noop as instrument;
+pub use tracing_base::*;
 
 #[cfg(feature = "stealthy")]
 pub mod noop {
@@ -25,7 +24,7 @@ pub mod noop {
 macro_rules! info_span {
     ($($tt:tt)*) => {
         $crate::noop::NoopSpan
-    }
+    };
 }
 
 #[cfg(feature = "stealthy")]

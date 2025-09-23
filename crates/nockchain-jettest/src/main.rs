@@ -273,11 +273,9 @@ async fn main() -> Result<()> {
     rayon::ThreadPoolBuilder::default().build_global().unwrap();
     #[cfg(feature = "threaded")]
     for _ in 0..rayon::current_num_threads() {
-        rayon::spawn(|| {
-            loop {
-                rayon::yield_now();
-                spin_loop();
-            }
+        rayon::spawn(|| loop {
+            rayon::yield_now();
+            spin_loop();
         });
     }
 
