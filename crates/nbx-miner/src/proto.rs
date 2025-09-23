@@ -62,8 +62,20 @@ fn verify_jwt(jwt: &str, keys: &[DecodingKey]) -> Result<TokenData<JwtClaims>, E
     let mut validation = Validation::new(Algorithm::HS256);
     validation.set_audience(&["nbx-proto"]);
     validation.set_required_spec_claims(&["iss", "aud", "sub"]);
+    validation.validate_exp = false;
     for key in keys {
-        match decode(jwt, key, &validation) {
+        match decode(jwt, key, &validation).and_then(|v: TokenData<JwtClaims>| {
+            if let Some(exp) = v.claims.exp {
+                let now = jsonwebtoken::get_current_timestamp();
+                if exp < now {
+                    return Err(ErrorKind::ExpiredSignature.into());
+                } else {
+                    Ok(v)
+                }
+            } else {
+                Ok(v)
+            }
+        }) {
             Err(e) if e.kind() == &ErrorKind::InvalidSignature => continue,
             r => return r,
         }
@@ -729,6 +741,7 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
             trace!("JWT validation skipped");
             JwtClaims {
                 sub: Default::default(),
+                exp: None,
                 non_share_proofs: true,
                 telemetry: true,
                 telemetry_metrics: true,
