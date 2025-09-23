@@ -50,6 +50,7 @@ use crate::shared::{
 pub const TELEMETRY_PROOFRATE_INTERVAL: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Debug, Args, Serialize, Deserialize)]
+#[serde(default)]
 pub struct MiningConfig {
     #[arg(
         long,

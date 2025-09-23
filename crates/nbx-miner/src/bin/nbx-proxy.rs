@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 #[global_allocator]
 static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct ProxyCfg {
     proxy: ProxyConfig,
     #[cfg(feature = "prom-exporter")]

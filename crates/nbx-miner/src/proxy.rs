@@ -29,6 +29,7 @@ use crate::shared::{
 };
 
 #[derive(Clone, Debug, Args, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ProxyConfig {
     #[command(flatten)]
     server: MiningConfig,
@@ -73,6 +74,26 @@ pub struct ProxyConfig {
         help = "JWT to use in order to authenticate to servers. Overrides NBX_AUTH_JWT environment variable."
     )]
     pub miner_auth_jwt: Option<Arc<str>>,
+}
+
+impl Default for ProxyConfig {
+    fn default() -> Self {
+        Self {
+            server: Default::default(),
+            miner_connect: vec!["pool-proxy.nockbox.org:4344".to_string()],
+            miner_num_concurrent_connections: 3,
+            client_name: None,
+            #[cfg(feature = "verifier")]
+            target_share_seconds: 60,
+            #[cfg(feature = "verifier")]
+            min_share_difficulty: 1,
+            miner_no_telemetry: false,
+            #[cfg(feature = "db")]
+            database_url: None,
+            #[cfg(feature = "jwt-auth-client")]
+            miner_auth_jwt: None,
+        }
+    }
 }
 
 const ROLLING_TIMING_CNT: usize = 20;

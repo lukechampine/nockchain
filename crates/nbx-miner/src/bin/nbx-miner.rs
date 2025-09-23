@@ -13,7 +13,8 @@ static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 static ALLOC: tracy_client::ProfiledAllocator<tikv_jemallocator::Jemalloc> =
     tracy_client::ProfiledAllocator::new(tikv_jemallocator::Jemalloc, 100);
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct MinerCfg {
     client: ClientConfig,
     #[cfg(feature = "prom-exporter")]

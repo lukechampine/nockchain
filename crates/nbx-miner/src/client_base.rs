@@ -371,7 +371,8 @@ async fn client_conn(
     }
 }
 
-#[derive(Args, Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Args, Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ClientConfig {
     #[arg(
         long,
@@ -379,9 +380,6 @@ pub struct ClientConfig {
         value_delimiter = ','
     )]
     pub miner_connect: Vec<String>,
-    #[cfg(not(feature = "force-tls"))]
-    #[arg(long, help = "Use TLS for the miner")]
-    pub miner_connect_tls: bool,
     #[arg(
         long,
         help = "How many concurrent connections to maintain",
@@ -413,6 +411,22 @@ pub struct ClientConfig {
         help = "JWT to use in order to authenticate to servers. Overrides NBX_AUTH_JWT environment variable."
     )]
     pub miner_auth_jwt: Option<Arc<str>>,
+}
+
+impl Default for ClientConfig {
+    fn default() -> Self {
+        Self {
+            miner_connect: vec!["pool-proxy.nockbox.org:4344".to_string()],
+            miner_num_concurrent_connections: 3,
+            num_threads: None,
+            pin_threads: None,
+            client_name: None,
+            #[cfg(feature = "gpu")]
+            gpus: vec![],
+            #[cfg(feature = "jwt-auth-client")]
+            miner_auth_jwt: None,
+        }
+    }
 }
 
 impl ClientConfig {
