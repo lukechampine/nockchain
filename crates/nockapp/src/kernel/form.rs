@@ -95,20 +95,135 @@ pub enum SerfAction<C> {
     Stop,
 }
 
-pub enum ThreadHandle {
-    Rayon(oneshot::Receiver<()>),
-    Tokio(std::thread::JoinHandle<()>),
+pub trait ThreadBackend {
+    type JoinHandle;
+    type PokeHandle;
+
+    fn spawn<T: Send + FnOnce() + 'static>(thread: T) -> Self::JoinHandle;
+    fn join(handle: Self::JoinHandle) -> Result<(), Box<dyn Any + Send + 'static>>;
+    fn join_async(handle: Self::JoinHandle) -> impl Future<Output = Result<()>> + Send;
+    fn mpsc_recv<T>(rx: &mut mpsc::Receiver<T>) -> Option<T>;
+    fn on_poke() -> Self::PokeHandle;
 }
 
-pub struct SerfThread<C> {
-    handle: Option<ThreadHandle>,
+static RAYON_POKE_HANDLE: AtomicU64 = AtomicU64::new(0);
+pub struct RayonPokeHandle(());
+
+impl Drop for RayonPokeHandle {
+    fn drop(&mut self) {
+        RAYON_POKE_HANDLE.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+impl RayonPokeHandle {
+    fn new() -> Self {
+        RAYON_POKE_HANDLE.fetch_add(1, Ordering::SeqCst);
+        Self(())
+    }
+}
+
+impl ThreadBackend for rayon::ThreadPool {
+    type JoinHandle = oneshot::Receiver<()>;
+    type PokeHandle = RayonPokeHandle;
+
+    fn spawn<T: Send + FnOnce() + 'static>(thread: T) -> Self::JoinHandle {
+        let (tx, handle) = oneshot::channel();
+        rayon::spawn(move || {
+            thread();
+            let _ = tx.send(());
+        });
+        handle
+    }
+
+    fn join(handle: Self::JoinHandle) -> Result<(), Box<dyn Any + Send + 'static>> {
+        handle
+            .blocking_recv()
+            .map_err(|_| Box::new("Unable to join rayon serf") as _)
+    }
+
+    fn join_async(handle: Self::JoinHandle) -> impl Future<Output = Result<()>> + Send {
+        async move {
+            match handle.await {
+                Ok(()) => Ok(()),
+                Err(e) => Err(CrownError::Unknown(format!(
+                    "Rayon serf thread failed: {e:?}"
+                ))),
+            }
+        }
+    }
+
+    fn mpsc_recv<T>(rx: &mut mpsc::Receiver<T>) -> Option<T> {
+        loop {
+            match rx.try_recv() {
+                Ok(received_action) => {
+                    return Some(received_action);
+                }
+                Err(mpsc::error::TryRecvError::Empty) => {
+                    match rayon::yield_now() {
+                        Some(rayon::Yield::Executed) => continue,
+                        Some(rayon::Yield::Idle) => {
+                            if RAYON_POKE_HANDLE.load(Ordering::SeqCst) > 0 {
+                                continue;
+                            }
+                        }
+                        _ => ()
+                    }
+                    // If we are not in hot loop waiting, do blocking wait.
+                    return std::thread::Thread::mpsc_recv(rx);
+                }
+                Err(mpsc::error::TryRecvError::Disconnected) => {
+                    return None;
+                }
+            }
+        }
+    }
+
+    fn on_poke() -> Self::PokeHandle {
+        RayonPokeHandle::new()
+    }
+}
+
+impl ThreadBackend for std::thread::Thread {
+    type JoinHandle = std::thread::JoinHandle<()>;
+    type PokeHandle = ();
+
+    fn spawn<T: Send + FnOnce() + 'static>(thread: T) -> Self::JoinHandle {
+        std::thread::spawn(thread)
+    }
+
+    fn join(handle: Self::JoinHandle) -> Result<(), Box<dyn Any + Send + 'static>> {
+        handle.join()
+    }
+
+    fn join_async(handle: Self::JoinHandle) -> impl Future<Output = Result<()>> + Send {
+        async move {
+            let tokio_join_handle = tokio::task::spawn_blocking(move || handle.join());
+            match tokio_join_handle.await {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(e)) => Err(CrownError::Unknown(format!("Serf thread panicked: {e:?}"))),
+                Err(e) => Err(CrownError::JoinError(e)),
+            }
+        }
+    }
+
+    fn mpsc_recv<T>(rx: &mut mpsc::Receiver<T>) -> Option<T> {
+        rx.blocking_recv()
+    }
+
+    fn on_poke() -> Self::PokeHandle {
+        ()
+    }
+}
+
+pub struct SerfThread<C, B: ThreadBackend = std::thread::Thread> {
+    handle: Option<B::JoinHandle>,
     action_sender: mpsc::Sender<SerfAction<C>>,
     pub cancel_token: NockCancelToken,
     inhibit: Arc<AtomicBool>,
     pub event_number: Arc<AtomicU64>,
 }
 
-impl<C: SerfCheckpoint + Send + 'static> SerfThread<C> {
+impl<C: SerfCheckpoint + Send + 'static, B: ThreadBackend> SerfThread<C, B> {
     pub async fn new(
         kernel_bytes: Vec<u8>,
         checkpoint: Option<C>,
@@ -117,14 +232,12 @@ impl<C: SerfCheckpoint + Send + 'static> SerfThread<C> {
         test_jets: Vec<NounSlab>,
         trace: TraceOpts,
         always_preserve_updates: bool,
-        use_rayon: bool,
     ) -> Result<Self> {
         let (action_sender, action_receiver) = mpsc::channel(1);
         let (event_number_sender, event_number_receiver) = oneshot::channel();
         let (cancel_token_sender, cancel_token_receiver) = oneshot::channel();
         let inhibit = Arc::new(AtomicBool::new(false));
         let inhibit_clone = inhibit.clone();
-        let (tx, handle) = oneshot::channel();
         let thread = move || {
             let stack = NockStack::new(nock_stack_size, 0);
             let serf = Serf::new(
@@ -137,20 +250,10 @@ impl<C: SerfCheckpoint + Send + 'static> SerfThread<C> {
             cancel_token_sender
                 .send(serf.context.cancel_token())
                 .expect("Could not send cancel token out of serf thread");
-            serf_loop(serf, action_receiver, inhibit_clone);
-            let _ = tx.send(());
+            serf_loop::<C, B>(serf, action_receiver, inhibit_clone);
         };
 
-        let handle = if use_rayon {
-            rayon::spawn(thread);
-            ThreadHandle::Rayon(handle)
-        } else {
-            let join_handle = std::thread::Builder::new()
-                .name("serf".to_string())
-                .stack_size(SERF_THREAD_STACK_SIZE)
-                .spawn(thread)?;
-            ThreadHandle::Tokio(join_handle)
-        };
+        let handle = B::spawn(thread);
 
         let event_number = event_number_receiver.await?;
         let cancel_token = cancel_token_receiver.await?;
@@ -164,7 +267,7 @@ impl<C: SerfCheckpoint + Send + 'static> SerfThread<C> {
     }
 }
 
-impl<C> SerfThread<C> {
+impl<C, B: ThreadBackend> SerfThread<C, B> {
     pub(crate) fn provide_metrics(
         &mut self,
         metrics: Arc<NockAppMetrics>,
@@ -190,34 +293,12 @@ impl<C> SerfThread<C> {
                 .send(SerfAction::Stop)
                 .await
                 .expect("Failed to send stop action");
-            match join_handle {
-                ThreadHandle::Rayon(rx) => match rx.await {
-                    Ok(()) => Ok(()),
-                    Err(e) => Err(CrownError::Unknown(format!(
-                        "Rayon serf thread failed: {e:?}"
-                    ))),
-                },
-                ThreadHandle::Tokio(handle) => {
-                    let tokio_join_handle = tokio::task::spawn_blocking(move || handle.join());
-                    match tokio_join_handle.await {
-                        Ok(Ok(())) => Ok(()),
-                        Ok(Err(e)) => {
-                            Err(CrownError::Unknown(format!("Serf thread panicked: {e:?}")))
-                        }
-                        Err(e) => Err(CrownError::JoinError(e)),
-                    }
-                }
-            }
+            B::join_async(join_handle).await
         }
     }
 
     pub(crate) fn join(&mut self) -> Result<(), Box<dyn Any + Send + 'static>> {
-        match self.handle.take().expect("Serf thread already joined") {
-            ThreadHandle::Rayon(rx) => rx
-                .blocking_recv()
-                .map_err(|_| Box::new("Unable to join rayon serf") as _),
-            ThreadHandle::Tokio(handle) => handle.join(),
-        }
+        B::join(self.handle.take().expect("Serf thread already joined"))
     }
 
     pub(crate) async fn get_kernel_state_slab(&self) -> Result<NounSlab> {
@@ -369,32 +450,7 @@ impl<C> SerfThread<C> {
     }
 }
 
-fn wait_for_action<C: SerfCheckpoint>(
-    action_receiver: &mut mpsc::Receiver<SerfAction<C>>,
-) -> Option<SerfAction<C>> {
-    if rayon::current_thread_index().is_none() {
-        // This thread is not scheduled on the rayon thread pool, block until the action is received.
-        return action_receiver.blocking_recv();
-    }
-
-    loop {
-        match action_receiver.try_recv() {
-            Ok(received_action) => {
-                return Some(received_action);
-            }
-            Err(mpsc::error::TryRecvError::Empty) => {
-                // Only yield in rayon if we're actually in a rayon thread
-                // This is a no-op in std threads
-                rayon::yield_now();
-            }
-            Err(mpsc::error::TryRecvError::Disconnected) => {
-                return None;
-            }
-        }
-    }
-}
-
-fn serf_loop<C: SerfCheckpoint>(
+fn serf_loop<C: SerfCheckpoint, B: ThreadBackend>(
     mut serf: Serf,
     mut action_receiver: mpsc::Receiver<SerfAction<C>>,
     inhibit: Arc<AtomicBool>,
@@ -402,7 +458,7 @@ fn serf_loop<C: SerfCheckpoint>(
     loop {
         let start = std::time::Instant::now();
 
-        let Some(action) = wait_for_action(&mut action_receiver) else {
+        let Some(action) = B::mpsc_recv(&mut action_receiver) else {
             break;
         };
         let recv_elapsed = start.elapsed();
@@ -551,6 +607,7 @@ fn serf_loop<C: SerfCheckpoint>(
                             debug!("Failed to send inihibited poke result from serf thread");
                         });
                 } else {
+                    let _handle = B::on_poke();
                     let cause_noun = cause.copy_to_stack(serf.stack());
                     let noun_res = serf.poke(wire, cause_noun);
                     let noun_slab_res = noun_res.map(|noun| {
@@ -617,12 +674,12 @@ fn create_checkpoint<C: SerfCheckpoint>(
 }
 
 /// Represents a Sword kernel, containing a Serf and snapshot location.
-pub struct Kernel<C> {
+pub struct Kernel<C, B: ThreadBackend = std::thread::Thread> {
     /// The Serf managing the interface to the Sword.
-    pub(crate) serf: SerfThread<C>,
+    pub(crate) serf: SerfThread<C, B>,
 }
 
-impl<C: SerfCheckpoint + 'static> Kernel<C> {
+impl<C: SerfCheckpoint + 'static, B: ThreadBackend> Kernel<C, B> {
     /// Loads a kernel with a custom hot state.
     ///
     /// # Arguments
@@ -645,7 +702,7 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         let kernel_vec = Vec::from(kernel);
         let hot_state_vec = Vec::from(hot_state);
         let serf = SerfThread::new(
-            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE, test_jets, trace, true, false,
+            kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE, test_jets, trace, true,
         )
         .await?;
         Ok(Self { serf })
@@ -662,7 +719,6 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         let hot_state_vec = Vec::from(hot_state);
         let serf = SerfThread::new(
             kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_TINY, test_jets, trace, true,
-            false,
         )
         .await?;
         Ok(Self { serf })
@@ -679,7 +735,6 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         let hot_state_vec = Vec::from(hot_state);
         let serf = SerfThread::new(
             kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_SMALL, test_jets, trace, true,
-            false,
         )
         .await?;
         Ok(Self { serf })
@@ -696,7 +751,6 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         let hot_state_vec = Vec::from(hot_state);
         let serf = SerfThread::new(
             kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_MEDIUM, test_jets, trace, true,
-            false,
         )
         .await?;
         Ok(Self { serf })
@@ -713,7 +767,6 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         let hot_state_vec = Vec::from(hot_state);
         let serf = SerfThread::new(
             kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_LARGE, test_jets, trace, true,
-            false,
         )
         .await?;
         Ok(Self { serf })
@@ -730,7 +783,6 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
         let hot_state_vec = Vec::from(hot_state);
         let serf = SerfThread::new(
             kernel_vec, checkpoint, hot_state_vec, NOCK_STACK_SIZE_HUGE, test_jets, trace, true,
-            false,
         )
         .await?;
         Ok(Self { serf })
@@ -762,7 +814,7 @@ impl<C: SerfCheckpoint + 'static> Kernel<C> {
     }
 }
 
-impl<C> Kernel<C> {
+impl<C, B: ThreadBackend> Kernel<C, B> {
     // We are very carefully ensuring the future does not contain the "self" reference to ensure no lifetime issues when spawning tasks
     pub fn poke(&self, wire: WireRepr, cause: NounSlab) -> impl Future<Output = Result<NounSlab>> {
         self.serf.poke(wire, cause)

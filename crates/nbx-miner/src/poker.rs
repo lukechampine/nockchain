@@ -27,7 +27,7 @@ pub struct PokerAttemptRes<M> {
 }
 
 struct Poker<M> {
-    serf: SerfThread<SaveableCheckpoint>,
+    serf: SerfThread<SaveableCheckpoint, rayon::ThreadPool>,
     id: usize,
     results: mpsc::Sender<PokerAttemptRes<M>>,
     reqs: watch::Receiver<SyncMutex<Option<(NounSlab, M)>>>,
@@ -108,7 +108,7 @@ impl<M: Send + 'static> PokerHandle<M> {
         poke_wire: WireRepr,
     ) -> Self {
         let kernel = Vec::from(KERNEL);
-        let serf = SerfThread::<SaveableCheckpoint>::new(
+        let serf = SerfThread::<SaveableCheckpoint, rayon::ThreadPool>::new(
             kernel,
             None,
             hot_state,
@@ -116,7 +116,6 @@ impl<M: Send + 'static> PokerHandle<M> {
             test_jets,
             Default::default(),
             false,
-            cfg!(feature = "gpu"),
         )
         .await
         .expect("Could not load mining kernel");

@@ -504,7 +504,6 @@ pub async fn mining_server<
                 vec![],
                 Default::default(),
                 false,
-                false,
             )
             .await
             .expect("Could not load mining kernel");

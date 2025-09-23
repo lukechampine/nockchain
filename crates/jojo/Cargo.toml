@@ -26,6 +26,7 @@ tokio-stream.workspace = true
 reedline.workspace = true
 anyhow.workspace = true
 flume.workspace = true
+rayon.workspace = true
 
 zkvm-jetpack.workspace = true
 nbx-jetpack.workspace = true

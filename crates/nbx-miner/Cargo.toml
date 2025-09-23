@@ -81,6 +81,7 @@ uuid = { workspace = true, features = ["serde"] }
 sqlx = { workspace = true, optional = true, features = ["postgres", "tls-rustls", "runtime-tokio", "uuid"] }
 serde_json = { workspace = true, optional = true }
 toml.workspace = true
+rayon.workspace = true
 
 zkvm-jetpack.workspace = true
 nbx-jetpack.workspace = true

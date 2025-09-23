@@ -1,4 +1,5 @@
 use core::iter::once;
+use std::hint::spin_loop;
 use std::path::Path;
 use std::time::Instant;
 
@@ -212,7 +213,7 @@ async fn run_kernel(
     hot_state: Vec<HotEntry>,
     cli: Cli,
 ) -> Receiver<SendSlab> {
-    let serf = SerfThread::<SaveableCheckpoint>::new(
+    let serf = SerfThread::<SaveableCheckpoint, rayon::ThreadPool>::new(
         kernels::miner::KERNEL.into(),
         None,
         hot_state,
@@ -220,7 +221,6 @@ async fn run_kernel(
         vec![],
         cli.trace_opts.into(),
         false,
-        cfg!(feature = "gpu"),
     )
     .await
     .expect("Could not load mining kernel");
@@ -269,6 +269,17 @@ async fn main() -> Result<()> {
     nockvm::check_endian();
     let cli = JettestCli::parse();
     boot::init_default_tracing(&cli.nockapp_cli);
+
+    rayon::ThreadPoolBuilder::default().build_global().unwrap();
+    #[cfg(feature = "threaded")]
+    for _ in 0..rayon::current_num_threads() {
+        rayon::spawn(|| {
+            loop {
+                rayon::yield_now();
+                spin_loop();
+            }
+        });
+    }
 
     match cli.mode {
         Mode::Test(p) => p.run(cli.nockapp_cli).await,

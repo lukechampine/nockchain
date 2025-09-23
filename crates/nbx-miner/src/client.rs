@@ -73,6 +73,11 @@ pub async fn run_client(cfg: ClientConfig) {
     let test_jets_str = std::env::var("NOCK_TEST_JETS").unwrap_or_default();
     let test_jets = nockapp::kernel::boot::parse_test_jets(test_jets_str.as_str());
 
+    rayon::ThreadPoolBuilder::default()
+        .num_threads(num_threads as usize)
+        .build_global()
+        .expect("Unable to build thread pool");
+
     let mut miners = tokio::task::JoinSet::new();
     for i in 0..(num_threads as usize) {
         let core_id = pin_threads.as_ref().map(|v| v[i]);
@@ -93,11 +98,7 @@ pub async fn run_client(cfg: ClientConfig) {
     let (ack_tx, mut ack_rx) = mpsc::channel(cfg.miner_connect.len());
 
     let (_client_tasks, server_extras) = client_loops(
-        cfg.miner_connect,
-        cfg.miner_num_concurrent_connections,
-        device,
-        mining_tx,
-        ack_tx,
+        cfg.miner_connect, cfg.miner_num_concurrent_connections, device, mining_tx, ack_tx,
         #[cfg(feature = "jwt-auth-client")]
         cfg.miner_auth_jwt,
         #[cfg(not(feature = "jwt-auth-client"))]
