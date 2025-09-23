@@ -188,7 +188,10 @@ impl ThreadBackend for std::thread::Thread {
     type PokeHandle = ();
 
     fn spawn<T: Send + FnOnce() + 'static>(thread: T) -> Self::JoinHandle {
-        std::thread::spawn(thread)
+        std::thread::Builder::new()
+            .name("serf".to_string())
+            .stack_size(SERF_THREAD_STACK_SIZE)
+            .spawn(thread).unwrap()
     }
 
     fn join(handle: Self::JoinHandle) -> Result<(), Box<dyn Any + Send + 'static>> {
