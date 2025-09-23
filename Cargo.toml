@@ -163,7 +163,6 @@ tonic-build = "0.14"
 tonic-prost = "0.14.0"
 tonic-prost-build = "0.14.0"
 tower-http = { version = "0.6", features = ["fs"] }
-tracing = "0.1.41"
 tracing-core = "0.1"
 tracing-opentelemetry = { version = "0.31.0", features = ["metrics"] }
 tracing-subscriber = { version = "0.3.18", features = [
@@ -202,6 +201,8 @@ sysinfo = "0.36"
 chacha = "0.4"
 sqlx = "0.8"
 uuid = "1"
+noop-attr = "=0.1.0"
+tracing-base = { package = "tracing", version = "0.1.41" }
 
 metrics = "0.24"
 metrics-util = "0.20.0"
@@ -269,6 +270,9 @@ path = "crates/nbx-shaders-src"
 
 [workspace.dependencies.nbx-tip5]
 path = "crates/nbx-tip5"
+
+[workspace.dependencies.tracing]
+path = "crates/tracing"
 
 [profile.dev]
 opt-level = 0

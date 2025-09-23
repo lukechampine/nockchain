@@ -1,7 +1,0 @@
-disallowed-macros = [
-    { path = "tracing::error", reason = "Always use the crate tracing infrastructure to prevent output in stealth builds" },
-    { path = "tracing::warn", reason = "Always use the crate tracing infrastructure to prevent output in stealth builds" },
-    { path = "tracing::debug", reason = "Always use the crate tracing infrastructure to prevent output in stealth builds" },
-    { path = "tracing::info", reason = "Always use the crate tracing infrastructure to prevent output in stealth builds" },
-    { path = "tracing::trace", reason = "Always use the crate tracing infrastructure to prevent output in stealth builds" },
-]

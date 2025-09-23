@@ -439,7 +439,7 @@ dependencies = [
  "tower",
  "tower-layer",
  "tower-service",
- "tracing",
+ "tracing 0.1.41",
 ]
 
 [[package]]
@@ -459,7 +459,7 @@ dependencies = [
  "sync_wrapper",
  "tower-layer",
  "tower-service",
- "tracing",
+ "tracing 0.1.41",
 ]
 
 [[package]]
@@ -2331,7 +2331,7 @@ dependencies = [
  "nonzero_ext",
  "once_cell",
  "thiserror 2.0.16",
- "tracing",
+ "tracing 0.1.41",
 ]
 
 [[package]]
@@ -2424,7 +2424,7 @@ dependencies = [
  "slab",
  "tokio",
  "tokio-util",
- "tracing",
+ "tracing 0.1.41",
 ]
 
 [[package]]
@@ -2552,7 +2552,7 @@ dependencies = [
  "thiserror 2.0.16",
  "tinyvec",
  "tokio",
- "tracing",
+ "tracing 0.1.41",
  "url",
 ]
 
@@ -2574,7 +2574,7 @@ dependencies = [
  "smallvec",
  "thiserror 2.0.16",
  "tokio",
- "tracing",
+ "tracing 0.1.41",
 ]
 
 [[package]]
@@ -2614,7 +2614,7 @@ dependencies = [
  "nockvm",
  "tempfile",
  "tokio",
- "tracing",
+ "tracing 0.0.0",
  "zkvm-jetpack",
 ]
 
@@ -2634,7 +2634,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.16",
  "tokio",
- "tracing",
+ "tracing 0.0.0",
  "tracing-subscriber",
  "tracing-tracy",
  "walkdir",
@@ -2766,7 +2766,7 @@ dependencies = [
  "socket2 0.6.0",
  "tokio",
  "tower-service",
- "tracing",
+ "tracing 0.1.41",
 ]
 
 [[package]]
@@ -3215,7 +3215,7 @@ dependencies = [
  "termcolor",
  "tokio",
  "tokio-stream",
- "tracing",
+ "tracing 0.0.0",
  "tracing-test",
  "vergen",
  "zkvm-jetpack",
@@ -3479,7 +3479,7 @@ dependencies = [
  "rand 0.8.5",
  "rw-stream-sink",
  "thiserror 2.0.16",
- "tracing",
+ "tracing 0.1.41",
  "unsigned-varint",
  "web-time",
 ]
@@ -3496,7 +3496,7 @@ dependencies = [
  "libp2p-identity",
  "parking_lot",
  "smallvec",
- "tracing",
+ "tracing 0.1.41",
 ]
 
 [[package]]
@@ -3516,7 +3516,7 @@ dependencies = [
  "quick-protobuf-codec",
  "smallvec",
  "thiserror 2.0.16",
- "tracing",
+ "tracing 0.1.41",
 ]
 
 [[package]]
@@ -3533,7 +3533,7 @@ dependencies = [
  "rand 0.8.5",
  "sha2",
  "thiserror 2.0.16",
- "tracing",
+ "tracing 0.1.41",
  "zeroize",
 ]
 
@@ -3558,7 +3558,7 @@ dependencies = [
  "sha2",
  "smallvec",
  "thiserror 2.0.16",
- "tracing",
+ "tracing 0.1.41",
  "uint",
  "web-time",
 ]
@@ -3578,7 +3578,7 @@ dependencies = [
  "smallvec",
  "socket2 0.5.10",
  "tokio",
- "tracing",
+ "tracing 0.1.41",
 ]
 
 [[package]]
@@ -3591,7 +3591,7 @@ dependencies = [
  "libp2p-swarm",
  "memory-stats",
  "sysinfo 0.33.1",
- "tracing",
+ "tracing 0.1.41",
 ]
 
 [[package]]
@@ -3632,7 +3632,7 @@ dependencies = [
  "libp2p-identity",
  "libp2p-swarm",
  "rand 0.8.5",
- "tracing",
+ "tracing 0.1.41",
  "web-time",
 ]
 
@@ -3654,7 +3654,7 @@ dependencies = [
  "socket2 0.5.10",
  "thiserror 2.0.16",
  "tokio",
- "tracing",
+ "tracing 0.1.41",
 ]
 
 [[package]]
@@ -3672,7 +3672,7 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "smallvec",
- "tracing",
+ "tracing 0.1.41",
 ]
 
 [[package]]
@@ -3692,7 +3692,7 @@ dependencies = [
  "rand 0.8.5",
  "smallvec",
  "tokio",
- "tracing",
+ "tracing 0.1.41",
  "web-time",
 ]
 
@@ -3718,7 +3718,7 @@ dependencies = [
  "libp2p-core",
  "socket2 0.5.10",
  "tokio",
- "tracing",
+ "tracing 0.1.41",
 ]
 
 [[package]]
@@ -3750,7 +3750,7 @@ dependencies = [
  "libp2p-core",
  "libp2p-swarm",
  "tokio",
- "tracing",
+ "tracing 0.1.41",
 ]
 
 [[package]]
@@ -3833,7 +3833,7 @@ dependencies = [
  "cfg-if",
  "generator",
  "scoped-tls",
- "tracing",
+ "tracing 0.1.41",
  "tracing-subscriber",
 ]
 
@@ -3969,7 +3969,7 @@ dependencies = [
  "quanta",
  "thiserror 2.0.16",
  "tokio",
- "tracing",
+ "tracing 0.1.41",
 ]
 
 [[package]]
@@ -4142,7 +4142,7 @@ dependencies = [
  "futures",
  "pin-project",
  "smallvec",
- "tracing",
+ "tracing 0.1.41",
  "unsigned-varint",
 ]
 
@@ -4217,7 +4217,7 @@ dependencies = [
  "pollster",
  "rayon",
  "tokio",
- "tracing",
+ "tracing 0.0.0",
  "wgpu",
  "zkvm-jetpack",
 ]
@@ -4260,7 +4260,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tokio-stream",
- "tracing",
+ "tracing 0.0.0",
  "tracing-test",
  "tracy-client",
  "uuid",
@@ -4469,7 +4469,7 @@ dependencies = [
  "tokio-util",
  "tonic 0.14.1",
  "tower-http",
- "tracing",
+ "tracing 0.0.0",
  "tracing-opentelemetry",
  "tracing-subscriber",
  "tracing-test",
@@ -4502,7 +4502,7 @@ dependencies = [
  "tonic-build",
  "tonic-prost",
  "tonic-prost-build",
- "tracing",
+ "tracing 0.0.0",
  "tracing-subscriber",
 ]
 
@@ -4535,7 +4535,7 @@ dependencies = [
  "termcolor",
  "tikv-jemallocator",
  "tokio",
- "tracing",
+ "tracing 0.0.0",
  "tracing-test",
  "tracy-client",
  "vergen",
@@ -4566,7 +4566,7 @@ dependencies = [
  "tikv-jemallocator",
  "tokio",
  "tokio-stream",
- "tracing",
+ "tracing 0.0.0",
  "tracing-test",
  "vergen",
  "zkvm-jetpack",
@@ -4599,7 +4599,7 @@ dependencies = [
  "serde_bytes",
  "serde_cbor",
  "tokio",
- "tracing",
+ "tracing 0.0.0",
  "void",
  "zkvm-jetpack",
 ]
@@ -4627,7 +4627,7 @@ dependencies = [
  "termimad",
  "thiserror 2.0.16",
  "tokio",
- "tracing",
+ "tracing 0.0.0",
  "tracing-subscriber",
 ]
 
@@ -4653,7 +4653,7 @@ dependencies = [
  "termimad",
  "thiserror 2.0.16",
  "tokio",
- "tracing",
+ "tracing 0.0.0",
  "tracing-subscriber",
  "zkvm-jetpack",
 ]
@@ -4683,7 +4683,7 @@ dependencies = [
  "slotmap",
  "static_assertions",
  "thiserror 2.0.16",
- "tracing",
+ "tracing 0.0.0",
  "tracing-core",
 ]
 
@@ -4726,6 +4726,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "38bf9645c8b145698bb0b18a4637dcacbc421ea49bef2317e4fd8065a387cf21"
 
 [[package]]
+name = "noop-attr"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60c4e7087abecc42fc475b67fa61e12d0daeb93f2125141880adb5b9f33f0a09"
+
+[[package]]
 name = "notify"
 version = "5.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4751,7 +4757,7 @@ dependencies = [
  "nockvm",
  "noun-serde-derive",
  "thiserror 2.0.16",
- "tracing",
+ "tracing 0.0.0",
 ]
 
 [[package]]
@@ -4968,7 +4974,7 @@ dependencies = [
  "js-sys",
  "pin-project-lite",
  "thiserror 2.0.16",
- "tracing",
+ "tracing 0.1.41",
 ]
 
 [[package]]
@@ -5000,7 +5006,7 @@ dependencies = [
  "thiserror 2.0.16",
  "tokio",
  "tonic 0.13.1",
- "tracing",
+ "tracing 0.1.41",
 ]
 
 [[package]]
@@ -5621,7 +5627,7 @@ dependencies = [
  "socket2 0.5.10",
  "thiserror 2.0.16",
  "tokio",
- "tracing",
+ "tracing 0.1.41",
  "web-time",
 ]
 
@@ -5642,7 +5648,7 @@ dependencies = [
  "slab",
  "thiserror 2.0.16",
  "tinyvec",
- "tracing",
+ "tracing 0.1.41",
  "web-time",
 ]
 
@@ -5656,7 +5662,7 @@ dependencies = [
  "libc",
  "once_cell",
  "socket2 0.5.10",
- "tracing",
+ "tracing 0.1.41",
  "windows-sys 0.59.0",
 ]
 
@@ -6718,7 +6724,7 @@ dependencies = [
  "thiserror 2.0.16",
  "tokio",
  "tokio-stream",
- "tracing",
+ "tracing 0.1.41",
  "url",
  "uuid",
  "webpki-roots 0.26.11",
@@ -6800,7 +6806,7 @@ dependencies = [
  "sqlx-core",
  "stringprep",
  "thiserror 2.0.16",
- "tracing",
+ "tracing 0.1.41",
  "uuid",
  "whoami",
 ]
@@ -6838,7 +6844,7 @@ dependencies = [
  "sqlx-core",
  "stringprep",
  "thiserror 2.0.16",
- "tracing",
+ "tracing 0.1.41",
  "uuid",
  "whoami",
 ]
@@ -6863,7 +6869,7 @@ dependencies = [
  "serde_urlencoded",
  "sqlx-core",
  "thiserror 2.0.16",
- "tracing",
+ "tracing 0.1.41",
  "url",
  "uuid",
 ]
@@ -7293,7 +7299,7 @@ dependencies = [
  "slab",
  "socket2 0.6.0",
  "tokio-macros",
- "tracing",
+ "tracing 0.1.41",
  "windows-sys 0.59.0",
 ]
 
@@ -7411,7 +7417,7 @@ dependencies = [
  "tower",
  "tower-layer",
  "tower-service",
- "tracing",
+ "tracing 0.1.41",
 ]
 
 [[package]]
@@ -7440,7 +7446,7 @@ dependencies = [
  "tower",
  "tower-layer",
  "tower-service",
- "tracing",
+ "tracing 0.1.41",
 ]
 
 [[package]]
@@ -7498,7 +7504,7 @@ dependencies = [
  "tokio-util",
  "tower-layer",
  "tower-service",
- "tracing",
+ "tracing 0.1.41",
 ]
 
 [[package]]
@@ -7526,7 +7532,7 @@ dependencies = [
  "tower",
  "tower-layer",
  "tower-service",
- "tracing",
+ "tracing 0.1.41",
 ]
 
 [[package]]
@@ -7540,6 +7546,14 @@ name = "tower-service"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
+
+[[package]]
+name = "tracing"
+version = "0.0.0"
+dependencies = [
+ "noop-attr",
+ "tracing 0.1.41",
+]
 
 [[package]]
 name = "tracing"
@@ -7596,7 +7610,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry_sdk",
  "smallvec",
- "tracing",
+ "tracing 0.1.41",
  "tracing-core",
  "tracing-log",
  "tracing-subscriber",
@@ -7616,7 +7630,7 @@ dependencies = [
  "sharded-slab",
  "smallvec",
  "thread_local",
- "tracing",
+ "tracing 0.1.41",
  "tracing-core",
  "tracing-log",
 ]
@@ -9069,7 +9083,7 @@ dependencies = [
  "quickcheck",
  "smallvec",
  "strum 0.27.2",
- "tracing",
+ "tracing 0.0.0",
 ]
 
 [[package]]

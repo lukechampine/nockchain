@@ -43,44 +43,8 @@ use two::*;
 pub use two::{bpoly_to_fpoly, mp_substitute_ultra_impl, new_fpoly};
 use zoon::*;
 
-#[cfg(not(feature = "stealthy"))]
 pub mod log {
     pub use tracing::log::*;
-}
-
-#[cfg(feature = "stealthy")]
-pub mod log {
-    #[macro_export]
-    macro_rules! error {
-        ($($tt:tt)*) => {
-            ()
-        };
-    }
-    #[macro_export]
-    macro_rules! warn {
-        ($($tt:tt)*) => {
-            ()
-        };
-    }
-    #[macro_export]
-    macro_rules! debug {
-        ($($tt:tt)*) => {
-            ()
-        };
-    }
-    #[macro_export]
-    macro_rules! info {
-        ($($tt:tt)*) => {
-            ()
-        };
-    }
-    #[macro_export]
-    macro_rules! trace {
-        ($($tt:tt)*) => {
-            ()
-        };
-    }
-    pub use super::{debug, error, info, trace, warn};
 }
 
 macro_rules! jam_err {

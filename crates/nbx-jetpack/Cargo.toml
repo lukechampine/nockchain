@@ -7,7 +7,7 @@ edition.workspace = true
 default = []
 gpu = ["nbx-shaders", "pollster", "wgpu", "naga"]
 gpu-prod = ["gpu", "nbx-shaders/comptime", "shader_passthrough"]
-stealthy = []
+stealthy = ["tracing/stealthy"]
 shader_passthrough = ["nbx-shaders/shader_passthrough"]
 validate-gpu = ["gpu"]
 
