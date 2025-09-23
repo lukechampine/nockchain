@@ -7,7 +7,7 @@ use nbx_jetpack::log::error;
 use nockchain_libp2p_io::tip5_util::ubig_to_base58;
 use sqlx::any::install_default_drivers;
 use sqlx::postgres::PgPoolOptions as DbPoolOptions;
-use sqlx::types::Uuid;
+use sqlx::types::{Json, Uuid};
 use sqlx::PgPool as DbPool;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
@@ -121,7 +121,7 @@ impl Database {
                     for (sub, m) in machines {
                         q = q.bind(sub);
                         for (mid, dev) in m {
-                            q = q.bind(mid.to_string()).bind(dev.is_proxy).bind(serde_json::to_string(&dev).unwrap());
+                            q = q.bind(mid.to_string()).bind(dev.is_proxy).bind(Json(dev));
                         }
                     }
                     q.execute(&pool).await
