@@ -61,7 +61,7 @@ fn pow_valid(work: u64, nonce: u64, pow_difficulty: u32) -> bool {
 fn verify_jwt(jwt: &str, keys: &[DecodingKey]) -> Result<TokenData<JwtClaims>, Error> {
     let mut validation = Validation::new(Algorithm::HS256);
     validation.set_audience(&["nbx-proto"]);
-    validation.set_required_spec_claims(&["exp", "iss", "aud", "sub"]);
+    validation.set_required_spec_claims(&["iss", "aud", "sub"]);
     for key in keys {
         match decode(jwt, key, &validation) {
             Err(e) if e.kind() == &ErrorKind::InvalidSignature => continue,
