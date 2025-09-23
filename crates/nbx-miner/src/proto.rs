@@ -729,9 +729,6 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
             trace!("JWT validation skipped");
             JwtClaims {
                 sub: Default::default(),
-                exp: 0,
-                aud: "nbx-proto".into(),
-                iss: "nbx".into(),
                 non_share_proofs: true,
                 telemetry: true,
                 telemetry_metrics: true,

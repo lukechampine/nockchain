@@ -103,9 +103,6 @@ impl Wire for MiningWire {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JwtClaims {
     pub sub: uuid::Uuid,
-    pub exp: u64,
-    pub aud: String,
-    pub iss: String,
     #[serde(default)]
     pub non_share_proofs: bool,
     #[serde(default)]
