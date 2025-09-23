@@ -7,9 +7,10 @@ edition.workspace = true
 default = []
 gpu = ["nbx-shaders", "pollster", "wgpu", "naga"]
 gpu-prod = ["gpu", "nbx-shaders/comptime", "shader_passthrough"]
-stealthy = ["tracing/stealthy"]
+stealthy = ["tracing/stealthy", "codefuscate"]
 shader_passthrough = ["nbx-shaders/shader_passthrough"]
 validate-gpu = ["gpu"]
+codefuscate = []
 
 [dependencies]
 nockvm.workspace = true
@@ -28,6 +29,8 @@ tokio.workspace = true
 bytemuck.workspace = true
 nbx-tip5.workspace = true
 rayon.workspace = true
+goldberg.workspace = true
+obfstr.workspace = true
 
 pollster = { workspace = true, optional = true }
 wgpu = { workspace = true, optional = true }

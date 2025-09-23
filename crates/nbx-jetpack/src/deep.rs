@@ -137,41 +137,45 @@ impl DivisorBatch {
 
     #[tracing::instrument(skip_all)]
     fn weighted_division(self) -> FPolyVec {
-        assert_eq!(self.polys.len(), self.openings.len());
-        assert_eq!(self.polys.len(), self.weights.len());
+        crate::codefuscate! {
+            assert_eq!(self.polys.len(), self.openings.len());
+            assert_eq!(self.polys.len(), self.weights.len());
 
-        if self.polys.is_empty() {
-            return zero_fpoly();
-        }
-
-        let div_const = WeightedDivConst::new(self.get_divisor_polynomial(), self.polys[0].0.len());
-
-        // Pre-compute the maximum polynomial length to avoid reallocations
-        let max_len = self.polys.iter().map(|p| p.0.len()).max().unwrap();
-
-        // Pre-allocate the weighted numerator with the correct size
-        let mut weighted_numerator = PolyVec(vec![Felt::zero(); max_len]);
-
-        for (&opening, &weight) in self.openings.iter().zip(&self.weights) {
-            if opening.is_zero() {
-                continue;
+            if self.polys.is_empty() {
+                return zero_fpoly();
             }
 
-            weighted_numerator.0[0] = weighted_numerator.0[0] - (opening * weight);
-        }
+            let div_const = WeightedDivConst::new(self.get_divisor_polynomial(), self.polys[0].0.len());
 
-        for (poly, weight) in self.polys.iter().zip(self.weights) {
-            for (&coeff, weighted_elem) in poly.0.iter().zip(weighted_numerator.0.iter_mut()) {
-                *weighted_elem += coeff * weight;
+            // Pre-compute the maximum polynomial length to avoid reallocations
+            let max_len = self.polys.iter().map(|p| p.0.len()).max().unwrap();
+
+            // Pre-allocate the weighted numerator with the correct size
+            let mut weighted_numerator = PolyVec(vec![Felt::zero(); max_len]);
+
+            for (&opening, &weight) in self.openings.iter().zip(&self.weights) {
+                if opening.is_zero() {
+                    continue;
+                }
+
+                weighted_numerator.0[0] = weighted_numerator.0[0] - (opening * weight);
             }
         }
 
-        let (lead, mut rf) = fpdiv_lead_rf(weighted_numerator, &div_const);
+        crate::codefuscate! {
+            for (poly, weight) in self.polys.iter().zip(self.weights) {
+                for (&coeff, weighted_elem) in poly.0.iter().zip(weighted_numerator.0.iter_mut()) {
+                    *weighted_elem += coeff * weight;
+                }
+            }
 
-        let expected_len = div_const.pinned_ntt.0.len();
-        rf.0.resize(expected_len, Felt::zero());
+            let (lead, mut rf) = fpdiv_lead_rf(weighted_numerator, &div_const);
 
-        fpdiv_with_cache(lead, rf, &div_const)
+            let expected_len = div_const.pinned_ntt.0.len();
+            rf.0.resize(expected_len, Felt::zero());
+
+            fpdiv_with_cache(lead, rf, &div_const)
+        }
     }
 }
 

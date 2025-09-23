@@ -32,59 +32,63 @@ impl Engine for CodewordEngine<'_> {
 
     #[tracing::instrument(skip_all)]
     fn reduce_cpu(self) -> Self::Output {
-        // ::
-        // ::  this mary is a list of all tables' columns, extended to codewords
-        // =/  codewords=mary
-        //   (compute-lde table-polys fri-domain-len total-cols)
-        let mut codewords = Mary {
-            step: self.fri_domain_len,
-            len: self.total_cols as u32,
-            dat: vec![0; self.fri_domain_len as usize * self.total_cols as usize],
-        };
-        compute_lde::<Belt>(
-            &self.table_polys,
-            self.fri_domain_len,
-            self.total_cols,
-            codewords.as_mut_slice(),
-        );
-        // ::
-        // ::  this mary is a list of rows, each row the values of above codewords at a fixed domain elt
-        // =/  codeword-array=mary
-        //   (transpose-bpolys codewords)
-        let mut codeword_array = Mary {
-            dat: vec![0; codewords.dat.len()],
-            step: codewords.len,
-            len: codewords.step,
-        };
-        mary_transpose(codewords.as_slice(), 1, &mut codeword_array.as_mut_slice());
-        // =/  merk-heap=(pair @ merk-heap:merkle)
-        //   (bp-build-merk-heap:merkle codeword-array)
-        let (height, mh) = build_merk_heap_impl::<Belt>(codeword_array.as_slice()).unwrap();
+        crate::codefuscate! {
+            // ::
+            // ::  this mary is a list of all tables' columns, extended to codewords
+            // =/  codewords=mary
+            //   (compute-lde table-polys fri-domain-len total-cols)
+            let mut codewords = Mary {
+                step: self.fri_domain_len,
+                len: self.total_cols as u32,
+                dat: vec![0; self.fri_domain_len as usize * self.total_cols as usize],
+            };
+            compute_lde::<Belt>(
+                &self.table_polys,
+                self.fri_domain_len,
+                self.total_cols,
+                codewords.as_mut_slice(),
+            );
+            // ::
+            // ::  this mary is a list of rows, each row the values of above codewords at a fixed domain elt
+            // =/  codeword-array=mary
+            //   (transpose-bpolys codewords)
+            let mut codeword_array = Mary {
+                dat: vec![0; codewords.dat.len()],
+                step: codewords.len,
+                len: codewords.step,
+            };
+            mary_transpose(codewords.as_slice(), 1, &mut codeword_array.as_mut_slice());
+            // =/  merk-heap=(pair @ merk-heap:merkle)
+            //   (bp-build-merk-heap:merkle codeword-array)
+            let (height, mh) = build_merk_heap_impl::<Belt>(codeword_array.as_slice()).unwrap();
 
-        (codeword_array, height, mh)
+            (codeword_array, height, mh)
+        }
     }
 
     #[cfg(feature = "gpu")]
     #[tracing::instrument(skip_all)]
     fn reduce_gpu(self, gpu: super::gpu::GpuHandle) -> Self::Output {
-        use nbx_tip5::melt::Melt;
-        use nbx_tip5::tip5::DIGEST_LENGTH;
+        crate::codefuscate! {
+            use nbx_tip5::melt::Melt;
+            use nbx_tip5::tip5::DIGEST_LENGTH;
 
-        use super::gpu::Submittable;
-        use crate::utils::xeb;
+            use super::gpu::Submittable;
+            use crate::utils::xeb;
 
-        let height = xeb(self.fri_domain_len as usize);
+            let height = xeb(self.fri_domain_len as usize);
 
-        let res = Submittable::gpu_process(self, gpu);
-        let codeword_array = res.codeword_array;
+            let res = Submittable::gpu_process(self, gpu);
+            let codeword_array = res.codeword_array;
 
-        let mh = MerkHeap {
-            h: <[u64; DIGEST_LENGTH]>::try_from(&res.merk_heap.dat[..DIGEST_LENGTH])
-                .unwrap()
-                .map(Melt::from_u64),
-            m: res.merk_heap,
-        };
+            let mh = MerkHeap {
+                h: <[u64; DIGEST_LENGTH]>::try_from(&res.merk_heap.dat[..DIGEST_LENGTH])
+                    .unwrap()
+                    .map(Melt::from_u64),
+                m: res.merk_heap,
+            };
 
-        (codeword_array, height, mh)
+            (codeword_array, height, mh)
+        }
     }
 }

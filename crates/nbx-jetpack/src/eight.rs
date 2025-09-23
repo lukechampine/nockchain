@@ -368,21 +368,23 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
         .map(<PolyVec<Elem>>::from)
         .collect::<Vec<_>>();
     for i in 0..omicrons.len() {
-        // =/  trace  (snag i tworow-trace-polys)
-        let trace = &tworow_trace_polys[i];
-        let trace: PolySlice<Elem> = trace.into();
-        // =/  constraints  (~(got by constraint-w-deg-map.dp) i)
-        let constraints2 = constraint_w_deg_map.get(&(i as u64)).unwrap();
-        // =/  dyns  (snag i dyn-list)
-        let dyns = dyn_list[i];
+        crate::codefuscate! {
+            // =/  trace  (snag i tworow-trace-polys)
+            let trace = &tworow_trace_polys[i];
+            let trace = <_ as Into<PolySlice<Elem>>>::into(trace);
+            // =/  constraints  (~(got by constraint-w-deg-map.dp) i)
+            let constraints2 = constraint_w_deg_map.get(&(i as u64)).unwrap();
+            // =/  dyns  (snag i dyn-list)
+            let dyns = dyn_list[i];
 
-        for constraints in constraints2 {
-            for (_, mp) in constraints.iter() {
-                // =/  comps=(list bpoly)
-                //   (mp-substitute-ultra mp trace max-height chal-map dyns)
-                comp_cnts.push(mp_substitute_ultra_impl(
-                    &mut engine, 0, *mp, trace, challenges, dyns,
-                )?);
+            for constraints in constraints2 {
+                for (_, mp) in constraints.iter() {
+                    // =/  comps=(list bpoly)
+                    //   (mp-substitute-ultra mp trace max-height chal-map dyns)
+                    comp_cnts.push(mp_substitute_ultra_impl(
+                        &mut engine, 0, *mp, trace, challenges, dyns,
+                    )?);
+                }
             }
         }
     }
@@ -396,6 +398,7 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
     // |=  [i=@ acc=_zero-bpoly]
     let mut acc = PolyVec(vec![Elem::zero(); poly_len]);
     for i in 0..omicrons.len() {
+        crate::codefuscate! {
         // =/  height=@  (snag i heights)
         let height = heights[i];
         // =/  omicron  (~(snag bop omicrons) i)
@@ -412,8 +415,8 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
         let counts = constraint_counts
             .and_then(|v| v.get(stack, D(i as _)))
             .ok_or_else(det_err)?;
-        let counts: [_; 5] = counts
-            .uncell()?
+        let counts = counts
+            .uncell::<5>()?
             .map(|v| v.as_atom().unwrap().as_u64().unwrap());
         // =/  constraints  (~(got by constraint-w-deg-map.dp) i)
         let constraints2 = constraint_w_deg_map.get(&(i as u64)).unwrap();
@@ -423,7 +426,7 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
         let row_zerofier = ppow(&[Elem::zero(), Elem::one()], height as _);
         let row_zerofier = psub_(&row_zerofier, &[Elem::one()]);
         let row_zerofier = PolySlice(&row_zerofier);
-        let mut row_acc: Option<Vec<_>> = None;
+        let mut row_acc = Option::<Vec<_>>::None;
 
         // ::  note: the transition zerofier = row-zerofier/last-row
         // ::  here, we are computing composition-constraints/transition-zerofier
@@ -473,12 +476,16 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
                     Some(acc) => padd_in_place(acc, &processed_constraints.0),
                     None => boundary_acc = Some(processed_constraints.0),
                 },
-                1 | 4 => match row_acc.as_mut() {
+                1 => match row_acc.as_mut() {
+                    Some(acc) => padd_in_place(acc, &processed_constraints.0),
+                    None => row_acc = Some(processed_constraints.0),
+                },
+                4 => match row_acc.as_mut() {
                     Some(acc) => padd_in_place(acc, &processed_constraints.0),
                     None => row_acc = Some(processed_constraints.0),
                 },
                 _ => {
-                    let dividend: PolyVec<Elem> = PolyVec(dividend.0.to_vec());
+                    let dividend = PolyVec(dividend.0.to_vec());
                     let result = pdiv(&processed_constraints.0, &dividend.0);
                     padd_in_place(&mut acc.0, &result);
                 }
@@ -488,7 +495,7 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
         if let Some(row_acc) = row_acc {
             let row_result = pdiv(&row_acc, row_zerofier.0);
             padd_in_place(&mut acc.0, &row_result);
-        }
+        } }
     }
 
     if let Some(boundary_acc) = boundary_acc {
