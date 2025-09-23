@@ -203,6 +203,7 @@ sqlx = "0.8"
 uuid = "1"
 noop-attr = "=0.1.0"
 tracing-base = { package = "tracing", version = "0.1.41" }
+toml = "0.9"
 
 metrics = "0.24"
 metrics-util = "0.20.0"

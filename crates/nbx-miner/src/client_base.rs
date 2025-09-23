@@ -13,6 +13,7 @@ use nbx_jetpack::log::*;
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
 use rustls::crypto::ring::default_provider;
+use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::{Id, JoinSet};
@@ -92,7 +93,11 @@ pub fn client_loops(
     device: Device,
     mining_tx: mpsc::Sender<MiningDataOut>,
     ack_tx: mpsc::Sender<MiningAckOut>,
+    jwt: Option<Arc<str>>,
 ) -> (JoinSet<()>, Vec<ServerExtras>) {
+    #[cfg(feature = "jwt-auth-client")]
+    let jwt = jwt.or_else(|| std::env::var("NBX_AUTH_JWT").ok().map(Arc::<str>::from));
+
     let _ = default_provider().install_default();
 
     let mut client_tasks = JoinSet::new();
@@ -119,6 +124,7 @@ pub fn client_loops(
         client_extras,
         mining_tx,
         ack_tx,
+        jwt,
     ));
 
     (client_tasks, server_extras)
@@ -130,6 +136,7 @@ async fn client_pool(
     mut client_extras: Vec<ClientExtras>,
     mining_tx: mpsc::Sender<MiningDataOut>,
     ack_tx: mpsc::Sender<MiningAckOut>,
+    jwt: Option<Arc<str>>,
 ) {
     let mut spawned: HashMap<Id, SocketAddr> = HashMap::new();
     let mut pool: HashMap<SocketAddr, PoolEntry> = HashMap::new();
@@ -145,11 +152,6 @@ async fn client_pool(
     let tls_dns = Arc::new(TlsClientConfig::forced_server_name(
         "pool-proxy.intra.nockbox.org".into(),
     ));
-
-    #[cfg(feature = "jwt-auth-client")]
-    let jwt = std::env::var("NBX_AUTH_JWT").ok().map(Arc::<str>::from);
-    #[cfg(not(feature = "jwt-auth-client"))]
-    let jwt = None;
 
     loop {
         let mut backoff = None;
@@ -369,7 +371,7 @@ async fn client_conn(
     }
 }
 
-#[derive(Args, Clone, Debug, Default)]
+#[derive(Args, Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ClientConfig {
     #[arg(
         long,
@@ -398,9 +400,6 @@ pub struct ClientConfig {
         help = "What's the client name to send in the protocol. Affects machine ID."
     )]
     pub client_name: Option<String>,
-    #[cfg(not(feature = "force-send-only-targets"))]
-    #[arg(long, help = "Whether to forward non-block proofs upstream")]
-    pub forward_non_block: bool,
     #[cfg(feature = "gpu")]
     #[arg(
         long,
@@ -408,6 +407,12 @@ pub struct ClientConfig {
         value_delimiter = ','
     )]
     pub gpus: Vec<GpuConfig>,
+    #[cfg(feature = "jwt-auth-client")]
+    #[arg(
+        long,
+        help = "JWT to use in order to authenticate to servers. Overrides NBX_AUTH_JWT environment variable."
+    )]
+    pub miner_auth_jwt: Option<Arc<str>>,
 }
 
 impl ClientConfig {
@@ -416,7 +421,7 @@ impl ClientConfig {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PinThreads {
     // Pin threads in sequnece starting from starting core ID
     Sequence { start_core_id: usize },
@@ -503,7 +508,7 @@ impl PinThreads {
 }
 
 #[cfg(feature = "gpu")]
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct GpuConfig {
     pub gpu_index: usize,
     pub name_filter: Option<String>,

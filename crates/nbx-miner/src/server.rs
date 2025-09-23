@@ -29,6 +29,7 @@ use nockvm::noun::T;
 #[cfg(feature = "verifier")]
 use nockvm_macros::tas;
 use rustls::crypto::ring::default_provider;
+use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 #[cfg(feature = "verifier")]
 use tokio::sync::Mutex;
@@ -48,7 +49,7 @@ use crate::shared::{
 
 pub const TELEMETRY_PROOFRATE_INTERVAL: Duration = Duration::from_secs(60);
 
-#[derive(Clone, Debug, Args)]
+#[derive(Clone, Debug, Args, Serialize, Deserialize)]
 pub struct MiningConfig {
     #[arg(
         long,
@@ -71,6 +72,12 @@ pub struct MiningConfig {
     #[cfg(feature = "miner-save-attempts")]
     #[arg(long, help = "Which mining attempts to save", default_value = "none")]
     miner_save_attempts: SaveMineAttempts,
+    #[cfg(feature = "jwt-auth-server")]
+    #[arg(
+        long = "miner-jwt-key",
+        help = "JWT keys to verify client connections with. Multiple to allow failover. Used in addition to NBX_JWT_KEY[1-9] environment variables."
+    )]
+    miner_jwt_keys: Vec<String>,
 }
 
 impl Default for MiningConfig {
@@ -85,6 +92,8 @@ impl Default for MiningConfig {
             miner_preverify: cfg!(feature = "force-preverify"),
             #[cfg(feature = "miner-save-attempts")]
             miner_save_attempts: Default::default(),
+            #[cfg(feature = "jwt-auth-server")]
+            miner_jwt_keys: Default::default(),
         }
     }
 }
@@ -104,7 +113,7 @@ pub async fn bind(cfg: &MiningConfig) -> Result<TcpListener> {
     Ok(listener)
 }
 
-#[derive(Default, Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, ValueEnum, Debug, Serialize, Deserialize)]
 enum SaveMineAttempts {
     #[default]
     None,
@@ -236,7 +245,11 @@ pub async fn mining_driver(
         |_telemetry: Telemetry, _client_id: usize, _sub: Uuid| async move { Result::Ok(()) };
 
     let server = mining_server(
-        cfg, listener, reqs_in, process_target, process_telemetry,
+        cfg,
+        listener,
+        reqs_in,
+        process_target,
+        process_telemetry,
         #[cfg(feature = "db")]
         None,
     );
@@ -358,12 +371,20 @@ pub async fn mining_server<
     let mut jwt_keys = vec![];
 
     #[cfg(feature = "jwt-auth-server")]
-    for i in 1..10 {
-        if let Ok(v) = std::env::var(&format!("NBX_JWT_KEY{i}")) {
+    {
+        for v in cfg.miner_jwt_keys {
             jwt_keys.push(
                 DecodingKey::from_base64_secret(&v)
                     .map_err(|_| NockAppError::OtherError("Invalid JWT".into()))?,
             );
+        }
+        for i in 1..10 {
+            if let Ok(v) = std::env::var(&format!("NBX_JWT_KEY{i}")) {
+                jwt_keys.push(
+                    DecodingKey::from_base64_secret(&v)
+                        .map_err(|_| NockAppError::OtherError("Invalid environment JWT".into()))?,
+                );
+            }
         }
     }
 

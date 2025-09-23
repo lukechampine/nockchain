@@ -93,17 +93,20 @@ pub async fn run_client(cfg: ClientConfig) {
     let (ack_tx, mut ack_rx) = mpsc::channel(cfg.miner_connect.len());
 
     let (_client_tasks, server_extras) = client_loops(
-        cfg.miner_connect, cfg.miner_num_concurrent_connections, device, mining_tx, ack_tx,
+        cfg.miner_connect,
+        cfg.miner_num_concurrent_connections,
+        device,
+        mining_tx,
+        ack_tx,
+        #[cfg(feature = "jwt-auth-client")]
+        cfg.miner_auth_jwt,
+        #[cfg(not(feature = "jwt-auth-client"))]
+        None,
     );
 
     let mut requests = BTreeMap::new();
 
     let mut interval = tokio::time::interval(Duration::from_secs(5));
-
-    #[cfg(not(feature = "force-send-only-targets"))]
-    let forward_non_block = cfg.forward_non_block;
-    #[cfg(feature = "force-send-only-targets")]
-    let forward_non_block = false;
 
     #[rustfmt::skip]
     let mut hit_metrics = TargetMetrics::new(Duration::from_secs(10), "hit", "10s")
@@ -247,7 +250,7 @@ pub async fn run_client(cfg: ClientConfig) {
                             "server_id" => server_id.to_string(),
                         ).set(extra.mining_res.capacity() as f64);
 
-                        if target_hit || forward_non_block {
+                        if target_hit {
                             if let Err(e) = extra.mining_res.try_send(
                                 ClientDataWrite {
                                     session_id,

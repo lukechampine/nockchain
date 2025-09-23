@@ -22,8 +22,6 @@ client = ["kernels/miner"]
 verifier = ["kernels/verifier"]
 # Forces the server pre-verify the proofs. Mandatory for pool setups
 force-preverify = ["verifier"]
-# Disables --forward-non-block command line argument
-force-send-only-targets = []
 # Enable NBX_JWT_KEY[1-9] environment variable reading, which configures client authentication
 jwt-auth-server = []
 # Enable NBX_AUTH_JWT environment variable reading, which configures client authentication
@@ -82,6 +80,7 @@ itertools.workspace = true
 uuid = { workspace = true, features = ["serde"] }
 sqlx = { workspace = true, optional = true, features = ["postgres", "tls-rustls", "runtime-tokio", "uuid"] }
 serde_json = { workspace = true, optional = true }
+toml.workspace = true
 
 zkvm-jetpack.workspace = true
 nbx-jetpack.workspace = true

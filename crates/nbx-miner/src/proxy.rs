@@ -7,6 +7,7 @@ use ibig::UBig;
 use nbx_jetpack::log::*;
 use nockapp::noun::slab::NounSlab;
 use nockapp::NockAppError;
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 use zkvm_jetpack::form::{Belt, PRIME};
@@ -27,7 +28,7 @@ use crate::shared::{
     Telemetry, TimeWriter,
 };
 
-#[derive(Clone, Debug, Args)]
+#[derive(Clone, Debug, Args, Serialize, Deserialize)]
 pub struct ProxyConfig {
     #[command(flatten)]
     server: MiningConfig,
@@ -48,8 +49,6 @@ pub struct ProxyConfig {
         help = "What's the client name to send in the protocol. Affects machine ID."
     )]
     pub client_name: Option<String>,
-    #[arg(long, help = "Whether to forward non-block proofs upstream")]
-    pub forward_non_block: bool,
     #[arg(
         long,
         help = "Target time to adjust proxy difficulty to",
@@ -68,6 +67,12 @@ pub struct ProxyConfig {
     #[cfg(feature = "db")]
     #[arg(long, help = "URL to database. e.g.: postgres://localhost:3243/pool")]
     pub database_url: Option<String>,
+    #[cfg(feature = "jwt-auth-client")]
+    #[arg(
+        long,
+        help = "JWT to use in order to authenticate to servers. Overrides NBX_AUTH_JWT environment variable."
+    )]
+    pub miner_auth_jwt: Option<Arc<str>>,
 }
 
 const ROLLING_TIMING_CNT: usize = 20;
@@ -173,12 +178,19 @@ pub async fn run_proxy(cfg: ProxyConfig) {
     let (mining_tx, mut mining_rx) = mpsc::channel(cfg.miner_connect.len());
     let (ack_tx, mut ack_rx) = mpsc::channel(cfg.miner_connect.len());
     let (_client_tasks, server_extras) = client_loops(
-        cfg.miner_connect, cfg.miner_num_concurrent_connections, device, mining_tx, ack_tx,
+        cfg.miner_connect,
+        cfg.miner_num_concurrent_connections,
+        device,
+        mining_tx,
+        ack_tx,
+        #[cfg(feature = "jwt-auth-client")]
+        cfg.miner_auth_jwt,
+        #[cfg(not(feature = "jwt-auth-client"))]
+        None,
     );
 
     let mut requests = BTreeMap::new();
     let server_id_map = SyncMutex::new(BTreeMap::<_, (_, (u32, usize, u32, UBig))>::new());
-    let forward_non_block = cfg.forward_non_block;
 
     #[cfg(feature = "verifier")]
     let mut last_updated = Instant::now();
@@ -271,11 +283,7 @@ pub async fn run_proxy(cfg: ProxyConfig) {
             data.target_hit = dig <= parent_target;
             if !data.target_hit {
                 miss_metrics.lock().unwrap().measure(dig);
-                if !forward_non_block {
-                    return Ok(());
-                }
-                data.poke = None;
-                data.effect = None;
+                return Ok(());
             } else {
                 hit_metrics.lock().unwrap().measure(dig);
             }
