@@ -135,13 +135,13 @@ let
 
   nbx-proxy = profile: {
     prod = nbx-proxy-base profile "${prodFeatures}" individualCrateArgsAbort;
-    internal = nbx-proxy-base profile "--features nbx-miner/db,nbx-miner/jwt-auth-server,nbx-miner/server-tls-key-load,nbx-miner/verifier,nbx-miner/force-preverify" individualCrateArgsAbort;
+    internal = nbx-proxy-base profile "--features nbx-miner/db,nbx-miner/jwt-auth-server,nbx-miner/server-tls-key-load,nbx-miner/verifier,nbx-miner/force-preverify,nbx-miner/instrument,nbx-miner/slog" individualCrateArgsAbort;
   };
 
   nbx-miner = profile: {
     prod = nbx-miner-base profile "${prodFeatures}" individualCrateArgsImmediateAbort;
     prod-gpu = nbx-miner-base profile "${prodFeatures} ${gpuFeatures}" individualCrateArgsImmediateAbort;
-    internal = nbx-miner-base profile "${gpuFeatures} --features nbx-miner/jwt-auth-client,nbx-miner/prom-exporter" individualCrateArgsAbort;
+    internal = nbx-miner-base profile "${gpuFeatures} --features nbx-miner/jwt-auth-client,nbx-miner/prom-exporter,nbx-miner/instrument,nbx-miner/slog" individualCrateArgsAbort;
   };
 
   polyfill = stdenv.mkDerivation {

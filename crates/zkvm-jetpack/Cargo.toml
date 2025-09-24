@@ -12,7 +12,7 @@ bytes.workspace = true
 either.workspace = true
 hex-literal.workspace = true
 ibig.workspace = true
-nockapp.workspace = true
+nockapp = { workspace = true, default-features = false }
 nockvm.workspace = true
 nockvm_macros.workspace = true
 noun-serde.workspace = true

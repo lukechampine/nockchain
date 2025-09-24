@@ -10,6 +10,8 @@ default = ["jemalloc"]
 jemalloc = ["tikv-jemallocator"]
 tracing-heap = ["tikv-jemallocator", "tracy-client"]
 gpu = ["nbx-jetpack/gpu-prod"]
+instrument = ["nockapp/tracing-tracy"]
+slog = ["nockapp/slog-tracing"]
 # Production grade logging and stealth
 production = ["nbx-jetpack/stealthy"]
 # Enables --miner-tls-key,--miner-tls-chain arguments, that enable setting up non-embedded TLS keys for auth
@@ -42,7 +44,7 @@ required-features = ["client"]
 
 [dependencies]
 kernels = { workspace = true, features = [] }
-nockapp.workspace = true
+nockapp = { workspace = true, default-features = false }
 nockvm.workspace = true
 nockvm_macros.workspace = true
 bitvec.workspace = true
