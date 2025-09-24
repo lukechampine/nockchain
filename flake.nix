@@ -29,7 +29,7 @@
 
         code = pkgs.callPackage ./nix/. { inherit pkgs system lib craneLib rustToolchainFor; };
       in rec {
-        packages = code // {
+        packages = code // code.nbx-internal // {
           all = pkgs.symlinkJoin {
             name = "all";
             paths = with code; [ hoonc nockchain nockchain-wallet nockchain-metrics-exporter ];

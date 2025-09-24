@@ -9,7 +9,6 @@ debug-assertions = true
 [profile.release-strip]
 inherits = "release"
 strip = "symbols"
-panic = "abort"
 
 [profile.release-v4]
 inherits = "release"
@@ -20,7 +19,6 @@ lto = "thin"
 [profile.release-v4-strip]
 inherits = "release-v4"
 strip = "symbols"
-panic = "abort"
 
 [profile.release-v3]
 inherits = "release-v4"
@@ -29,7 +27,14 @@ rustflags = ["-C", "target-cpu=x86-64-v3"]
 [profile.release-v3-strip]
 inherits = "release-v3"
 strip = "symbols"
-panic = "abort"
+
+[profile.release-v2]
+inherits = "release-v4"
+rustflags = ["-C", "target-cpu=x86-64-v2"]
+
+[profile.release-v2-strip]
+inherits = "release-v2"
+strip = "symbols"
 
 [profile.release-native]
 inherits = "release-v4"
