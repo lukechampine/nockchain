@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as SyncMutex};
 use std::time::{Duration, Instant};
 
-use clap::Args;
 use clap_serde_derive::ClapSerde;
 use ibig::UBig;
 use nbx_jetpack::log::*;
@@ -29,11 +29,10 @@ use crate::shared::{
     Telemetry, TimeWriter,
 };
 
-#[derive(ClapSerde, Clone, Debug, Args, Serialize, Deserialize)]
+const LOG_TARGET: &str = "nbx::proxy";
+
+#[derive(ClapSerde, Serialize, Deserialize)]
 pub struct ProxyConfig {
-    #[clap_serde]
-    #[command(flatten)]
-    server: MiningConfig,
     #[arg(
         long,
         help = "Which servers to connect to in order to receive mining requests from",
@@ -41,7 +40,10 @@ pub struct ProxyConfig {
     )]
     pub miner_connect: Vec<String>,
     #[default(3)]
-    #[arg(long, help = "How many concurrent connections to maintain [default: 3]")]
+    #[arg(
+        long,
+        help = "How many concurrent connections to maintain [default: 3]"
+    )]
     pub miner_num_concurrent_connections: usize,
     #[arg(
         long,
@@ -146,8 +148,8 @@ impl DifficultyTracker {
     }
 }
 
-pub async fn run_proxy(cfg: ProxyConfig) {
-    let server_listener = crate::server::bind(&cfg.server)
+pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
+    let server_listener = crate::server::bind(&server_cfg)
         .await
         .expect("Unable to bind proxy listener");
 
@@ -171,6 +173,11 @@ pub async fn run_proxy(cfg: ProxyConfig) {
         debug!("Skipping DB connection");
         (None, None)
     };
+
+    if cfg.miner_connect.is_empty() {
+        crate::log!(error, "miner_connect (--miner-connect) cannot be unset");
+        panic!("miner_connect (--miner-connect) cannot be unset")
+    }
 
     let (mining_tx, mut mining_rx) = mpsc::channel(cfg.miner_connect.len());
     let (ack_tx, mut ack_rx) = mpsc::channel(cfg.miner_connect.len());
@@ -281,6 +288,8 @@ pub async fn run_proxy(cfg: ProxyConfig) {
                 hit_metrics.lock().unwrap().measure(dig);
             }
 
+            crate::log!(debug, "{sub} on {hwid} hit parent target. Forwarding.");
+
             gauge!(
                 "nbx_miner_proxy_channel_mining_res_capacity",
                 "server_id" => server_id.to_string(),
@@ -325,13 +334,18 @@ pub async fn run_proxy(cfg: ProxyConfig) {
         async move { Ok(()) }
     };
 
+    crate::log!(debug, "Starting NockBox proxy on {}", server_cfg.miner_bind);
+
+    let connected_clients = AtomicUsize::new(0);
+
     let (reqs_out, reqs_in) = mpsc::channel(1);
     let server = mining_server(
-        cfg.server,
+        server_cfg,
         server_listener,
         reqs_in,
         process_target,
         process_telemetry,
+        Some(&connected_clients),
         #[cfg(feature = "db")]
         db.clone(),
     );
@@ -342,6 +356,8 @@ pub async fn run_proxy(cfg: ProxyConfig) {
         telemetry_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         #[cfg(feature = "db")]
         let db = db.clone();
+        let mut stats_interval = tokio::time::interval(Duration::from_secs(60));
+        stats_interval.reset();
 
         loop {
             counter!("nbx_miner_proxy_main_loop_ticks_total").increment(1);
@@ -440,6 +456,35 @@ pub async fn run_proxy(cfg: ProxyConfig) {
                             };
                         }
                     }
+                }
+                _ = stats_interval.tick() => {
+                    let mut difficulty_sum = 0;
+                    let mut cnt = 0;
+                    if let Some(max_height) = requests
+                        .iter()
+                        .filter(|((sid, _), _)| server_extras[*sid].shared().live)
+                        .inspect(|(_, v)| {
+                            let target = unsafe { v.0.target.root() };
+                            let target = parse_bn(*target);
+                            let diff = target_to_difficulty(target);
+                            difficulty_sum += u64::try_from(diff).unwrap_or(u64::MAX);
+                            cnt += 1;
+                        })
+                        .map(|(_, v)| v.0.block_height).max()
+                    {
+                        let difficulty_avg = difficulty_sum / cnt;
+                        crate::log!(
+                            info,
+                            "Connected. block_height = {max_height}; difficulty = {difficulty_avg}"
+                        )
+                    } else {
+                        crate::log!(
+                            warn,
+                            "Waiting for connection."
+                        );
+                    }
+
+                    crate::log!(debug, "Connected clients: {}", connected_clients.load(Ordering::Relaxed));
                 }
                 _ = interval.tick() => {
                     counter!("nbx_miner_proxy_main_loop_interval_total").increment(1);

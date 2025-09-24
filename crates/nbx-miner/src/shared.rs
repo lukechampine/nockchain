@@ -420,6 +420,14 @@ impl TargetMetrics {
         self.measurements.push_back((now, target));
         self.measure_down();
     }
+
+    pub fn get_rate_statistics(&self, out: &mut Vec<String>) {
+        let Some(last) = self.measurements.front() else {
+            return;
+        };
+        let rate = (self.measurements.len() as f64) / last.0.elapsed().as_secs_f64();
+        out.push(format!("{} avg: {:.02}p/s", self.level, rate));
+    }
 }
 
 #[derive(Default, Debug)]
@@ -448,7 +456,7 @@ impl ConnTrack {
         }
     }
 
-    pub fn emit_metrics(&self) {
+    pub fn emit_metrics(&self) -> usize {
         let track = self.0.lock().unwrap();
         gauge!("nbx_miner_conntrack_subs").set(track.conns.len() as f64);
         let mut total = 0;
@@ -457,6 +465,7 @@ impl ConnTrack {
             total += v.len();
         }
         gauge!("nbx_miner_conntrack_active").set(total as f64);
+        total
     }
 }
 

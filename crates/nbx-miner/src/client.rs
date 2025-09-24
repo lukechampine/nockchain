@@ -27,8 +27,11 @@ use crate::proto::{
 };
 use crate::server::TELEMETRY_PROOFRATE_INTERVAL;
 use crate::shared::{
-    digest_to_target, MiningData, MiningResult, MiningWire, TargetMetrics, Telemetry,
+    digest_to_target, parse_bn, target_to_difficulty, MiningData, MiningResult, MiningWire,
+    TargetMetrics, Telemetry,
 };
+
+const LOG_TARGET: &str = "nbx::client";
 
 struct MiningRequest {
     data: MiningData,
@@ -38,6 +41,14 @@ struct MiningRequest {
 }
 
 pub async fn run_client(cfg: ClientConfig) {
+    if cfg.miner_connect.is_empty() {
+        crate::log!(error, "miner_connect (--miner-connect) cannot be unset");
+        panic!("miner_connect (--miner-connect) cannot be unset")
+    }
+
+    let num_threads = cfg.num_threads();
+    crate::log!(info, "Starting NockBox miner with {} threads", num_threads);
+
     #[cfg(feature = "gpu")]
     {
         let mut builder = nbx_jetpack::gpu::GpuRegistry::builder();
@@ -54,9 +65,6 @@ pub async fn run_client(cfg: ClientConfig) {
 
         builder.build().unwrap();
     }
-
-    let num_threads = cfg.num_threads();
-    info!("Starting mining driver with {} threads", num_threads);
 
     let pin_threads = cfg
         .pin_threads
@@ -121,9 +129,19 @@ pub async fn run_client(cfg: ClientConfig) {
         .with_previous(TargetMetrics::new(Duration::from_secs(600), "miss", "10m")
         .with_previous(TargetMetrics::new(Duration::from_secs(3600), "miss", "60m"))));
 
+    #[rustfmt::skip]
+    let mut all_metrics = [
+        TargetMetrics::new(Duration::from_secs(60), "all", "1m"),
+        TargetMetrics::new(Duration::from_secs(600), "all", "10m"),
+        TargetMetrics::new(Duration::from_secs(3600), "all", "60m"),
+    ];
+
     let mut counted_proofs = 0;
     let mut telemetry_interval = tokio::time::interval(TELEMETRY_PROOFRATE_INTERVAL);
     telemetry_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut stats_interval = tokio::time::interval(Duration::from_secs(60));
+
+    stats_interval.reset();
 
     loop {
         counter!("nbx_miner_client_main_loop_ticks_total").increment(1);
@@ -132,7 +150,10 @@ pub async fn run_client(cfg: ClientConfig) {
             v = mining_rx.recv() => {
                 counter!("nbx_miner_client_main_loop_mining_rx_total").increment(1);
                 let MiningDataOut { server_id, session_id, expire, new_datas } = v.expect("Client loop died");
+                let max_height = requests.values().map(|v: &MiningRequest| v.data.block_height).max().unwrap_or(0);
+                let mut max_height2 = max_height;
                 for (data_id, data) in new_datas {
+                    max_height2 = core::cmp::max(max_height2, data.block_height);
                     let hit_cnt = requests.values().filter(|v: &&MiningRequest| v.data.block_height == data.block_height).map(|v| v.hit_cnt).min().unwrap_or(0);
                     requests.insert((server_id, data_id), MiningRequest { data, last_hit: Instant::now(), hit_cnt, session_id });
                 }
@@ -143,6 +164,12 @@ pub async fn run_client(cfg: ClientConfig) {
                 }
                 for m in &miners {
                     start_mining_attempt(m, &server_extras, &mut requests);
+                }
+                if max_height != max_height2 {
+                    crate::log!(
+                        debug,
+                        "Received data with block_height = {max_height2}",
+                    );
                 }
             }
             v = ack_rx.recv() => {
@@ -213,6 +240,45 @@ pub async fn run_client(cfg: ClientConfig) {
                     };
                 }
             }
+            _ = stats_interval.tick() => {
+                let mut difficulty_sum = 0;
+                let mut cnt = 0;
+                if let Some(max_height) = requests
+                    .iter()
+                    .filter(|((sid, _), _)| server_extras[*sid].shared().live)
+                    .inspect(|(_, v)| {
+                        let target = unsafe { v.data.target.root() };
+                        let target = parse_bn(*target);
+                        let diff = target_to_difficulty(target);
+                        difficulty_sum += u64::try_from(diff).unwrap_or(u64::MAX);
+                        cnt += 1;
+                    })
+                    .map(|(_, v)| v.data.block_height).max()
+                {
+                    let difficulty_avg = difficulty_sum / cnt;
+                    crate::log!(
+                        info,
+                        "Connected. block_height = {max_height}; difficulty = {difficulty_avg}"
+                    )
+                } else {
+                    crate::log!(
+                        warn,
+                        "Waiting for connection."
+                    );
+                }
+
+                let mut stats = vec![];
+                for m in &all_metrics {
+                    m.get_rate_statistics(&mut stats);
+                }
+                if !stats.is_empty() {
+                    crate::log!(
+                        info,
+                        "Proofrate: {}",
+                        stats.join("; "),
+                    );
+                }
+            }
             r = mining_attempts.recv() => {
                 counter!("nbx_miner_client_main_loop_mining_attempts_total").increment(1);
                 let PokerAttemptRes { id, duration_millis, inst_delta: ReadInstruments { gpu_enqueue_ms, gpu_submit_ms, gpu_finish_ms }, slab_res, slab_inp, metadata: (server_id, data_id, session_id) } = r.expect("Mining attempt result failed");
@@ -238,6 +304,10 @@ pub async fn run_client(cfg: ClientConfig) {
 
                         counted_proofs += 1;
 
+                        for m in &mut all_metrics {
+                            m.measure(dig.clone());
+                        }
+
                         if target_hit {
                             hit_metrics.measure(dig);
                         } else {
@@ -252,6 +322,7 @@ pub async fn run_client(cfg: ClientConfig) {
                         ).set(extra.mining_res.capacity() as f64);
 
                         if target_hit {
+                            crate::log!(debug, "Target hit. Submitting");
                             if let Err(e) = extra.mining_res.try_send(
                                 ClientDataWrite {
                                     session_id,

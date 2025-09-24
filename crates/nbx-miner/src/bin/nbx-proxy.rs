@@ -1,6 +1,7 @@
 use clap::Parser;
 use clap_serde_derive::ClapSerde;
 use nbx_miner::proxy::ProxyConfig;
+use nbx_miner::server::MiningConfig;
 use nockapp::kernel::boot::{self, Cli as NockappCli};
 use serde::{Deserialize, Serialize};
 
@@ -14,6 +15,9 @@ pub struct ProxyCfg {
     #[clap_serde]
     #[command(flatten)]
     proxy: ProxyConfig,
+    #[clap_serde]
+    #[command(flatten)]
+    server: MiningConfig,
     #[cfg(feature = "prom-exporter")]
     #[default("127.0.0.1:9006".to_string())]
     #[arg(long)]
@@ -69,7 +73,6 @@ async fn main() {
         .expect("Unable to install prometheus exporter");
 
     nockvm::check_endian();
-    #[cfg(not(feature = "stealthy"))]
     boot::init_default_tracing(&cli.nockapp_cli);
-    nbx_miner::proxy::run_proxy(config.proxy).await;
+    nbx_miner::proxy::run_proxy(config.proxy, config.server).await;
 }

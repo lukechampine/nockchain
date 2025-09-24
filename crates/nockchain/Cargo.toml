@@ -53,6 +53,7 @@ nbx-jetpack.workspace = true
 nbx-miner = { workspace = true, features = ["client"] }
 metrics-exporter-prometheus.workspace = true
 metrics-util.workspace = true
+clap-serde-derive.workspace = true
 
 [build-dependencies]
 vergen = { workspace = true, features = [

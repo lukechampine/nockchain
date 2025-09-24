@@ -3,6 +3,7 @@ use std::future::Future;
 use std::io;
 use std::net::{Ipv6Addr, SocketAddr};
 use std::pin::pin;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -49,13 +50,13 @@ use crate::shared::{
 };
 
 pub const TELEMETRY_PROOFRATE_INTERVAL: Duration = Duration::from_secs(60);
+const LOG_TARGET: &str = "nbx::server";
 
-#[derive(ClapSerde, Clone, Debug, Args, Serialize, Deserialize)]
-#[serde(default)]
+#[derive(ClapSerde, Args, Clone, Debug, Serialize, Deserialize)]
 pub struct MiningConfig {
     #[default((Ipv6Addr::LOCALHOST, 0).into())]
     #[arg(long, help = "Where to bind the mining server to [default: [::]:0]")]
-    miner_bind: SocketAddr,
+    pub miner_bind: SocketAddr,
     #[cfg(feature = "server-tls-key-load")]
     #[arg(long, help = "Path to custom TLS private key")]
     miner_tls_key: Option<String>,
@@ -227,7 +228,7 @@ pub async fn mining_driver(
         |_telemetry: Telemetry, _client_id: usize, _sub: Uuid| async move { Result::Ok(()) };
 
     let server = mining_server(
-        cfg, listener, reqs_in, process_target, process_telemetry,
+        cfg, listener, reqs_in, process_target, process_telemetry, None,
         #[cfg(feature = "db")]
         None,
     );
@@ -324,6 +325,7 @@ pub async fn mining_server<
     mut reqs_in: mpsc::Receiver<(Arc<MiningData>, Arc<OnceLock<Instant>>)>,
     mut process_target: F1,
     mut process_telemetry: F2,
+    connected_clients: Option<&AtomicUsize>,
     #[cfg(feature = "db")] db: Option<crate::db::DatabaseHandle>,
 ) -> Result {
     let (tx, mut rx) = mpsc::channel(1024);
@@ -492,6 +494,8 @@ pub async fn mining_server<
     };
 
     let mut metrics_interval = tokio::time::interval(Duration::from_secs(10));
+    let mut stats_interval = tokio::time::interval(Duration::from_secs(60));
+    stats_interval.reset();
 
     loop {
         tokio::select! {
@@ -500,7 +504,7 @@ pub async fn mining_server<
                 let sub = handshake.client_sub;
                 let hwid = handshake.client_hwid.clone();
                 let perms = handshake.perms;
-                debug!("Accepted client_id={client_cnt}, client_hwid={}, client_sub={sub} on {a}", handshake.client_hwid);
+                crate::log!(debug, "Accepted {a} with client_id = {client_cnt}; client_hwid = {hwid}; client_sub = {sub}");
                 replay_mining_data.retain(|(_, v)| v.get().is_none());
                 let cmd = futures::stream::iter(replay_mining_data.clone()).chain(BroadcastStream::new(mining_data_tx.subscribe()).filter_map(|v| async move { v.ok() }));
                 let srv = server(handshake, cmd, client_cnt, tx.clone());
@@ -515,14 +519,21 @@ pub async fn mining_server<
                     Err(e) => (e.id(), None),
                 };
                 if let Some(client_id) = clients.remove(id) {
-                    error!("client_id={client_id} died ({r:?})");
+                    match r {
+                        Some(Err(e)) => crate::log!(debug, "client_id = {client_id} died with error: {e}"),
+                        Some(Ok(())) => crate::log!(debug, "client_id = {client_id} died cleanly"),
+                        None => crate::log!(warn, "client_id = {client_id} died without finishing"),
+                    }
                 } else {
                     error!("Accept loop removed");
                     break Err(NockAppError::IoError(io::ErrorKind::BrokenPipe.into()));
                 }
             }
             _ = metrics_interval.tick() => {
-                conntrack.emit_metrics();
+                let clients = conntrack.emit_metrics();
+                if let Some(cc) = connected_clients {
+                    cc.store(clients, Ordering::Relaxed);
+                }
             }
             data = rx.recv() => {
                 let ClientDataRead { data, client_id } = data.expect("Result senders died");

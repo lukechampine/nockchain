@@ -78,7 +78,6 @@ async fn main() {
         .expect("Unable to install prometheus exporter");
 
     nockvm::check_endian();
-    #[cfg(not(feature = "stealthy"))]
     boot::init_default_tracing(&cli.nockapp_cli);
     nbx_miner::client::run_client(config.client.into()).await;
 }

@@ -11,6 +11,16 @@ pub mod proxy;
 pub mod server;
 pub mod shared;
 
+macro_rules! log {
+    ($mode:ident, $($tt:tt)*) => {
+        tracing_base::log::$mode! {
+            target: LOG_TARGET,
+            $($tt)*
+        }
+    };
+}
+pub(crate) use log;
+
 #[cfg(feature = "stealthy")]
 pub mod metrics {
     pub struct NoopMetrics;

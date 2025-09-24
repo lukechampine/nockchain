@@ -53,6 +53,7 @@ futures.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tracing.workspace = true
 tracing-test.workspace = true
+tracing-base.workspace = true
 anyhow.workspace = true
 flume.workspace = true
 rand = { workspace = true }

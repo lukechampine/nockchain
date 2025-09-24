@@ -10,7 +10,6 @@ use clap::Args;
 use clap_serde_derive::ClapSerde;
 use either::Either;
 use gdt_cpus::CoreType;
-use nbx_jetpack::log::*;
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
 use rustls::crypto::ring::default_provider;
@@ -21,11 +20,14 @@ use tokio::task::{Id, JoinSet};
 use tokio::time::sleep;
 
 use crate::device::Device;
+use crate::log;
 use crate::metrics::gauge;
 use crate::proto::{
     self, ClientDataWrite, MiningAckOut, MiningDataOut, MiningResultIn, Permissions,
 };
 use crate::shared::{tls_connect, TlsClientConfig};
+
+const LOG_TARGET: &str = "nbx::conn";
 
 #[derive(Default, Clone, Copy)]
 pub struct SharedExtras {
@@ -168,7 +170,8 @@ async fn client_pool(
             let now = Instant::now();
             let spawn_time = c.spawn_time();
             if spawn_time > now {
-                debug!(
+                log!(
+                    debug,
                     "{a} in exponential backoff for {:.02}s",
                     spawn_time.duration_since(now).as_secs_f64()
                 );
@@ -185,10 +188,10 @@ async fn client_pool(
             // We just checked this
             let sn = resolved.get(a).unwrap().clone();
             let tls = if let Some(sn) = &sn {
-                debug!("Connecting to {sn} on {a}");
+                log!(debug, "Connecting to {sn} on {a}");
                 tls_dns.clone()
             } else {
-                debug!("Connecting to {a}");
+                log!(debug, "Connecting to {a}");
                 tls_ip.clone()
             };
             // We know we are not empty
@@ -214,9 +217,8 @@ async fn client_pool(
         if client_extras.is_empty() {
             for (id, v) in &spawned {
                 if !resolved.contains_key(v) {
-                    let id = *id;
                     let v = *v;
-                    debug!("{v} no longer resolvable. Killing");
+                    log!(debug, "{v} no longer resolvable. Killing");
                     pool.get(&v).unwrap().handle.as_ref().unwrap().abort();
                     break;
                 }
@@ -234,7 +236,11 @@ async fn client_pool(
             _ = ticker.tick() => {
                 resolved = resolve_all(&client_connect).await.unwrap_or_default();
                 for (a, server_name) in resolved.iter() {
-                    trace!("Resolved {a} on domain {server_name:?}");
+                    if let Some(sn) = &server_name {
+                        log!(trace, "Resolved {sn} on {a}");
+                    } else {
+                        log!(trace, "Fixed IP on {a}");
+                    }
                     pool.entry(*a).or_insert_with(|| PoolEntry {
                         server_name: server_name.clone(),
                         err_cnt: Arc::new(AtomicUsize::new(0)),
@@ -268,7 +274,7 @@ async fn client_pool(
             .collect::<Vec<_>>();
 
         for a in to_remove {
-            trace!("Cleaning up {a}");
+            log!(trace, "Cleaning up {a}");
             pool.remove(&a);
         }
     }
@@ -297,13 +303,13 @@ async fn client_conn(
     {
         Ok(Ok(stream)) => stream,
         Ok(Err(e)) => {
-            error!("Unable to connect to {addr}: {e}.");
+            log!(error, "Unable to connect to {addr}: {e}.");
             let c = err_cnt.fetch_add(1, Ordering::Relaxed);
             gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string()).set((c + 1) as f64);
             return;
         }
         Err(_) => {
-            error!("Timeout connecting to {addr}");
+            log!(error, "Timeout connecting to {addr}");
             let c = err_cnt.fetch_add(1, Ordering::Relaxed);
             gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string()).set((c + 1) as f64);
             return;
@@ -318,13 +324,13 @@ async fn client_conn(
     {
         Ok(Ok(stream)) => stream,
         Ok(Err(e)) => {
-            error!("Unable to establish TLS on {addr}: {e}.");
+            log!(error, "Unable to establish TLS on {addr}: {e}.");
             let c = err_cnt.fetch_add(1, Ordering::Relaxed);
             gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string()).set((c + 1) as f64);
             return;
         }
         Err(_) => {
-            error!("Timeout establishing TLS on {addr}");
+            log!(error, "Timeout establishing TLS on {addr}");
             let c = err_cnt.fetch_add(1, Ordering::Relaxed);
             gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string()).set((c + 1) as f64);
             return;
@@ -339,18 +345,20 @@ async fn client_conn(
     {
         Ok(Ok(h)) => h,
         Ok(Err(e)) => {
-            error!("Handshake failed: {e}.");
+            log!(error, "Handshake failed: {e}.");
             let c = err_cnt.fetch_add(1, Ordering::Relaxed);
             gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string()).set((c + 1) as f64);
             return;
         }
         Err(_) => {
-            error!("Handshake timeout.");
+            log!(error, "Handshake timeout.");
             let c = err_cnt.fetch_add(1, Ordering::Relaxed);
             gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string()).set((c + 1) as f64);
             return;
         }
     };
+
+    log!(debug, "Connected to {addr}");
 
     {
         let mut shared = shared.lock().unwrap();
@@ -365,7 +373,7 @@ async fn client_conn(
     shared.lock().unwrap().live = false;
 
     if let Err(e) = res {
-        error!("Connection finished: {e}.");
+        log!(error, "Connection finished: {e}.");
         let c = err_cnt.fetch_add(1, Ordering::Relaxed);
         gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string())
             .set((c + 1) as f64);
@@ -381,12 +389,12 @@ pub struct ClientConfig {
     )]
     pub miner_connect: Vec<String>,
     #[default(3)]
+    #[arg(long, help = "How many concurrent connections to maintain")]
+    pub miner_num_concurrent_connections: usize,
     #[arg(
         long,
-        help = "How many concurrent connections to maintain",
+        help = "Number of threads to mine with defaults to one less than the number of cpus available."
     )]
-    pub miner_num_concurrent_connections: usize,
-    #[arg(long, help = "Number of threads to mine with defaults to one less than the number of cpus available.")]
     pub num_threads: Option<u64>,
     #[arg(
         long,
