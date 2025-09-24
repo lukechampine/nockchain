@@ -170,6 +170,7 @@ tracing-subscriber = { version = "0.3.18", features = [
     "env-filter",
     "registry",
 ] }
+tracing = "0.1"
 tracing-test = "0.2.5"
 tracing-tracy = { version = "0.11.4" }
 tracy-client = { version = "0.18.2" }
@@ -202,7 +203,6 @@ chacha = "0.4"
 sqlx = "0.8"
 uuid = "1"
 noop-attr = "=0.1.0"
-tracing-base = { package = "tracing", version = "0.1.41" }
 toml = "0.9"
 goldberg = "0.1"
 obfstr = "0.4"
@@ -275,9 +275,6 @@ path = "crates/nbx-shaders-src"
 [workspace.dependencies.nbx-tip5]
 path = "crates/nbx-tip5"
 
-[workspace.dependencies.tracing]
-path = "crates/tracing"
-
 [profile.dev]
 opt-level = 0
 debug = 2
@@ -297,4 +294,5 @@ codegen-units = 1
 debug = 1
 
 [patch.crates-io]
+tracing = { git = "https://github.com/h33p/tracing-stripped" }
 rayon-core = { git = "https://github.com/ricohageman/rayon.git", rev = "6105cea31c87c6954442d312dc3a4d592b04d0e9" }

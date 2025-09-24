@@ -439,7 +439,7 @@ dependencies = [
  "tower",
  "tower-layer",
  "tower-service",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
 ]
 
 [[package]]
@@ -459,7 +459,7 @@ dependencies = [
  "sync_wrapper",
  "tower-layer",
  "tower-service",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
 ]
 
 [[package]]
@@ -1573,7 +1573,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d162beedaa69905488a8da94f5ac3edb4dd4788b732fadb7bd120b2625c1976"
 dependencies = [
  "data-encoding",
- "syn 2.0.106",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -2353,7 +2353,7 @@ dependencies = [
  "nonzero_ext",
  "once_cell",
  "thiserror 2.0.16",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
 ]
 
 [[package]]
@@ -2459,7 +2459,7 @@ dependencies = [
  "slab",
  "tokio",
  "tokio-util",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
 ]
 
 [[package]]
@@ -2587,7 +2587,7 @@ dependencies = [
  "thiserror 2.0.16",
  "tinyvec",
  "tokio",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
  "url",
 ]
 
@@ -2609,7 +2609,7 @@ dependencies = [
  "smallvec",
  "thiserror 2.0.16",
  "tokio",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
 ]
 
 [[package]]
@@ -2649,7 +2649,7 @@ dependencies = [
  "nockvm",
  "tempfile",
  "tokio",
- "tracing 0.0.0",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
  "zkvm-jetpack",
 ]
 
@@ -2669,7 +2669,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.16",
  "tokio",
- "tracing 0.0.0",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
  "tracing-subscriber",
  "tracing-tracy",
  "walkdir",
@@ -2801,7 +2801,7 @@ dependencies = [
  "socket2 0.6.0",
  "tokio",
  "tower-service",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
 ]
 
 [[package]]
@@ -3251,7 +3251,7 @@ dependencies = [
  "termcolor",
  "tokio",
  "tokio-stream",
- "tracing 0.0.0",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
  "tracing-test",
  "vergen",
  "zkvm-jetpack",
@@ -3515,7 +3515,7 @@ dependencies = [
  "rand 0.8.5",
  "rw-stream-sink",
  "thiserror 2.0.16",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
  "unsigned-varint",
  "web-time",
 ]
@@ -3532,7 +3532,7 @@ dependencies = [
  "libp2p-identity",
  "parking_lot",
  "smallvec",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
 ]
 
 [[package]]
@@ -3552,7 +3552,7 @@ dependencies = [
  "quick-protobuf-codec",
  "smallvec",
  "thiserror 2.0.16",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
 ]
 
 [[package]]
@@ -3569,7 +3569,7 @@ dependencies = [
  "rand 0.8.5",
  "sha2",
  "thiserror 2.0.16",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
  "zeroize",
 ]
 
@@ -3594,7 +3594,7 @@ dependencies = [
  "sha2",
  "smallvec",
  "thiserror 2.0.16",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
  "uint",
  "web-time",
 ]
@@ -3614,7 +3614,7 @@ dependencies = [
  "smallvec",
  "socket2 0.5.10",
  "tokio",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
 ]
 
 [[package]]
@@ -3627,7 +3627,7 @@ dependencies = [
  "libp2p-swarm",
  "memory-stats",
  "sysinfo 0.33.1",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
 ]
 
 [[package]]
@@ -3668,7 +3668,7 @@ dependencies = [
  "libp2p-identity",
  "libp2p-swarm",
  "rand 0.8.5",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
  "web-time",
 ]
 
@@ -3690,7 +3690,7 @@ dependencies = [
  "socket2 0.5.10",
  "thiserror 2.0.16",
  "tokio",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
 ]
 
 [[package]]
@@ -3708,7 +3708,7 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "smallvec",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
 ]
 
 [[package]]
@@ -3728,7 +3728,7 @@ dependencies = [
  "rand 0.8.5",
  "smallvec",
  "tokio",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
  "web-time",
 ]
 
@@ -3754,7 +3754,7 @@ dependencies = [
  "libp2p-core",
  "socket2 0.5.10",
  "tokio",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
 ]
 
 [[package]]
@@ -3786,7 +3786,7 @@ dependencies = [
  "libp2p-core",
  "libp2p-swarm",
  "tokio",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
 ]
 
 [[package]]
@@ -3869,7 +3869,7 @@ dependencies = [
  "cfg-if",
  "generator",
  "scoped-tls",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
  "tracing-subscriber",
 ]
 
@@ -4005,7 +4005,7 @@ dependencies = [
  "quanta",
  "thiserror 2.0.16",
  "tokio",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
 ]
 
 [[package]]
@@ -4189,7 +4189,7 @@ dependencies = [
  "futures",
  "pin-project",
  "smallvec",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
  "unsigned-varint",
 ]
 
@@ -4266,7 +4266,7 @@ dependencies = [
  "pollster",
  "rayon",
  "tokio",
- "tracing 0.0.0",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
  "wgpu",
  "zkvm-jetpack",
 ]
@@ -4313,8 +4313,7 @@ dependencies = [
  "tokio-rustls",
  "tokio-stream",
  "toml",
- "tracing 0.0.0",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
  "tracing-subscriber",
  "tracing-test",
  "tracy-client",
@@ -4524,7 +4523,7 @@ dependencies = [
  "tokio-util",
  "tonic 0.14.1",
  "tower-http",
- "tracing 0.0.0",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
  "tracing-opentelemetry",
  "tracing-subscriber",
  "tracing-test",
@@ -4557,7 +4556,7 @@ dependencies = [
  "tonic-build",
  "tonic-prost",
  "tonic-prost-build",
- "tracing 0.0.0",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
  "tracing-subscriber",
 ]
 
@@ -4591,7 +4590,7 @@ dependencies = [
  "termcolor",
  "tikv-jemallocator",
  "tokio",
- "tracing 0.0.0",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
  "tracing-test",
  "tracy-client",
  "vergen",
@@ -4623,7 +4622,7 @@ dependencies = [
  "tikv-jemallocator",
  "tokio",
  "tokio-stream",
- "tracing 0.0.0",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
  "tracing-test",
  "vergen",
  "zkvm-jetpack",
@@ -4656,7 +4655,7 @@ dependencies = [
  "serde_bytes",
  "serde_cbor",
  "tokio",
- "tracing 0.0.0",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
  "void",
  "zkvm-jetpack",
 ]
@@ -4684,7 +4683,7 @@ dependencies = [
  "termimad",
  "thiserror 2.0.16",
  "tokio",
- "tracing 0.0.0",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
  "tracing-subscriber",
 ]
 
@@ -4710,7 +4709,7 @@ dependencies = [
  "termimad",
  "thiserror 2.0.16",
  "tokio",
- "tracing 0.0.0",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
  "tracing-subscriber",
  "zkvm-jetpack",
 ]
@@ -4740,8 +4739,8 @@ dependencies = [
  "slotmap",
  "static_assertions",
  "thiserror 2.0.16",
- "tracing 0.0.0",
- "tracing-core",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
+ "tracing-core 0.1.34",
 ]
 
 [[package]]
@@ -4814,7 +4813,7 @@ dependencies = [
  "nockvm",
  "noun-serde-derive",
  "thiserror 2.0.16",
- "tracing 0.0.0",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
 ]
 
 [[package]]
@@ -5037,7 +5036,7 @@ dependencies = [
  "js-sys",
  "pin-project-lite",
  "thiserror 2.0.16",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
 ]
 
 [[package]]
@@ -5069,7 +5068,7 @@ dependencies = [
  "thiserror 2.0.16",
  "tokio",
  "tonic 0.13.1",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
 ]
 
 [[package]]
@@ -5690,7 +5689,7 @@ dependencies = [
  "socket2 0.5.10",
  "thiserror 2.0.16",
  "tokio",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
  "web-time",
 ]
 
@@ -5711,7 +5710,7 @@ dependencies = [
  "slab",
  "thiserror 2.0.16",
  "tinyvec",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
  "web-time",
 ]
 
@@ -5725,7 +5724,7 @@ dependencies = [
  "libc",
  "once_cell",
  "socket2 0.5.10",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
  "windows-sys 0.59.0",
 ]
 
@@ -6787,7 +6786,7 @@ dependencies = [
  "thiserror 2.0.16",
  "tokio",
  "tokio-stream",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
  "url",
  "uuid",
  "webpki-roots 0.26.11",
@@ -6869,7 +6868,7 @@ dependencies = [
  "sqlx-core",
  "stringprep",
  "thiserror 2.0.16",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
  "uuid",
  "whoami",
 ]
@@ -6907,7 +6906,7 @@ dependencies = [
  "sqlx-core",
  "stringprep",
  "thiserror 2.0.16",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
  "uuid",
  "whoami",
 ]
@@ -6932,7 +6931,7 @@ dependencies = [
  "serde_urlencoded",
  "sqlx-core",
  "thiserror 2.0.16",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
  "url",
  "uuid",
 ]
@@ -7373,7 +7372,7 @@ dependencies = [
  "slab",
  "socket2 0.6.0",
  "tokio-macros",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
  "windows-sys 0.59.0",
 ]
 
@@ -7499,7 +7498,7 @@ dependencies = [
  "tower",
  "tower-layer",
  "tower-service",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
 ]
 
 [[package]]
@@ -7528,7 +7527,7 @@ dependencies = [
  "tower",
  "tower-layer",
  "tower-service",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
 ]
 
 [[package]]
@@ -7586,7 +7585,7 @@ dependencies = [
  "tokio-util",
  "tower-layer",
  "tower-service",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
 ]
 
 [[package]]
@@ -7614,7 +7613,7 @@ dependencies = [
  "tower",
  "tower-layer",
  "tower-service",
- "tracing 0.1.41",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
 ]
 
 [[package]]
@@ -7631,33 +7630,40 @@ checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
 
 [[package]]
 name = "tracing"
-version = "0.0.0"
+version = "0.1.41"
+source = "git+https://github.com/tokio-rs/tracing?rev=tracing-0.1.41#0ca78870815a34a345a908f48db057057e8803d2"
 dependencies = [
- "noop-attr",
- "tracing 0.1.41",
+ "log",
+ "pin-project-lite",
+ "tracing-attributes",
+ "tracing-core 0.1.33",
 ]
 
 [[package]]
 name = "tracing"
 version = "0.1.41"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "784e0ac535deb450455cbfa28a6f0df145ea1bb7ae51b821cf5e7927fdcfbdd0"
+source = "git+https://github.com/h33p/tracing-stripped#144ab6100a8b252a681126a1eecc4160b5625b48"
 dependencies = [
- "log",
- "pin-project-lite",
- "tracing-attributes",
- "tracing-core",
+ "noop-attr",
+ "tracing 0.1.41 (git+https://github.com/tokio-rs/tracing?rev=tracing-0.1.41)",
 ]
 
 [[package]]
 name = "tracing-attributes"
-version = "0.1.30"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81383ab64e72a7a8b8e13130c49e3dab29def6d0c7d76a03087b3cf71c5c6903"
+version = "0.1.28"
+source = "git+https://github.com/tokio-rs/tracing?rev=tracing-0.1.41#0ca78870815a34a345a908f48db057057e8803d2"
 dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.106",
+]
+
+[[package]]
+name = "tracing-core"
+version = "0.1.33"
+source = "git+https://github.com/tokio-rs/tracing?rev=tracing-0.1.41#0ca78870815a34a345a908f48db057057e8803d2"
+dependencies = [
+ "once_cell",
 ]
 
 [[package]]
@@ -7678,7 +7684,7 @@ checksum = "ee855f1f400bd0e5c02d150ae5de3840039a3f54b025156404e34c23c03f47c3"
 dependencies = [
  "log",
  "once_cell",
- "tracing-core",
+ "tracing-core 0.1.34",
 ]
 
 [[package]]
@@ -7692,8 +7698,8 @@ dependencies = [
  "opentelemetry",
  "opentelemetry_sdk",
  "smallvec",
- "tracing 0.1.41",
- "tracing-core",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
+ "tracing-core 0.1.34",
  "tracing-log",
  "tracing-subscriber",
  "web-time",
@@ -7712,8 +7718,8 @@ dependencies = [
  "sharded-slab",
  "smallvec",
  "thread_local",
- "tracing 0.1.41",
- "tracing-core",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
+ "tracing-core 0.1.34",
  "tracing-log",
 ]
 
@@ -7723,7 +7729,7 @@ version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "557b891436fe0d5e0e363427fc7f217abf9ccd510d5136549847bdcbcd011d68"
 dependencies = [
- "tracing-core",
+ "tracing-core 0.1.34",
  "tracing-subscriber",
  "tracing-test-macro",
 ]
@@ -7744,7 +7750,7 @@ version = "0.11.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0eaa1852afa96e0fe9e44caa53dc0bd2d9d05e0f2611ce09f97f8677af56e4ba"
 dependencies = [
- "tracing-core",
+ "tracing-core 0.1.34",
  "tracing-subscriber",
  "tracy-client",
 ]
@@ -9165,7 +9171,7 @@ dependencies = [
  "quickcheck",
  "smallvec",
  "strum 0.27.2",
- "tracing 0.0.0",
+ "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
 ]
 
 [[package]]
