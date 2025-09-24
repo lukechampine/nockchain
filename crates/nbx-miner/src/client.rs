@@ -72,6 +72,13 @@ pub async fn run_client(cfg: ClientConfig) {
     let device = Device::new(cfg.client_name, false);
     let hwid = device.hwid.clone();
 
+    if device.info.cpu_arch != device.info.binary_arch {
+        crate::log!(
+            warn, "Binary architecture ({}) does not match running CPU architecture ({}). Performance or stability may be degraded.",
+            device.info.binary_arch, device.info.cpu_arch
+        );
+    }
+
     let num_threads = cfg
         .num_threads
         .unwrap_or_else(|| autodetect_threads(&device.info));

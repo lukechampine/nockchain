@@ -165,12 +165,6 @@ impl Device {
             trace, "Device info: cpu_arch = {}; cpu_count = {}; ram_mb = {}; hwid = {hwid}",
             info.cpu_arch, info.cpu_count, info.ram_mb
         );
-        if info.cpu_arch != info.binary_arch {
-            crate::log!(
-                warn, "Binary architecture ({}) does not match running CPU architecture ({}). Performance or stability may be degraded.",
-                info.binary_arch, info.cpu_arch
-            );
-        }
 
         Self { hwid, info }
     }
