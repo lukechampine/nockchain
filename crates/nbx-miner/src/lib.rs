@@ -13,7 +13,7 @@ pub mod shared;
 
 macro_rules! log {
     ($mode:ident, $($tt:tt)*) => {
-        tracing_base::log::$mode! {
+        tracing::unfiltered_tracing::log::$mode! {
             target: LOG_TARGET,
             $($tt)*
         }

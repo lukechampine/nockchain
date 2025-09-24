@@ -4740,7 +4740,7 @@ dependencies = [
  "static_assertions",
  "thiserror 2.0.16",
  "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
- "tracing-core 0.1.34",
+ "tracing-core",
 ]
 
 [[package]]
@@ -7636,7 +7636,7 @@ dependencies = [
  "log",
  "pin-project-lite",
  "tracing-attributes",
- "tracing-core 0.1.33",
+ "tracing-core",
 ]
 
 [[package]]
@@ -7664,15 +7664,6 @@ version = "0.1.33"
 source = "git+https://github.com/tokio-rs/tracing?rev=tracing-0.1.41#0ca78870815a34a345a908f48db057057e8803d2"
 dependencies = [
  "once_cell",
-]
-
-[[package]]
-name = "tracing-core"
-version = "0.1.34"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9d12581f227e93f094d3af2ae690a574abb8a2b9b7a96e7cfe9647b2b617678"
-dependencies = [
- "once_cell",
  "valuable",
 ]
 
@@ -7684,7 +7675,17 @@ checksum = "ee855f1f400bd0e5c02d150ae5de3840039a3f54b025156404e34c23c03f47c3"
 dependencies = [
  "log",
  "once_cell",
- "tracing-core 0.1.34",
+ "tracing-core",
+]
+
+[[package]]
+name = "tracing-log"
+version = "0.2.0"
+source = "git+https://github.com/tokio-rs/tracing?rev=tracing-0.1.41#0ca78870815a34a345a908f48db057057e8803d2"
+dependencies = [
+ "log",
+ "once_cell",
+ "tracing-core",
 ]
 
 [[package]]
@@ -7699,17 +7700,16 @@ dependencies = [
  "opentelemetry_sdk",
  "smallvec",
  "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
- "tracing-core 0.1.34",
- "tracing-log",
+ "tracing-core",
+ "tracing-log 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tracing-subscriber",
  "web-time",
 ]
 
 [[package]]
 name = "tracing-subscriber"
-version = "0.3.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8189decb5ac0fa7bc8b96b7cb9b2701d60d48805aca84a238004d665fcc4008"
+version = "0.3.18"
+source = "git+https://github.com/tokio-rs/tracing?rev=tracing-0.1.41#0ca78870815a34a345a908f48db057057e8803d2"
 dependencies = [
  "matchers",
  "nu-ansi-term 0.46.0",
@@ -7718,9 +7718,9 @@ dependencies = [
  "sharded-slab",
  "smallvec",
  "thread_local",
- "tracing 0.1.41 (git+https://github.com/h33p/tracing-stripped)",
- "tracing-core 0.1.34",
- "tracing-log",
+ "tracing 0.1.41 (git+https://github.com/tokio-rs/tracing?rev=tracing-0.1.41)",
+ "tracing-core",
+ "tracing-log 0.2.0 (git+https://github.com/tokio-rs/tracing?rev=tracing-0.1.41)",
 ]
 
 [[package]]
@@ -7729,7 +7729,7 @@ version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "557b891436fe0d5e0e363427fc7f217abf9ccd510d5136549847bdcbcd011d68"
 dependencies = [
- "tracing-core 0.1.34",
+ "tracing-core",
  "tracing-subscriber",
  "tracing-test-macro",
 ]
@@ -7750,7 +7750,7 @@ version = "0.11.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0eaa1852afa96e0fe9e44caa53dc0bd2d9d05e0f2611ce09f97f8677af56e4ba"
 dependencies = [
- "tracing-core 0.1.34",
+ "tracing-core",
  "tracing-subscriber",
  "tracy-client",
 ]
