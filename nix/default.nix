@@ -206,7 +206,7 @@ let
         strip -s "$bname"
         objcopy --add-gnu-debuglink="$dbg" "$bname"
 
-        # upx $bname
+        upx $bname
         chmod -w $bname
       done
     '';
