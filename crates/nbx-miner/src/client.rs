@@ -65,8 +65,8 @@ fn autodetect_threads(info: &DeviceInfo) -> u64 {
 
 pub async fn run_client(cfg: ClientConfig) {
     if cfg.miner_connect.is_empty() {
-        crate::log!(error, "miner_connect (--miner-connect) cannot be unset");
-        panic!("miner_connect (--miner-connect) cannot be unset")
+        eprintln!("miner_connect (--miner-connect) cannot be unset");
+        std::process::exit(1);
     }
 
     let device = Device::new(cfg.client_name, false);

@@ -50,7 +50,7 @@ pub fn init_default_tracing(colors: ColorChoice) {
                 .with_target(true)
                 .with_level(true),
         )
-        //.with(PrefixFilter)
+        .with(PrefixFilter)
         .with(filter)
         .init();
 }

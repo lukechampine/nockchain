@@ -156,8 +156,8 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
     let device = Device::new(cfg.client_name.clone(), true);
 
     if cfg.miner_connect.is_empty() {
-        crate::log!(error, "miner_connect (--miner-connect) cannot be unset");
-        panic!("miner_connect (--miner-connect) cannot be unset")
+        eprintln!("miner_connect (--miner-connect) cannot be unset");
+        std::process::exit(1);
     }
 
     crate::log!(

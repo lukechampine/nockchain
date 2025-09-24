@@ -52,10 +52,6 @@ async fn main() {
         MinerCfg::from(cli.miner)
     };
 
-    if config.client.client_name.is_none() {
-        panic!("Client name must be set");
-    }
-
     if cli.print_config {
         println!("{}", toml::to_string_pretty(&config).unwrap());
         return;

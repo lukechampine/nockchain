@@ -144,6 +144,62 @@ let
     internal = nbx-miner-base profile "${gpuFeatures} --features nbx-miner/jwt-auth-client,nbx-miner/prom-exporter,nbx-miner/instrument,nbx-miner/slog" individualCrateArgsAbort;
   };
 
+  bddisasm = stdenv.mkDerivation {
+    pname = "bddisasm";
+    version = "unstable";
+    src = pkgs.fetchFromGitHub {
+      owner = "bitdefender";
+      repo = "bddisasm";
+      rev = "83ee0d120d796f0751897468c38e7c6f41b380cf";
+      sha256 = "4UMyP29AbBRlWziobAISYJ0Xtq1VvalwVt4QAmrIWWQ=";
+    };
+    nativeBuildInputs = with pkgs; [ gcc cmake gnumake ];
+    installPhase = ''
+      runHook preInstall
+
+      mkdir -p $out/include $out/lib
+      ls
+      pwd
+      cp -r $src/inc/* $out/include/
+      cp ../bin/x64/Release/*.a $out/lib/
+
+      runHook postInstall
+    '';
+    cmakeFlags = [ "-DCMAKE_INSTALL_PREFIX=$out" ];
+  };
+
+  kiteshield = stdenv.mkDerivation {
+    pname = "kiteshield";
+    version = "unstable";
+    src = pkgs.fetchFromGitHub {
+      owner = "GunshipPenguin";
+      repo = "kiteshield";
+      rev = "3c6aaceda5aa7b4317138eb20ce365e1527e1e62";
+      sha256 = "35iP/BT2IqSyWNEXSCD0/gM+zV69AyHhpsj2DjZBzsU=";
+    };
+    nativeBuildInputs = with pkgs; [ gcc ninja bddisasm python311 ];
+    NIX_CFLAGS_COMPILE = [
+      "-Wno-error=array-bounds"
+      "-Wno-error=dangling-pointer"
+      "-fno-stack-protector"
+    ];
+    NIX_CFLAGS_LINK = [
+      "-lssp"
+    ];
+    buildPhase = ''
+      ln -s ${bddisasm}/include/bddisasm packer/bddisasm/inc
+      ls ${bddisasm}
+      ls packer/bddisasm/inc
+      make packer
+    '';
+    installPhase = ''
+      mkdir -p $out/bin
+      ls packer
+      ls -lah
+      install -m755 packer/kiteshield $out/bin/kiteshield
+    '';
+  };
+
   polyfill = stdenv.mkDerivation {
     pname = "polyfill-glibc";
     version = "unstable";
@@ -173,7 +229,7 @@ let
     dontConfigure = true;
     dontBuild = true;
 
-    buildInputs = with pkgs; [ binutils upx patchelf polyfill ];
+    buildInputs = with pkgs; [ binutils upx patchelf polyfill perl kiteshield ];
 
     installPhase = ''
       mkdir -p $out/bin
@@ -204,9 +260,17 @@ let
         chmod -wx "$dbg"
 
         strip -s "$bname"
-        objcopy --add-gnu-debuglink="$dbg" "$bname"
+        # objcopy --add-gnu-debuglink="$dbg" "$bname"
 
-        upx $bname
+        upx -9 $bname
+        sed 's/UPX!/    /g' $bname |
+          sed 's/This file is packed with the UPX executable packer http:\/\/upx.sf.net/                                                                    /g' |
+          sed 's/UPX .... Copyright (C) 1996-2018 the UPX Team. All Rights Reserved./                                                                   /g' > $bname.cleancompress
+        rm -f $bname.upx $bname
+        mv $bname.cleancompress $bname
+        chmod +x $bname
+        kiteshield -n $bname $bname.new
+        mv $bname.new $bname
         chmod -w $bname
       done
     '';
@@ -240,4 +304,5 @@ in
   };
 
   polyfill-glibc = polyfill;
+  kiteshield = kiteshield;
 }
