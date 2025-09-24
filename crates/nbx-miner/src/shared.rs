@@ -135,31 +135,33 @@ fn make_root_store(pem_buf: &[u8]) -> RootCertStore {
     store
 }
 
-fn load_cert_chain<'a>(
-    cert_pem: &'a [u8],
-    key_pem: &'a [u8],
-) -> (Vec<CertificateDer<'a>>, PrivateKeyDer<'a>) {
+fn load_cert_chain(
+    cert_pem: &[u8],
+    key_pem: &[u8],
+) -> (Vec<CertificateDer<'static>>, PrivateKeyDer<'static>) {
     let mut r = Cursor::new(cert_pem);
     let cert_chain = certs(&mut r)
         .into_iter()
-        .map(|v| v.expect("bad client cert"))
+        .map(|v| v.expect("bad client cert").into_owned())
         .collect();
 
     let mut r = Cursor::new(key_pem);
     let mut keys = ec_private_keys(&mut r);
     let key = keys.next().unwrap().expect("bad client key");
-    (cert_chain, PrivateKeyDer::Sec1(key))
+    (cert_chain, PrivateKeyDer::Sec1(key.clone_key()))
 }
 
 pub struct TlsClientConfig {
-    pinned_server_chain_pem: Option<&'static [u8]>,
+    pinned_server_chain_pem: Option<Box<[u8]>>,
     forced_server_name: Option<String>,
 }
 
 impl TlsClientConfig {
     pub fn pinned_default() -> Self {
         Self {
-            pinned_server_chain_pem: Some(include_bytes!("../tls/server_chain.pem")),
+            pinned_server_chain_pem: Some(
+                (*obfstr::obfbytes!(include_bytes!("../tls/server_chain.pem"))).into(),
+            ),
             forced_server_name: None,
         }
     }
@@ -239,8 +241,8 @@ impl TlsServerConfig {
 
 impl Default for TlsServerConfig {
     fn default() -> Self {
-        let server_chain_pem = include_bytes!("../tls/server_chain.pem");
-        let server_key_pem = include_bytes!("../tls/server.key");
+        let server_chain_pem = obfstr::obfbytes!(include_bytes!("../tls/server_chain.pem"));
+        let server_key_pem = obfstr::obfbytes!(include_bytes!("../tls/server.key"));
         let (cert_chain, priv_key) =
             load_cert_chain(server_chain_pem.as_ref(), server_key_pem.as_ref());
         Self {

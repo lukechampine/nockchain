@@ -1,7 +1,6 @@
-use clap::Parser;
+use clap::{ColorChoice, Parser};
 use clap_serde_derive::ClapSerde;
 use nbx_miner::client_base::ClientConfig;
-use nockapp::kernel::boot::{self, Cli as NockappCli};
 use serde::{Deserialize, Serialize};
 
 // When enabled, use jemalloc for more stable memory allocation
@@ -30,12 +29,12 @@ pub struct MinerCfg {
 pub struct MinerCli {
     #[command(flatten)]
     miner: <MinerCfg as ClapSerde>::Opt,
-    #[command(flatten)]
-    nockapp_cli: NockappCli,
     #[arg(long, help = "Path to config")]
     pub config: Option<String>,
     #[arg(long, help = "Print current config and exit")]
     pub print_config: bool,
+    #[arg(long, help = "Control colored output", value_enum, default_value_t = ColorChoice::Auto)]
+    pub color: ColorChoice,
 }
 
 #[tokio::main]
@@ -78,6 +77,6 @@ async fn main() {
         .expect("Unable to install prometheus exporter");
 
     nockvm::check_endian();
-    boot::init_default_tracing(&cli.nockapp_cli);
+    nbx_miner::init_default_tracing(cli.color);
     nbx_miner::client::run_client(config.client.into()).await;
 }

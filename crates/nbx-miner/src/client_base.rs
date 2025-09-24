@@ -153,7 +153,7 @@ async fn client_pool(
     let tls_ip = Arc::new(TlsClientConfig::pinned_default());
     // TODO: feature flag to not force the server name
     let tls_dns = Arc::new(TlsClientConfig::forced_server_name(
-        "pool-proxy.intra.nockbox.org".into(),
+        obfstr::obfstr!("pool-proxy.intra.nockbox.org").into(),
     ));
 
     loop {
@@ -305,13 +305,13 @@ async fn client_conn(
         Ok(Err(e)) => {
             log!(error, "Unable to connect to {addr}: {e}.");
             let c = err_cnt.fetch_add(1, Ordering::Relaxed);
-            gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string()).set((c + 1) as f64);
+            gauge!("nbx_miner_client_loop_connect_error_count", "server_addr" => addr.to_string(), "server_id" => server_id.to_string()).set((c + 1) as f64);
             return;
         }
         Err(_) => {
             log!(error, "Timeout connecting to {addr}");
             let c = err_cnt.fetch_add(1, Ordering::Relaxed);
-            gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string()).set((c + 1) as f64);
+            gauge!("nbx_miner_client_loop_connect_error_count", "server_addr" => addr.to_string(), "server_id" => server_id.to_string()).set((c + 1) as f64);
             return;
         }
     };
@@ -324,15 +324,27 @@ async fn client_conn(
     {
         Ok(Ok(stream)) => stream,
         Ok(Err(e)) => {
-            log!(error, "Unable to establish TLS on {addr}: {e}.");
+            match e.downcast::<rustls::Error>() {
+                Ok(rustls::Error::InvalidCertificate(
+                    rustls::CertificateError::NotValidForNameContext { .. },
+                )) => {
+                    log!(error, "Unable to establish TLS on {addr}: invalid peer certificate.");
+                }
+                Ok(e) => {
+                    log!(error, "Unable to establish TLS on {addr}: {e}.");
+                }
+                Err(e) => {
+                    log!(error, "Unable to establish TLS on {addr}: {e}.");
+                }
+            }
             let c = err_cnt.fetch_add(1, Ordering::Relaxed);
-            gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string()).set((c + 1) as f64);
+            gauge!("nbx_miner_client_loop_connect_error_count", "server_addr" => addr.to_string(), "server_id" => server_id.to_string()).set((c + 1) as f64);
             return;
         }
         Err(_) => {
             log!(error, "Timeout establishing TLS on {addr}");
             let c = err_cnt.fetch_add(1, Ordering::Relaxed);
-            gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string()).set((c + 1) as f64);
+            gauge!("nbx_miner_client_loop_connect_error_count", "server_addr" => addr.to_string(), "server_id" => server_id.to_string()).set((c + 1) as f64);
             return;
         }
     };
