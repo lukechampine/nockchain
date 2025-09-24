@@ -11,7 +11,7 @@ use sqlx::types::{Json, Uuid};
 use sqlx::PgPool as DbPool;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
-use crate::device::DeviceInfo;
+use crate::device::DeviceInfoWithSockets;
 use crate::server::AbortReason;
 
 enum DbMsg {
@@ -25,7 +25,7 @@ enum DbMsg {
         machines: BTreeMap<Uuid, BTreeMap<Arc<str>, u32>>,
     },
     TelemetryHwinfo {
-        machines: BTreeMap<Uuid, BTreeMap<Arc<str>, DeviceInfo>>,
+        machines: BTreeMap<Uuid, BTreeMap<Arc<str>, DeviceInfoWithSockets>>,
     },
     Abort {
         client_sub: Uuid,
@@ -121,7 +121,7 @@ impl Database {
                     for (sub, m) in machines {
                         q = q.bind(sub);
                         for (mid, dev) in m {
-                            q = q.bind(mid.to_string()).bind(dev.is_proxy).bind(Json(dev));
+                            q = q.bind(mid.to_string()).bind(dev.device.is_proxy).bind(Json(dev));
                         }
                     }
                     q.execute(&pool).await
@@ -185,7 +185,10 @@ impl DatabaseHandle {
         });
     }
 
-    pub fn submit_telemetry_hwinfo(&self, hwinfo: BTreeMap<Uuid, BTreeMap<Arc<str>, DeviceInfo>>) {
+    pub fn submit_telemetry_hwinfo(
+        &self,
+        hwinfo: BTreeMap<Uuid, BTreeMap<Arc<str>, DeviceInfoWithSockets>>,
+    ) {
         self.submit_msg(DbMsg::TelemetryHwinfo { machines: hwinfo });
     }
 

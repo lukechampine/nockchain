@@ -19,7 +19,7 @@ use zkvm_jetpack::form::{Belt, PRIME};
 use zkvm_jetpack::noun::noun_ext::NounExt as OtherNounExt;
 
 use crate::client_base::{client_loops, ClientConfig, ServerExtras};
-use crate::device::Device;
+use crate::device::{Device, DeviceInfo};
 use crate::metrics::{counter, gauge, histogram};
 use crate::poker::{PokerAttemptRes, PokerHandle};
 use crate::proto::{
@@ -40,14 +40,44 @@ struct MiningRequest {
     session_id: u32,
 }
 
+fn autodetect_threads(info: &DeviceInfo) -> u64 {
+    let mb_per_thread = 1800;
+    let ram_threads = info.ram_mb / mb_per_thread;
+
+    let cpu_threads = if info.cpu_count == 1 {
+        1
+    } else if info.cpu_count < 16 {
+        info.cpu_count - 1
+    } else {
+        info.cpu_count - 2
+    };
+
+    let threads = core::cmp::min(ram_threads, cpu_threads);
+
+    if ram_threads < threads {
+        crate::log!(debug, "Autodetected {threads} threads. Limited by RAM");
+    } else {
+        crate::log!(debug, "Autodetected {threads} threads");
+    }
+
+    threads
+}
+
 pub async fn run_client(cfg: ClientConfig) {
     if cfg.miner_connect.is_empty() {
         crate::log!(error, "miner_connect (--miner-connect) cannot be unset");
         panic!("miner_connect (--miner-connect) cannot be unset")
     }
 
-    let num_threads = cfg.num_threads();
-    crate::log!(info, "Starting NockBox miner with {} threads", num_threads);
+    let device = Device::new(cfg.client_name, false);
+    let hwid = device.hwid.clone();
+
+    let num_threads = cfg
+        .num_threads
+        .unwrap_or_else(|| autodetect_threads(&device.info));
+    crate::log!(
+        info, "Starting NockBox miner {} with {} threads", device.info.binary_version, num_threads
+    );
 
     #[cfg(feature = "gpu")]
     {
@@ -69,9 +99,6 @@ pub async fn run_client(cfg: ClientConfig) {
     let pin_threads = cfg
         .pin_threads
         .map(|v| v.logical_core_ids(num_threads as _));
-
-    let device = Device::new(cfg.client_name, false);
-    let hwid = device.hwid.clone();
 
     let (mining_attempt_results, mut mining_attempts) = mpsc::channel(num_threads as usize);
 

@@ -29,7 +29,7 @@ use x509_parser::prelude::*;
 use zkvm_jetpack::form::{Belt, PRIME};
 use zkvm_jetpack::noun::noun_ext::NounExt;
 
-use crate::device::DeviceInfo;
+use crate::device::{DeviceInfo, DeviceInfoWithSockets};
 use crate::proto::name_valid;
 
 #[derive(Debug)]
@@ -120,7 +120,7 @@ pub enum Telemetry {
         machines: BTreeMap<Arc<str>, u32>,
     },
     HwInfo {
-        machines: BTreeMap<Arc<str>, DeviceInfo>,
+        machines: BTreeMap<Arc<str>, DeviceInfoWithSockets>,
     },
 }
 

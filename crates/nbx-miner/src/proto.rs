@@ -1,6 +1,7 @@
 use core::pin::pin;
 use std::collections::BTreeMap;
 use std::io;
+use std::net::SocketAddr;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -20,11 +21,11 @@ use tokio::task::JoinSet;
 use uuid::Uuid;
 use zkvm_jetpack::form::Belt;
 
-use crate::device::{Device, DeviceInfo};
+use crate::device::{Device, DeviceInfo, DeviceInfoWithSockets};
 use crate::metrics::{counter, gauge, histogram};
 use crate::shared::{self, JwtClaims};
 
-pub const PROTOCOL: u32 = 6;
+pub const PROTOCOL: u32 = 7;
 pub const NAME_MAX_LENGTH: usize = 16;
 pub const RECENTLY_EXPIRED_DURATION: Duration = Duration::from_secs(20);
 pub const PROTO_POW_DIFFICULTY: u32 = 18;
@@ -113,7 +114,7 @@ pub struct Permissions {
 
 #[derive(Encode, Decode, Clone, Debug)]
 pub struct TelemetryHwInfo {
-    machines: BTreeMap<Arc<str>, DeviceInfo>,
+    machines: BTreeMap<Arc<str>, DeviceInfoWithSockets>,
 }
 
 #[derive(Encode, Decode, Clone, Debug)]
@@ -349,6 +350,7 @@ async fn binrecv_limited<T: Decode<()>, const PARSE_ERR: bool, const MAX_READ: u
 #[derive(Debug)]
 pub struct ClientHandshake<S> {
     pub stream: S,
+    pub server_addr: SocketAddr,
     pub server_sub: Uuid,
     pub server_name: Arc<str>,
     pub server_id_str: Arc<str>,
@@ -360,6 +362,7 @@ pub struct ClientHandshake<S> {
 
 pub async fn client_handshake<S: AsyncRead + AsyncWrite + Unpin>(
     mut stream: S,
+    server_addr: SocketAddr,
     server_id: usize,
     server_name: &str,
     device: Arc<Device>,
@@ -440,6 +443,7 @@ pub async fn client_handshake<S: AsyncRead + AsyncWrite + Unpin>(
 
     Ok(ClientHandshake {
         stream,
+        server_addr,
         server_sub,
         server_name,
         server_id_str,
@@ -453,6 +457,7 @@ pub async fn client_handshake<S: AsyncRead + AsyncWrite + Unpin>(
 pub async fn client<S: AsyncRead + AsyncWrite + Unpin>(
     ClientHandshake {
         stream,
+        server_addr,
         server_sub,
         server_name,
         server_id_str,
@@ -564,9 +569,12 @@ pub async fn client<S: AsyncRead + AsyncWrite + Unpin>(
                 server_name.clone(),
                 "telemetry_hwinfo",
                 TelemetryHwInfo {
-                    machines: [(device.hwid.clone(), device.info.clone())]
-                        .into_iter()
-                        .collect(),
+                    machines: [(
+                        device.hwid.clone(),
+                        device.info.with_outgoing_socket(server_addr),
+                    )]
+                    .into_iter()
+                    .collect(),
                 },
             )
             .await?;
@@ -638,7 +646,10 @@ pub async fn client<S: AsyncRead + AsyncWrite + Unpin>(
                             )
                             .await?;
                         }
-                        shared::Telemetry::HwInfo { machines } => {
+                        shared::Telemetry::HwInfo { mut machines } => {
+                            machines
+                                .values_mut()
+                                .for_each(|v| v.sockets_outgoing.push(server_addr));
                             let telemetry = TelemetryHwInfo { machines };
                             write.write_u8(TelemetryResponse::HWINFO as _).await?;
                             binsend(
@@ -668,6 +679,7 @@ pub async fn client<S: AsyncRead + AsyncWrite + Unpin>(
 #[derive(Debug)]
 pub struct ServerHandshake<S> {
     pub stream: S,
+    pub client_addr: SocketAddr,
     pub client_sub: Uuid,
     pub client_hwid: Arc<str>,
     pub perms: Permissions,
@@ -677,6 +689,7 @@ pub struct ServerHandshake<S> {
 
 pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
     mut stream: S,
+    client_addr: SocketAddr,
     jwt_keys: Arc<[DecodingKey]>,
     conntrack: shared::ConnTrack,
 ) -> io::Result<ServerHandshake<S>> {
@@ -816,6 +829,7 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
 
     Ok(ServerHandshake {
         stream,
+        client_addr,
         client_sub,
         client_hwid,
         perms,
@@ -832,6 +846,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
 ) -> io::Result<()> {
     let ServerHandshake {
         stream,
+        client_addr,
         client_sub,
         client_hwid,
         perms,
@@ -1165,7 +1180,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                             ClientDataReadType::Telemetry(shared::Telemetry::Proofrate { machines })
                         }
                         TelemetryResponse::HWINFO => {
-                            let TelemetryHwInfo { machines } = binrecv_server(
+                            let TelemetryHwInfo { mut machines } = binrecv_server(
                                 &mut read,
                                 &mut read_crypt,
                                 client_sub.clone(),
@@ -1173,6 +1188,9 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                                 "telemetry_hwinfo",
                             )
                             .await?;
+                            machines
+                                .values_mut()
+                                .for_each(|v| v.sockets_incoming.push(client_addr));
                             ClientDataReadType::Telemetry(shared::Telemetry::HwInfo { machines })
                         }
                     };

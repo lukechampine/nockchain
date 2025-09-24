@@ -15,7 +15,7 @@ use zkvm_jetpack::form::{Belt, PRIME};
 use zkvm_jetpack::noun::noun_ext::NounExt as OtherNounExt;
 
 use crate::client_base::client_loops;
-use crate::device::{Device, DeviceInfo};
+use crate::device::{Device, DeviceInfoWithSockets};
 use crate::metrics::{counter, gauge, histogram};
 use crate::proto::{
     ClientDataWrite, ClientDataWriteType, MiningAckOut, MiningDataOut, MiningResultIn,
@@ -155,6 +155,18 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
 
     let device = Device::new(cfg.client_name.clone(), true);
 
+    if cfg.miner_connect.is_empty() {
+        crate::log!(error, "miner_connect (--miner-connect) cannot be unset");
+        panic!("miner_connect (--miner-connect) cannot be unset")
+    }
+
+    crate::log!(
+        debug,
+        "Starting NockBox proxy {} on {}",
+        device.info.binary_version,
+        server_cfg.miner_bind()
+    );
+
     #[cfg(feature = "db")]
     let (db_inst, db) = if let Some(db) = cfg.database_url {
         debug!("Connecting to DB");
@@ -173,11 +185,6 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
         debug!("Skipping DB connection");
         (None, None)
     };
-
-    if cfg.miner_connect.is_empty() {
-        crate::log!(error, "miner_connect (--miner-connect) cannot be unset");
-        panic!("miner_connect (--miner-connect) cannot be unset")
-    }
 
     let (mining_tx, mut mining_rx) = mpsc::channel(cfg.miner_connect.len());
     let (ack_tx, mut ack_rx) = mpsc::channel(cfg.miner_connect.len());
@@ -316,7 +323,7 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
     #[derive(Default)]
     struct TelemetryStore {
         proofrate: BTreeMap<Uuid, BTreeMap<Arc<str>, u32>>,
-        hwinfo: BTreeMap<Uuid, BTreeMap<Arc<str>, DeviceInfo>>,
+        hwinfo: BTreeMap<Uuid, BTreeMap<Arc<str>, DeviceInfoWithSockets>>,
     }
 
     let telemetry = SyncMutex::new(TelemetryStore::default());
@@ -333,8 +340,6 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
         }
         async move { Ok(()) }
     };
-
-    crate::log!(debug, "Starting NockBox proxy on {}", server_cfg.miner_bind);
 
     let connected_clients = AtomicUsize::new(0);
 

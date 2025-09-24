@@ -54,9 +54,9 @@ const LOG_TARGET: &str = "nbx::server";
 
 #[derive(ClapSerde, Args, Clone, Debug, Serialize, Deserialize)]
 pub struct MiningConfig {
-    #[default((Ipv6Addr::LOCALHOST, 0).into())]
+    #[default(None)]
     #[arg(long, help = "Where to bind the mining server to [default: [::]:0]")]
-    pub miner_bind: SocketAddr,
+    pub miner_bind: Option<SocketAddr>,
     #[cfg(feature = "server-tls-key-load")]
     #[arg(long, help = "Path to custom TLS private key")]
     miner_tls_key: Option<String>,
@@ -69,10 +69,10 @@ pub struct MiningConfig {
         help = "Whether to pre-verify client proofs before accepting them as valid"
     )]
     miner_preverify: bool,
-    #[default(SaveMineAttempts::None)]
+    #[default(None)]
     #[cfg(feature = "miner-save-attempts")]
     #[arg(long, help = "Which mining attempts to save [default: none]")]
-    miner_save_attempts: SaveMineAttempts,
+    miner_save_attempts: Option<SaveMineAttempts>,
     #[cfg(feature = "jwt-auth-server")]
     #[arg(
         long = "miner-jwt-key",
@@ -81,12 +81,19 @@ pub struct MiningConfig {
     miner_jwt_keys: Vec<String>,
 }
 
+impl MiningConfig {
+    pub fn miner_bind(&self) -> SocketAddr {
+        self.miner_bind
+            .unwrap_or_else(|| (Ipv6Addr::LOCALHOST, 0).into())
+    }
+}
+
 type Result<T = ()> = core::result::Result<T, NockAppError>;
 
 pub async fn bind(cfg: &MiningConfig) -> Result<TcpListener> {
     let _ = default_provider().install_default();
 
-    let listener = TcpListener::bind(cfg.miner_bind)
+    let listener = TcpListener::bind(cfg.miner_bind())
         .await
         .map_err(NockAppError::IoError)?;
     info!(
@@ -430,7 +437,7 @@ pub async fn mining_server<
 
                         let handshake = match tokio::time::timeout(
                             Duration::from_secs(20),
-                            server_handshake(s, jwt_keys, conntrack),
+                            server_handshake(s, a, jwt_keys, conntrack),
                         )
                         .await
                         {
@@ -458,7 +465,7 @@ pub async fn mining_server<
     client_set.spawn(accept_loop);
 
     #[cfg(feature = "miner-save-attempts")]
-    let save_mine_attempts = cfg.miner_save_attempts;
+    let save_mine_attempts = cfg.miner_save_attempts.unwrap_or(SaveMineAttempts::None);
     #[cfg(not(feature = "miner-save-attempts"))]
     let save_mine_attempts = SaveMineAttempts::None;
     let now = SystemTime::now()

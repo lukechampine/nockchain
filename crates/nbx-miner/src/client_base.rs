@@ -19,7 +19,7 @@ use tokio::sync::{mpsc, Mutex};
 use tokio::task::{Id, JoinSet};
 use tokio::time::sleep;
 
-use crate::device::Device;
+use crate::device::{Device, DeviceInfo};
 use crate::log;
 use crate::metrics::gauge;
 use crate::proto::{
@@ -339,7 +339,14 @@ async fn client_conn(
 
     let handshake = match tokio::time::timeout(
         Duration::from_secs(20),
-        proto::client_handshake(stream, server_id, &server_proto_name, device, jwt.clone()),
+        proto::client_handshake(
+            stream,
+            addr,
+            server_id,
+            &server_proto_name,
+            device,
+            jwt.clone(),
+        ),
     )
     .await
     {
@@ -419,12 +426,6 @@ pub struct ClientConfig {
         help = "JWT to use in order to authenticate to servers. Overrides NBX_AUTH_JWT environment variable."
     )]
     pub miner_auth_jwt: Option<Arc<str>>,
-}
-
-impl ClientConfig {
-    pub fn num_threads(&self) -> u64 {
-        self.num_threads.unwrap_or(1)
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
