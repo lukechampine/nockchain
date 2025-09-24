@@ -1,5 +1,3 @@
-#![feature(array_chunks)]
-
 pub mod form;
 pub mod hand;
 pub mod hot;

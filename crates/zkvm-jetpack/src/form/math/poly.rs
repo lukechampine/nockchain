@@ -408,10 +408,10 @@ pub fn p_hadamard_inplace<T: ElementEx, O: Copy + Into<T>>(a: &mut [T], b: &[O])
     const CHUNK_SIZE: usize = 16;
     const PREFETCH_CHUNKS: usize = 4;
     let num_chunks = a.len() / CHUNK_SIZE;
-    let mut a_chunks = a.array_chunks_mut::<CHUNK_SIZE>();
-    let mut b_chunks = b.array_chunks::<CHUNK_SIZE>();
+    let (a_chunks, a_chunks_rem) = a.as_chunks_mut::<CHUNK_SIZE>();
+    let (b_chunks, b_chunks_rem) = b.as_chunks::<CHUNK_SIZE>();
 
-    for (i, (a, b)) in (&mut a_chunks).zip(&mut b_chunks).enumerate() {
+    for (i, (a, b)) in a_chunks.iter_mut().zip(b_chunks).enumerate() {
         if i + PREFETCH_CHUNKS < num_chunks {
             unsafe {
                 #[cfg(target_arch = "aarch64")]
@@ -438,10 +438,9 @@ pub fn p_hadamard_inplace<T: ElementEx, O: Copy + Into<T>>(a: &mut [T], b: &[O])
         }
     }
 
-    for (a, b) in a_chunks
-        .into_remainder()
+    for (a, b) in a_chunks_rem
         .iter_mut()
-        .zip(b_chunks.remainder())
+        .zip(b_chunks_rem)
     {
         *a *= (*b).into();
     }
