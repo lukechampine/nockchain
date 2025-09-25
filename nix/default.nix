@@ -238,6 +238,14 @@ let
 
       for bname in $out/bin/*; do
         chmod +w $bname
+        # These symbols are weakly imported by rust stdlib when creating processes.
+        # These symbols are coming from glibc 2.39, and polyfill cannot handle the getpid one atm.
+        # Let's just make the symbols not available, because we don't really need them in the first place.
+        if readelf -Ws $bname | egrep 'pidfd_getpid|pidfd_spawnp' | grep GLOBAL; then
+          echo "There is non-weak pidfd_getpid or pidfd_spawnp. Cannot patch glibc!"
+          exit 1
+        fi
+        polyfill-glibc --clear-symbol-version=pidfd_spawnp,pidfd_getpid $bname
         polyfill-glibc --target-glibc=2.35 $bname
         patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 $bname
 
