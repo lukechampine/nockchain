@@ -20,6 +20,8 @@ server-tls-key-load = []
 prom-exporter = ["metrics-exporter-prometheus", "metrics-util"]
 # Enables client module, which is necessary for the client binary
 client = ["kernels/miner"]
+# Enables launcher module, which is necessary for the launcher binary
+launcher = ["dirs", "reqwest"]
 # Enables server-based verification, and proxy difficulty adjustments
 verifier = ["kernels/verifier"]
 # Forces the server pre-verify the proofs. Mandatory for pool setups
@@ -41,6 +43,9 @@ name = "nbx-proxy"
 [[bin]]
 name = "nbx-miner"
 required-features = ["client"]
+
+[[bin]]
+name = "nbx-launcher"
 
 [dependencies]
 kernels = { workspace = true, features = [] }
@@ -87,6 +92,8 @@ toml.workspace = true
 rayon.workspace = true
 clap-serde-derive.workspace = true
 obfstr.workspace = true
+dirs = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true, features = ["json"] }
 
 zkvm-jetpack.workspace = true
 nbx-jetpack.workspace = true
