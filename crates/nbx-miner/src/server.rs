@@ -25,6 +25,8 @@ use nockapp::{
 };
 use nockapp::{NockAppError, NounExt};
 use nockchain_libp2p_io::tip5_util::tip5_hash_to_base58;
+use nockchain_math::belt::*;
+use nockchain_math::noun_ext::NounMathExt;
 use nockvm::noun::D;
 #[cfg(feature = "verifier")]
 use nockvm::noun::T;
@@ -40,8 +42,6 @@ use tokio::task::{AbortHandle, Id, JoinSet};
 use tokio::time::sleep;
 use tokio_stream::wrappers::BroadcastStream;
 use uuid::Uuid;
-use zkvm_jetpack::form::{Belt, PRIME};
-use zkvm_jetpack::noun::noun_ext::NounExt as ZNounExt;
 
 use crate::proto::{server, server_handshake, ClientDataRead, ClientDataReadType};
 use crate::shared::{

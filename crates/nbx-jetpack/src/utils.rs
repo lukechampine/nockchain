@@ -1,14 +1,14 @@
+use nockchain_math::handle::{
+    finalize_mary, finalize_poly, new_handle_mut_mary, new_handle_mut_slice,
+};
+use nockchain_math::mary::MarySlice;
+use nockchain_math::poly::Element;
+use nockvm::jets::util::BAIL_FAIL;
 use nockvm::jets::{util, JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::mug::mug;
 use nockvm::noun::*;
 use nockvm::serialization::jam;
-use zkvm_jetpack::form::mary::MarySlice;
-use zkvm_jetpack::form::Element;
-use zkvm_jetpack::hand::handle::{
-    finalize_mary, finalize_poly, new_handle_mut_mary, new_handle_mut_slice,
-};
-use zkvm_jetpack::jets::utils::jet_err;
 
 pub struct DP(pub Noun);
 
@@ -131,7 +131,7 @@ pub fn cut_direct(
     }
 
     if util::bite_to_word(bloq, run)? > 1 {
-        return jet_err();
+        return Err(BAIL_FAIL);
     }
 
     let direct = unsafe {

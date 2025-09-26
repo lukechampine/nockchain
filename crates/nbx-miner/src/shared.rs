@@ -13,6 +13,8 @@ use metrics::gauge;
 use nbx_jetpack::log::*;
 use nockapp::noun::slab::{slab_equality, NounSlab};
 use nockapp::wire::Wire;
+use nockchain_math::belt::{Belt, PRIME};
+use nockchain_math::noun_ext::NounMathExt;
 use nockvm::noun::{Noun, D, T};
 use nockvm_macros::tas;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
@@ -26,8 +28,6 @@ use tokio_rustls::{client, server, TlsAcceptor, TlsConnector};
 use uuid::Uuid;
 use x509_parser::oid_registry::OID_X509_COMMON_NAME;
 use x509_parser::prelude::*;
-use zkvm_jetpack::form::{Belt, PRIME};
-use zkvm_jetpack::noun::noun_ext::NounExt;
 
 use crate::device::{DeviceInfo, DeviceInfoWithSockets};
 use crate::proto::name_valid;

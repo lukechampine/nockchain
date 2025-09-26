@@ -1,11 +1,13 @@
 use std::sync::Arc;
 
 use nbx_tip5::base::binv;
-use rayon::prelude::*;
-use zkvm_jetpack::form::math::poly::{
-    p_fft_twiddles, p_hadamard_inplace, p_ntt_twiddled, p_ntt_twiddles, pscal_inplace,
+use nockchain_math::belt::Belt;
+use nockchain_math::felt::Felt;
+use nockchain_math::poly::*;
+use nockchain_math::poly_ext::{
+    p_fft_twiddles, p_hadamard_inplace, p_ntt_twiddled, p_ntt_twiddles, pscal_inplace, ElementEx,
 };
-use zkvm_jetpack::form::{Belt, ElementEx, FPolySlice, FPolyVec, Felt, PolyVec};
+use rayon::prelude::*;
 
 use crate::new_fpoly;
 use crate::two::{

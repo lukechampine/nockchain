@@ -1,6 +1,6 @@
+use nockchain_math::belt::Belt;
 use zkvm_jetpack::form::mary::{Mary, MarySlice};
 use zkvm_jetpack::form::math::mary::mary_transpose;
-use zkvm_jetpack::form::Belt;
 
 use crate::eight::compute_lde;
 use crate::engine::Engine;

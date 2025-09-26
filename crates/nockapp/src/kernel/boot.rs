@@ -309,19 +309,12 @@ pub fn init_default_tracing(cli: &Cli) {
 
 pub async fn setup<J: Jammer + Send + 'static>(
     jam: &[u8],
-    cli: Option<Cli>,
+    cli: Cli,
     hot_state: &[HotEntry],
     name: &str,
     data_dir: Option<PathBuf>,
 ) -> Result<NockApp<J>, Box<dyn std::error::Error>> {
-    let result = setup_(
-        jam,
-        cli.unwrap_or_else(|| default_boot_cli(false)),
-        hot_state,
-        name,
-        data_dir,
-    )
-    .await?;
+    let result = setup_(jam, cli, hot_state, name, data_dir).await?;
     match result {
         SetupResult::App(app) => Ok(app),
         SetupResult::ExportedState => {

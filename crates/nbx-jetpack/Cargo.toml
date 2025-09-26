@@ -17,10 +17,12 @@ nockvm.workspace = true
 nockvm_macros.workspace = true
 nockapp = { workspace = true, default-features = false }
 zkvm-jetpack.workspace = true
+nockchain-math.workspace = true
 either.workspace = true
 num-traits.workspace = true
 tracing.workspace = true
 ibig.workspace = true
+noun-serde.workspace = true
 
 array-concat.workspace = true
 array-util.workspace = true

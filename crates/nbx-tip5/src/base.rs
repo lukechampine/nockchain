@@ -108,29 +108,47 @@ pub const fn montify(x: u64) -> u64 {
 
 /// Reduce a 128 bit number
 #[inline(always)]
-pub fn reduce(prod: u128) -> u64 {
-    // NOTE: see https://docs.rs/risc0-core/1.2.6/src/risc0_core/field/goldilocks.rs.html#299
-    let ret: u64 = prod as u64;
-    // Get two high words
-    let med: u32 = (prod >> 64) as u32;
-    let high: u32 = (prod >> 96) as u32;
-    // Subtract out high bits, add in P if underflow
-    let ret = if ret >= (high as u64) {
-        ret.wrapping_sub(high as u64)
-    } else {
-        ret.wrapping_sub(high as u64).wrapping_add(PRIME)
-    };
+pub fn reduce(n: u128) -> u64 {
+    reduce_159(n as u64, (n >> 64) as u32, (n >> 96) as u64)
+}
 
-    // Compute shifted effect of medium
-    let med_shift = ((med as u64) << 32).wrapping_sub(med as u64);
-
-    // Add in, if overflow, subtract a P
-    let ret = ret.wrapping_add(med_shift);
-    if ret < med_shift || ret >= PRIME {
-        ret.wrapping_sub(PRIME)
-    } else {
-        ret
+/// Reduce a 159 bit number
+/// See <https://cp4space.hatsya.com/2021/09/01/an-efficient-prime-for-number-theoretic-transforms/>
+/// See <https://github.com/mir-protocol/plonky2/blob/3a6d693f3ffe5aa1636e0066a4ea4885a10b5cdf/field/src/goldilocks_field.rs#L340-L356>
+/// Removing both branch_hints can cause misleading changes to performance. bmul and especially
+/// bpow in their micro-benchmarks will appear to be faster but higher-level stuff like bp_fft
+/// will be slower. Make sure you validate your changes across the whole benchmark suite.
+/// We have wrapping benchmarks (bpow(PRIME - 1, 5)) that are meant to be sensitive to the edge
+/// cases but they seem to get faster anyway.
+#[inline(always)]
+pub fn reduce_159(low: u64, mid: u32, high: u64) -> u64 {
+    let (mut low2, carry) = low.overflowing_sub(high);
+    if carry {
+        low2 = low2.wrapping_add(PRIME);
     }
+
+    let mut product = (mid as u64) << 32;
+    product -= product >> 32;
+
+    let (mut result, carry) = product.overflowing_add(low2);
+    if std::hint::likely(carry) {
+        // This branch is likely to happen. It should compile to a use
+        // branchless conditional operations. This seems counter-intuitive,
+        // but we get better performance out of bpow from this branch_hint.
+        result = result.wrapping_sub(PRIME);
+    }
+
+    if result >= PRIME {
+        // TODO: 2025-04-26: Chris A: I'm not sure that it's actually guaranteed,
+        // when I unified the two branches, it caused an error.
+        // This branch is unlikely to happen. It is guaranteed not to be taken
+        // if the above branch was taken. (But merging the two branches is
+        // slower.)
+        // TODO: 2025-04-26: Chris A: +20% improvement to roswell prove_block pow/128 vs. branch_hint
+        core::hint::cold_path();
+        result -= PRIME;
+    }
+    result
 }
 
 #[inline(always)]
@@ -170,9 +188,32 @@ pub fn bdiv(a: u64, b: u64) -> u64 {
 
 #[inline(always)]
 pub fn binv(a: u64) -> u64 {
-    // Due to fermat's little theorem, a^(p-1) = 1 (mod p), so a^(p-2) = a^(-1) (mod p)
-    // bpow already checks based, so we skip it here
-    bpow(a, PRIME - 2)
+    based!(a);
+    let y = montify(a);
+    let y2 = montiply(y, montiply(y, y));
+    let y3 = montiply(y, montiply(y2, y2));
+    let y5 = montiply(y2, montwopow(y3, 2));
+    let y10 = montiply(y5, montwopow(y5, 5));
+    let y20 = montiply(y10, montwopow(y10, 10));
+    let y30 = montiply(y10, montwopow(y20, 10));
+    let y31 = montiply(y, montiply(y30, y30));
+    let dup = montiply(montwopow(y31, 32), y31);
+
+    mont_reduction(montiply(y, montiply(dup, dup)).into())
+}
+
+#[inline(always)]
+pub fn montwopow(a: u64, b: u32) -> u64 {
+    based!(a);
+    // if b == 0 {
+    //     return a;
+    // }
+
+    let mut res = a;
+    for _ in 0..b {
+        res = montiply(res, res);
+    }
+    res
 }
 
 #[test]

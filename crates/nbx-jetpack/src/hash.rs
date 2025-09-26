@@ -1,14 +1,16 @@
 use either::Either;
 use nbx_tip5::tip5::RATE;
+use nockchain_math::belt::Belt;
+use nockchain_math::melt::Melt;
+use nockchain_math::noun_ext::NounMathExt;
+use nockchain_math::poly::Element;
+use nockchain_math::structs::HoonList;
+use nockvm::jets::util::BAIL_FAIL;
 use nockvm::jets::JetErr;
 use nockvm::noun::{Atom, Noun, D};
 use nockvm_macros::tas;
 use zkvm_jetpack::form::mary::MarySlice;
 use zkvm_jetpack::form::math::tip5::DIGEST_LENGTH;
-use zkvm_jetpack::form::{Belt, Element, Melt};
-use zkvm_jetpack::hand::structs::HoonList;
-use zkvm_jetpack::jets::utils::jet_err;
-use zkvm_jetpack::noun::noun_ext::NounExt;
 
 #[cfg(feature = "gpu")]
 use super::gpu;
@@ -694,7 +696,7 @@ impl HashEngine {
             }
             Ok(tas!(b"mary")) => {
                 let Ok(ma) = MarySlice::try_from(h.tail()) else {
-                    return jet_err();
+                    return Err(BAIL_FAIL);
                 };
                 Ok(self.push_mary(stage, ma))
             }

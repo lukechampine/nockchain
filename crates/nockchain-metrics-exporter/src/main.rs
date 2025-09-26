@@ -16,8 +16,8 @@ use nockapp::kernel::boot::{default_boot_cli, init_default_tracing};
 use nockapp::noun::slab::NounSlab;
 use nockapp::wire::WireTag;
 use nockapp::{Bytes, NockAppError, NockAppExit, Noun};
-use nockapp_grpc::client::NockAppGrpcClient;
-use nockapp_grpc::pb::Wire as GrpcWire;
+use nockapp_grpc::services::private_nockapp::PrivateNockAppGrpcClient;
+use nockapp_grpc_proto::pb::common::v1::Wire as GrpcWire;
 use nockvm::noun::{IndirectAtom, D, T};
 use nockvm_macros::tas;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -66,24 +66,19 @@ struct MetricsCli {
 }
 
 struct GrpcHandle {
-    client: NockAppGrpcClient,
+    client: PrivateNockAppGrpcClient,
     pid: i32,
 }
 
 impl GrpcHandle {
     pub async fn new(address: &str) -> Result<Self, NockAppError> {
-        let client = NockAppGrpcClient::connect(address).await.map_err(|e| {
-            NockAppError::OtherError(format!("Failed to connect to gRPC server: {}", e))
-        })?;
+        let client = PrivateNockAppGrpcClient::connect(address)
+            .await
+            .map_err(|e| {
+                NockAppError::OtherError(format!("Failed to connect to gRPC server: {}", e))
+            })?;
 
         Ok(Self { client, pid: 0 })
-    }
-
-    pub async fn ping(&mut self) -> Result<bool, NockAppError> {
-        self.client
-            .ping()
-            .await
-            .map_err(|e| NockAppError::OtherError(format!("gRPC ping failed: {}", e)))
     }
 
     pub async fn peek(&mut self, path: &[&str]) -> Result<NounSlab, NockAppError> {
@@ -221,18 +216,8 @@ impl RetryExporter {
 
     pub async fn acquire(&mut self) -> Option<&mut Exporter> {
         if let Some(mut exporter) = self.exporter.take() {
-            if let Ok(Ok(true)) = timeout(Duration::from_secs(5), exporter.grpc_handle.ping()).await
-            {
-                self.exporter = Some(exporter);
-                return self.exporter.as_mut();
-            }
-
-            debug!(
-                "Nockchain at {} has died. Reconnecting...",
-                self.grpc_address
-            );
-            core::mem::drop(exporter);
-            self.exporter = None;
+            self.exporter = Some(exporter);
+            return self.exporter.as_mut();
         }
 
         if self.retry_instant <= Instant::now() {

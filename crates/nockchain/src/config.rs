@@ -53,7 +53,7 @@ pub struct NockchainCli {
     #[arg(long, help = "Don't dial default peers")]
     pub no_default_peers: bool,
     #[arg(long, help = "Bind address", action = ArgAction::Append)]
-    pub bind: Vec<String>,
+    pub bind: Option<Vec<String>>,
     #[arg(
         long,
         help = "Don't generate a new peer ID, keep the existing one",
@@ -97,6 +97,10 @@ pub struct NockchainCli {
     pub fakenet_genesis_jam_path: Option<PathBuf>,
     #[arg(long, default_value = "127.0.0.1:9005")]
     pub prometheus_bind: String,
+    #[arg(long, value_parser = clap::value_parser!(std::net::SocketAddr), default_value = "127.0.0.1:5555")]
+    pub bind_public_grpc_addr: std::net::SocketAddr,
+    #[arg(long, default_value = "5555")]
+    pub bind_private_grpc_port: u16,
 }
 
 impl NockchainCli {

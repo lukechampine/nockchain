@@ -1,27 +1,27 @@
 use std::collections::BTreeMap;
 use std::iter::{repeat, repeat_n};
 
+use nockchain_math::belt::*;
+use nockchain_math::bpoly::*;
+use nockchain_math::felt::*;
+use nockchain_math::fpoly::*;
+use nockchain_math::handle::{
+    finalize_mary, finalize_poly, new_handle_mut_felt, new_handle_mut_mary, new_handle_mut_slice,
+};
+use nockchain_math::noun_ext::NounMathExt;
+use nockchain_math::poly::*;
+use nockchain_math::poly_ext::{p_ntt, *};
+use nockchain_math::structs::{HoonList, HoonMapIter};
+use nockvm::jets::util::BAIL_FAIL;
 use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::noun::*;
 use nockvm_macros::tas;
 use zkvm_jetpack::form::bpoly::bpscal_inplace;
-use zkvm_jetpack::form::fext::{fadd_, fdiv_, finv_, fmul_, fneg_};
 use zkvm_jetpack::form::mary::{Mary, MarySlice, MarySliceMut};
 use zkvm_jetpack::form::math::mary::mary_transpose;
-use zkvm_jetpack::form::math::poly::{p_ntt, *};
 use zkvm_jetpack::form::mega::{brek, MegaTyp};
 use zkvm_jetpack::form::poly::Poly;
-use zkvm_jetpack::form::{
-    binv, bneg, bpow, BPolySlice, BPolyVec, Belt, Element, ElementEx, FPolySlice, FPolySliceMut,
-    FPolyVec, Felt, PolySlice, PolyVec,
-};
-use zkvm_jetpack::hand::handle::{
-    finalize_mary, finalize_poly, new_handle_mut_felt, new_handle_mut_mary, new_handle_mut_slice,
-};
-use zkvm_jetpack::hand::structs::{HoonList, HoonMapIter};
-use zkvm_jetpack::jets::utils::jet_err;
-use zkvm_jetpack::noun::noun_ext::NounExt;
 
 use super::one::{p_decompose_impl, peval_impl};
 use super::substitute::{SubstituteEngine, SubstituteMulStage, SubstituteOp};
@@ -74,10 +74,10 @@ pub fn bp_intercosate(offset: Belt, order: u32, values: BPolyVec) -> BPolyVec {
 pub fn bp_shift_by_unity_sam(stack: &mut NockStack, sam: Noun) -> Result {
     let [bp, n] = sam.uncell()?;
     let Ok(bp) = BPolySlice::try_from(bp) else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
     let n = n.as_atom()?.as_u64()?;
-    let (h, slc) = new_handle_mut_slice::<Belt>(stack, Some(bp.len()));
+    let (h, slc) = new_handle_mut_slice::<Belt, _>(stack, Some(bp.len()));
     let n = core::cmp::min(n, bp.len() as u64) as usize;
     let sp = bp.len() - n;
     slc[..sp].copy_from_slice(&bp.0[n..]);
@@ -88,7 +88,7 @@ pub fn bp_shift_by_unity_sam(stack: &mut NockStack, sam: Noun) -> Result {
 pub fn interpolate_table_sam(stack: &mut NockStack, sam: Noun) -> Result {
     let [table, domain_len] = sam.uncell()?;
     let Ok(table) = MarySlice::try_from(table) else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
     let domain_len = domain_len.as_atom()?.as_u64()? as u32;
     let ma = interpolate_table(table, domain_len);
@@ -147,7 +147,7 @@ pub fn bpeval_lift_sam(stack: &mut NockStack, sam: Noun) -> Result {
     // |:  [bp=`bpoly`one-bpoly x=`felt`(lift 1)]
     let [bp, x] = sam.uncell()?;
     let Ok(bp) = BPolySlice::try_from(bp) else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
     let x = x.as_felt().copied().unwrap_or_else(|_| Felt::one());
     // ^-  felt
@@ -304,7 +304,7 @@ pub fn fpdiv<'a>(
         // ~|  "Cannot divide by the zero polynomial!"
         error!("Cannot divide by the zero polynomial!");
         // !!
-        return jet_err();
+        return Err(BAIL_FAIL);
     }
 
     //println!("p={} q={}", vmug(stack, &p.0), vmug(stack, &q.0));
@@ -380,7 +380,7 @@ pub fn fp_ntt_sam(stack: &mut NockStack, sam: Noun) -> Result {
     let [fp, root] = sam.uncell()?;
 
     let Ok(p_poly) = FPolyVec::try_from(fp) else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
 
     let returned_fpoly = p_ntt(p_poly.0, root.as_felt()?);
@@ -396,7 +396,7 @@ pub fn fp_ntt_sam(stack: &mut NockStack, sam: Noun) -> Result {
 
 pub fn fp_fft_sam(stack: &mut NockStack, sam: Noun) -> Result {
     let Ok(p_poly) = FPolyVec::try_from(sam) else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
     let returned_fpoly = fp_fft(p_poly)?;
     let (res_atom, res_poly): (IndirectAtom, &mut [Felt]) =
@@ -424,7 +424,7 @@ fn fp_fft(p: FPolyVec) -> core::result::Result<FPolyVec, JetErr> {
 
 pub fn fp_ifft_sam(stack: &mut NockStack, sam: Noun) -> Result {
     let Ok(p_poly) = FPolyVec::try_from(sam) else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
     let returned_fpoly = fp_ifft(p_poly)?;
     let (res_atom, res_poly): (IndirectAtom, &mut [Felt]) =
@@ -452,17 +452,17 @@ pub fn mp_substitute_ultra(stack: &mut NockStack, inp: Noun) -> Result {
     let [p, trace_evals, height, chals, dyns] = inp.uncell()?;
 
     let Ok(trace_evals) = BPolySlice::try_from(trace_evals) else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
 
     let height = height.as_atom()?.as_u64()?;
 
     let Ok(chals) = BPolySlice::try_from(chals) else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
 
     let Ok(dyns) = BPolySlice::try_from(dyns) else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
 
     //let mut engine = SubstituteEngine::new(height);
@@ -588,7 +588,7 @@ pub fn mp_substitute_ultra_impl<'a, E: ElementEx>(
             ret
         }
         // ==
-        _ => jet_err()?,
+        _ => Err(BAIL_FAIL)?,
     };
 
     Ok(ret)
@@ -607,7 +607,7 @@ fn fp_ifft<'a>(p: FPolyVec) -> core::result::Result<FPolyVec, JetErr> {
     // (fp-ntt p (lift (binv (ordered-root len.p))))
     let binv_len = Belt(binv(p.0.len() as _));
     let Ok(or) = Belt(p.0.len() as _).ordered_root() else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
     let root = Felt::lift(Belt(binv(or.0)));
     let ntt = p_ntt(p.0, &root);
@@ -739,13 +739,13 @@ pub fn mp_substitute_mega(stack: &mut NockStack, inp: Noun) -> Result {
     let [p, trace_evals, height, chals, dyns, com_map] = inp.uncell()?;
 
     let Ok(trace_evals) = BPolySlice::try_from(trace_evals) else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
     let Ok(chals) = BPolySlice::try_from(chals) else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
     let Ok(dyns) = BPolySlice::try_from(dyns) else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
 
     let height = height.as_atom()?.as_u64()?;
@@ -811,7 +811,7 @@ where
     for e in HoonMapIter::from(p) {
         let [k, v] = e.uncell()?;
         let Ok(k) = BPolySlice::try_from(k) else {
-            return jet_err();
+            return Err(BAIL_FAIL);
         };
         let v = E::from_u64(v.as_atom()?.as_u64()?);
 
@@ -1041,7 +1041,7 @@ pub fn bp_ifft<'a>(p: BPolyVec) -> core::result::Result<BPolyVec, JetErr> {
     // (bp-ntt p (binv (ordered-root len.p)))
     let binv_len = Belt(binv(p.0.len() as _));
     let Ok(or) = Belt(p.0.len() as _).ordered_root() else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
     let root = Belt(binv(or.0));
     let mut ntt = p_ntt(p.0, &root);
@@ -1060,7 +1060,7 @@ pub fn turn_coseword(stack: &mut NockStack, sam: Noun) -> Result {
     // |=  [polys=mary offset=belt order=@]
     let [polys, offset, order] = sam.uncell()?;
     let Ok(polys) = MarySlice::try_from(polys) else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
     let offset = offset.as_belt()?;
     let order = order.as_direct()?.data() as u32;

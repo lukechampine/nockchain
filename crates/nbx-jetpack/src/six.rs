@@ -1,18 +1,20 @@
 use std::iter::once;
 
 use nbx_tip5::base::binv;
+use nockchain_math::belt::Belt;
+use nockchain_math::felt::Felt;
+use nockchain_math::handle::{finalize_mary, new_handle_mut_mary};
+use nockchain_math::noun_ext::NounMathExt;
+use nockchain_math::poly::*;
+use nockchain_math::poly_ext::*;
 use nockvm::interpreter::Context;
+use nockvm::jets::util::BAIL_FAIL;
 use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::noun::{Atom, Noun, Slots, D, T};
 use num_traits::Pow;
 use zkvm_jetpack::form::mary::Mary;
-use zkvm_jetpack::form::math::poly::*;
 use zkvm_jetpack::form::poly::Poly;
-use zkvm_jetpack::form::{Belt, ElementEx, FPolySlice, FPolyVec, Felt, PolySlice, PolyVec};
-use zkvm_jetpack::hand::handle::{finalize_mary, new_handle_mut_mary};
-use zkvm_jetpack::jets::utils::jet_err;
-use zkvm_jetpack::noun::noun_ext::NounExt;
 
 use super::four::{absorb_proof_objects_impl, Proof, ProofData};
 use super::one::*;
@@ -91,7 +93,7 @@ pub fn prove_fri_door(context: &mut Context, subj: Noun) -> Result {
     // |=  [codeword=fpoly stream=proof]
     let [codeword, stream] = sam.uncell()?;
     let codeword = FPolySlice::try_from(codeword) else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
     // ^-  [fri-indices=(list @) stream=proof]
     // |^
@@ -193,7 +195,7 @@ pub fn prove_fri_door(context: &mut Context, subj: Noun) -> Result {
     //   ==
     // --
     //todo!()
-    jet_err()
+    Err(BAIL_FAIL)
 }
 
 // ++  query

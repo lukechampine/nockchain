@@ -1,15 +1,19 @@
 use std::iter::once;
 
+use nockchain_math::belt::*;
+use nockchain_math::felt::*;
+use nockchain_math::handle::{finalize_poly, new_handle_mut_slice};
+use nockchain_math::melt::*;
+use nockchain_math::noun_ext::NounMathExt;
+use nockchain_math::poly::*;
+use nockchain_math::poly_ext::*;
+use nockchain_math::structs::HoonList;
+use nockvm::jets::util::BAIL_FAIL;
 use nockvm::jets::JetErr;
 use nockvm::mem::NockStack;
 use nockvm::noun::*;
 use nockvm_macros::tas;
 use zkvm_jetpack::form::mary::MarySlice;
-use zkvm_jetpack::form::{BPolyVec, Belt, Element, ElementEx, FPolyVec, Felt, Melt, PolyVec};
-use zkvm_jetpack::hand::handle::{finalize_poly, new_handle_mut_slice};
-use zkvm_jetpack::hand::structs::HoonList;
-use zkvm_jetpack::jets::utils::jet_err;
-use zkvm_jetpack::noun::noun_ext::NounExt;
 
 use super::hash::{HashEngine, NounDigest};
 use super::three::{absorb_sponge, new_sponge, Tip5Tog};
@@ -145,7 +149,7 @@ impl TryFrom<Noun> for ProofData {
             tas!(b"evals") => Self::Evals(t.try_into()?),
             tas!(b"heights") => Self::Heights(t),
             tas!(b"poly") => Self::Poly(t.try_into()?),
-            _ => jet_err()?,
+            _ => Err(BAIL_FAIL)?,
         })
     }
 }

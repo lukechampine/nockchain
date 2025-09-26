@@ -1,15 +1,15 @@
 use array_concat::concat_arrays;
 use either::Either;
+use nockchain_math::belt::{binv, bsub, PRIME};
+use nockchain_math::handle::{finalize_mary, new_handle_mut_mary};
+use nockchain_math::noun_ext::NounMathExt;
+use nockchain_math::structs::{HoonList, HoonMap};
+use nockvm::jets::util::BAIL_FAIL;
 use nockvm::jets::Result;
 use nockvm::mem::NockStack;
 use nockvm::noun::*;
 use nockvm_macros::tas;
 use zkvm_jetpack::form::mary::{Mary, MarySlice};
-use zkvm_jetpack::form::{binv, bsub, PRIME};
-use zkvm_jetpack::hand::handle::{finalize_mary, new_handle_mut_mary};
-use zkvm_jetpack::hand::structs::{HoonList, HoonMap};
-use zkvm_jetpack::jets::utils::jet_err;
-use zkvm_jetpack::noun::noun_ext::NounExt;
 
 use super::utils::xeb;
 
@@ -374,7 +374,7 @@ pub fn pad(stack: &mut NockStack, sam: Noun) -> Result {
     // |=  table=table-mary
     let [header, p] = sam.uncell()?;
     let Ok(p) = MarySlice::try_from(p) else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
     // NOTE: we rely on step being 14 for code to be correct (hoon doesn't check it, but it also
     // does rely on it).

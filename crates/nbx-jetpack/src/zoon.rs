@@ -1,8 +1,8 @@
+use nockchain_math::noun_ext::NounMathExt;
 use nockvm::interpreter::Context;
 use nockvm::jets::Result;
 use nockvm::mem::NockStack;
 use nockvm::noun::{Noun, Slots, T};
-use zkvm_jetpack::noun::noun_ext::NounExt;
 
 fn zby_key_impl(stack: &mut NockStack, map: Noun) -> Result {
     if map.is_atom() {

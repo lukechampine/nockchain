@@ -1,15 +1,15 @@
 use array_concat::concat_arrays;
 use either::Either;
+use nockchain_math::belt::PRIME;
+use nockchain_math::handle::{finalize_mary, new_handle_mut_mary};
+use nockchain_math::noun_ext::NounMathExt;
+use nockchain_math::structs::HoonList;
+use nockvm::jets::util::BAIL_FAIL;
 use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::noun::*;
 use nockvm_macros::tas;
 use zkvm_jetpack::form::mary::Mary;
-use zkvm_jetpack::form::PRIME;
-use zkvm_jetpack::hand::handle::{finalize_mary, new_handle_mut_mary};
-use zkvm_jetpack::hand::structs::HoonList;
-use zkvm_jetpack::jets::utils::jet_err;
-use zkvm_jetpack::noun::noun_ext::NounExt;
 
 // ++  num-randomizers  1
 const NUM_RANDOMIZERS: u64 = 1;
@@ -55,7 +55,7 @@ fn op_map_get(op: usize) -> core::result::Result<[bool; 10], JetErr> {
     //     :-  9   [0 0 0 0 0 0 0 0 0 1]
     // ==
     if op >= 10 {
-        return jet_err();
+        return Err(BAIL_FAIL);
     }
     let mut ret = [false; 10];
     ret[op] = true;

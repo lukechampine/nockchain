@@ -96,5 +96,6 @@ dirs = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true, features = ["json"] }
 
 zkvm-jetpack.workspace = true
+nockchain-math.workspace = true
 nbx-jetpack.workspace = true
 tracy-client = { workspace = true, optional = true }

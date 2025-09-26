@@ -2,10 +2,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use nbx_tip5::melt::Melt;
+use nockchain_math::poly::*;
+use nockchain_math::poly_ext::*;
 use rayon::prelude::*;
-use zkvm_jetpack::form::math::poly::*;
-use zkvm_jetpack::form::poly::Poly;
-use zkvm_jetpack::form::{ElementEx, PolySlice, PolyVec};
 
 #[cfg(feature = "gpu")]
 use super::gpu;
@@ -133,7 +132,7 @@ impl<E: ElementEx> SubstituteStage<'_, E> {
             .zip(self.out.iter_mut().flat_map(|m| m.chunks_mut(poly_len)))
             .collect::<Vec<_>>();
 
-        t.into_par_iter().for_each(|(i, o)| i.reduce(inp, o));
+        t.into_iter().for_each(|(i, o)| i.reduce(inp, o));
 
         self.out
     }

@@ -1,6 +1,7 @@
 use std::ops::{Add, AddAssign, Div, Mul, MulAssign, Neg, Sub};
 
 use nockvm::noun::Noun;
+use noun_serde::{NounDecode, NounEncode};
 use num_traits::Pow;
 
 use crate::base::*;
@@ -128,15 +129,25 @@ impl Div for Melt {
     }
 }
 
-impl TryFrom<Noun> for Melt {
-    type Error = ();
+impl NounEncode for Melt {
+    fn to_noun<A: nockvm::noun::NounAllocator>(&self, allocator: &mut A) -> nockvm::noun::Noun {
+        nockvm::noun::Atom::new(allocator, self.0).as_noun()
+    }
+}
 
-    #[inline(always)]
-    fn try_from(n: Noun) -> std::result::Result<Self, Self::Error> {
-        if !n.is_atom() {
-            Err(())
-        } else {
-            Ok(Melt::from_u64(n.as_atom()?.as_u64()?))
+impl NounDecode for Melt {
+    fn from_noun(noun: &nockvm::noun::Noun) -> Result<Self, noun_serde::NounDecodeError> {
+        let atom = noun
+            .as_atom()
+            .map_err(|_| noun_serde::NounDecodeError::ExpectedAtom)?;
+        let value = atom
+            .as_u64()
+            .map_err(|_| noun_serde::NounDecodeError::Custom("Melt value too large".to_string()))?;
+        if !based_check(value) {
+            return Err(noun_serde::NounDecodeError::Custom(
+                "Melt value not based".to_string(),
+            ));
         }
+        Ok(Melt(value))
     }
 }

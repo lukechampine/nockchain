@@ -1,13 +1,13 @@
 use bytemuck::{Pod, Zeroable};
 use nbx_tip5::melt::Melt;
+use nockchain_math::belt::Belt;
+use nockchain_math::poly_ext::p_ntt_twiddles;
 use nockvm::noun::D;
 use tracing::info_span;
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use wgpu::{Buffer, BufferDescriptor, BufferUsages, CommandBuffer, ComputePass};
 use zkvm_jetpack::form::bpoly::bitreverse;
 use zkvm_jetpack::form::mary::{Mary, MarySlice};
-use zkvm_jetpack::form::math::poly::p_ntt_twiddles;
-use zkvm_jetpack::form::Belt;
 
 use super::util::p_ntt;
 use super::{DebugHandle, FromBuffer, GpuHandle, Pipeline, Submission, Submittable};

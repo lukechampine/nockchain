@@ -2,27 +2,25 @@ use nockvm::interpreter::Context;
 use nockvm::jets::bits::util::{lsh, rep, rip};
 use nockvm::jets::list::util::{lent, reap, snip, weld, zing};
 use nockvm::jets::math::util::add;
-use nockvm::jets::util::{bite_to_word, chop, slot};
+use nockvm::jets::util::{bite_to_word, chop, slot, BAIL_FAIL};
 use nockvm::jets::JetErr;
 use nockvm::mem::NockStack;
 use nockvm::noun::{Atom, Error, IndirectAtom, Noun, D, NO, T, YES};
 use nockvm_macros::tas;
 use tracing::{debug, error};
 
-use crate::form::mary::*;
-use crate::form::math::mary::*;
-use crate::form::tip5::DIGEST_LENGTH;
-use crate::form::Belt;
-use crate::hand::handle::{
+use crate::form::belt::*;
+use crate::form::handle::{
     finalize_mary, finalize_poly, new_handle_mut_mary, new_handle_mut_slice,
 };
-use crate::hand::structs::HoonList;
+use crate::form::mary::*;
+use crate::form::noun_ext::{AtomMathExt, NounMathExt};
+use crate::form::shape::leaf_sequence;
+use crate::form::structs::HoonList;
+use crate::form::tip5::DIGEST_LENGTH;
 use crate::jets::base_jets::{levy_based, rip_correct};
 use crate::jets::bp_jets::init_bpoly;
-use crate::jets::shape_jets::leaf_sequence;
 use crate::jets::tip5_jets::{digest_to_noundigest, hash_hashable, hash_pairs};
-use crate::jets::utils::jet_err;
-use crate::noun::noun_ext::{AtomExt, NounExt};
 use crate::utils::vecnoun_to_hoon_list;
 
 pub fn mary_swag_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
@@ -34,7 +32,7 @@ pub fn mary_swag_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetEr
 
     let Ok(mary) = MarySlice::try_from(ma) else {
         debug!("cannot convert mary arg to mary");
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
 
     let (res, res_poly): (IndirectAtom, MarySliceMut) =
@@ -58,12 +56,12 @@ pub fn mary_weld_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetEr
     let step2 = ma2.as_cell()?.head().as_direct()?.data() as u32;
     if step != step2 {
         debug!("can only weld marys of same step");
-        return jet_err();
+        return Err(BAIL_FAIL);
     }
 
     let (Ok(mary1), Ok(mary2)) = (MarySlice::try_from(ma), MarySlice::try_from(ma2)) else {
         debug!("mary1 or mary2 is not an fpoly");
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
     let res_len = mary1.len + mary2.len;
     let (res, res_poly): (IndirectAtom, MarySliceMut) =
@@ -81,7 +79,7 @@ pub fn mary_transpose_jet(context: &mut Context, subject: Noun) -> Result<Noun, 
 
     let (Ok(mary), Ok(offset)) = (MarySlice::try_from(ma), offset.as_atom()?.as_u64()) else {
         debug!("fp is not an fpoly or n is not an atom");
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
 
     let offset = offset as usize;
@@ -371,7 +369,7 @@ fn snag_as_digest(stack: &mut NockStack, m_noun: Noun, i: usize) -> Result<Noun,
     digest[3] = cut(stack, 6, 3, 1, buf)?.as_atom()?.as_u64()?;
     digest[4] = cut(stack, 6, 4, 1, buf)?.as_atom()?.as_u64()?;
 
-    Ok(digest_to_noundigest(stack, digest))
+    Ok(digest_to_noundigest(stack, digest.map(Belt)))
 }
 
 pub fn mary_to_list_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {

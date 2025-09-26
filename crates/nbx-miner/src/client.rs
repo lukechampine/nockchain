@@ -10,13 +10,13 @@ use nockapp::nockapp::wire::Wire;
 use nockapp::noun::slab::{NockJammer, NounSlab};
 use nockapp::noun::NounExt;
 use nockchain_libp2p_io::tip5_util::tip5_hash_to_base58;
+use nockchain_math::belt::{Belt, PRIME};
+use nockchain_math::noun_ext::NounMathExt;
 use nockvm::noun::{Atom, D, T};
 use rand::distr::weighted::WeightedIndex;
 use rand::prelude::Distribution;
 use rand::Rng;
 use tokio::sync::mpsc;
-use zkvm_jetpack::form::{Belt, PRIME};
-use zkvm_jetpack::noun::noun_ext::NounExt as OtherNounExt;
 
 use crate::client_base::{client_loops, ClientConfig, ServerExtras};
 use crate::device::{Device, DeviceInfo};

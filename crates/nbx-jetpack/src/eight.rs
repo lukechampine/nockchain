@@ -1,22 +1,21 @@
 use std::collections::BTreeMap;
 
+use nockchain_math::belt::*;
+use nockchain_math::felt::*;
+use nockchain_math::handle::{
+    finalize_mary, finalize_poly, new_handle_mut_mary, new_handle_mut_slice,
+};
+use nockchain_math::melt::*;
+use nockchain_math::noun_ext::NounMathExt;
+use nockchain_math::poly::*;
+use nockchain_math::poly_ext::*;
+use nockchain_math::structs::{HoonList, HoonMap};
+use nockvm::jets::util::BAIL_FAIL;
 use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::noun::{Atom, IndirectAtom, Noun, D, T};
-use zkvm_jetpack::form::fext::{fmul_, fpow_};
 use zkvm_jetpack::form::mary::{Mary, MarySlice, MarySliceMut};
-use zkvm_jetpack::form::math::poly::*;
 use zkvm_jetpack::form::poly::Poly;
-use zkvm_jetpack::form::{
-    binv, bneg, BPolySlice, BPolyVec, Belt, Element, ElementEx, FPolySlice, Felt, Melt, PolySlice,
-    PolyVec,
-};
-use zkvm_jetpack::hand::handle::{
-    finalize_mary, finalize_poly, new_handle_mut_mary, new_handle_mut_slice,
-};
-use zkvm_jetpack::hand::structs::{HoonList, HoonMap};
-use zkvm_jetpack::jets::utils::{det_err, jet_err};
-use zkvm_jetpack::noun::noun_ext::NounExt;
 
 use super::one::*;
 use super::substitute::SubstituteEngine;
@@ -49,11 +48,11 @@ pub fn compute_deep(stack: &mut NockStack, inp: Noun) -> Result {
         .into_iter()
         .map(MarySlice::try_from)
         .collect::<core::result::Result<Vec<_>, _>>()
-        .or_else(|_| jet_err())?;
+        .or_else(|_| Err(BAIL_FAIL))?;
 
     let Ok(trace_openings) = FPolySlice::try_from(trace_openings) else {
         debug!("trace_openings is not a valid FPolySlice");
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
 
     let composition_pieces = HoonList::try_from(composition_pieces)?
@@ -62,22 +61,22 @@ pub fn compute_deep(stack: &mut NockStack, inp: Noun) -> Result {
         .collect::<core::result::Result<Vec<_>, _>>()
         .or_else(|_| {
             debug!("composition_pieces contain invalid FPolySlice");
-            jet_err()
+            Err(BAIL_FAIL)
         })?;
 
     let Ok(composition_piece_openings) = FPolySlice::try_from(composition_piece_openings) else {
         debug!("composition_piece_openings is not a valid FPolySlice");
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
 
     let Ok(weights) = FPolySlice::try_from(weights) else {
         debug!("weights is not a valid FPolySlice");
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
 
     let Ok(omicrons) = FPolySlice::try_from(omicrons) else {
         debug!("omicrons is not a valid FPolySlice");
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
 
     let deep_challenge = deep_challenge.as_felt()?;
@@ -305,32 +304,32 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
         sam.uncell()?;
 
     let Ok(omicrons) = BPolySlice::try_from(omicrons) else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
 
     let Ok(heights) = HoonList::try_from(heights).map(|v| {
         v.map(|v| v.as_atom().unwrap().as_u64().unwrap())
             .collect::<Vec<_>>()
     }) else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
 
     let Ok(tworow_trace_polys) = HoonList::try_from(tworow_trace_polys).map(|v| {
         v.map(|v| BPolySlice::try_from(v).unwrap())
             .collect::<Vec<_>>()
     }) else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
 
     let Ok(challenges) = BPolySlice::try_from(challenges) else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
 
     let Ok(dyn_list) = HoonList::try_from(dyn_list).map(|v| {
         v.map(|v| BPolySlice::try_from(v).unwrap())
             .collect::<Vec<_>>()
     }) else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
 
     let [constraint_map, constraint_counts, weights_map] =
@@ -344,7 +343,7 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
     //   %-  bex  %-  xeb  %-  dec
     //   (roll heights max)
     let Some(&max_height) = heights.iter().max() else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
     let max_height = 1 << xeb((max_height as usize) - 1);
 
@@ -409,12 +408,12 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
         // =/  weights  (~(got by weights-map) i)
         let weights = weights_map
             .and_then(|v| v.get(stack, D(i as _)))
-            .ok_or_else(det_err)?;
+            .ok_or(BAIL_FAIL)?;
         let weights2 = BPolySlice::try_from(weights)?;
         // =/  counts  (~(got by constraint-counts) i)
         let counts = constraint_counts
             .and_then(|v| v.get(stack, D(i as _)))
-            .ok_or_else(det_err)?;
+            .ok_or(BAIL_FAIL)?;
         let counts = counts
             .uncell::<5>()?
             .map(|v| v.as_atom().unwrap().as_u64().unwrap());
@@ -709,7 +708,7 @@ fn degree_processing(
 pub fn precompute_ntts(stack: &mut NockStack, inp: Noun) -> Result {
     // |=  [polys=mary height=@ ntt-len=@]
     let [polys, height, ntt_len] = inp.uncell()?;
-    let polys = MarySlice::try_from(polys).or_else(|_| jet_err())?;
+    let polys = MarySlice::try_from(polys).or_else(|_| Err(BAIL_FAIL))?;
     let height = height.as_direct()?.data() as usize;
     let ntt_len = ntt_len.as_direct()?.data() as usize;
 
@@ -777,7 +776,7 @@ pub fn compute_codeword_commitments_sam(stack: &mut NockStack, sam: Noun) -> Res
         .collect::<std::result::Result<Vec<_>, _>>();
 
     let Ok(table_marys_vec) = table_marys_vec else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
 
     let fri_domain_len = fri_domain_len.as_atom()?.as_u64()? as u32;
@@ -825,7 +824,7 @@ pub fn compute_lde_sam(stack: &mut NockStack, sam: Noun) -> Result {
         .collect::<std::result::Result<Vec<_>, _>>();
 
     let Ok(table_polys_vec) = table_polys_vec else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
 
     let fri_domain_len = fri_domain_len.as_atom()?.as_u64()?;

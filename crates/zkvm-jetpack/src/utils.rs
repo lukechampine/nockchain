@@ -1,12 +1,13 @@
 use bitvec::prelude::{BitSlice, Lsb0};
 use ibig::UBig;
 use nockvm::interpreter::Context;
+use nockvm::jets::util::BAIL_FAIL;
 use nockvm::jets::JetErr;
 use nockvm::mem::NockStack;
 use nockvm::noun::{Atom, IndirectAtom, Noun, D, DIRECT_MAX, NONE, T};
 pub use tracing::{debug, trace};
 
-use crate::form::Belt;
+use crate::form::belt::*;
 
 // tests whether a felt atom has the leading 1. we cannot actually test
 // Felt, because it doesn't include the leading 1.
@@ -97,6 +98,24 @@ pub fn u128_as_noun(stack: &mut NockStack, res: u128) -> Noun {
         let res_big = UBig::from(res);
         Atom::from_ubig(stack, &res_big).as_noun()
     }
+}
+
+pub fn hoon_list_to_arraybelt<const N: usize>(list: Noun) -> Result<[Belt; N], JetErr> {
+    let mut input_iterate = list;
+    let mut input: [Belt; N] = [Belt(0); N];
+    let mut idx = 0;
+
+    for idx in 0..N {
+        if is_hoon_list_end(&input_iterate) {
+            return if idx == N { Err(BAIL_FAIL) } else { Ok(input) };
+        }
+        let input_cell = input_iterate.as_cell()?;
+        let head_belt = Belt(input_cell.head().as_atom()?.as_u64()?);
+        input[idx] = head_belt;
+        input_iterate = input_cell.tail();
+    }
+
+    return Err(BAIL_FAIL);
 }
 
 pub fn hoon_list_to_vecbelt(list: Noun) -> Result<Vec<Belt>, JetErr> {

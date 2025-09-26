@@ -1,12 +1,13 @@
+use nockchain_math::belt::Belt;
+use nockchain_math::felt::Felt;
+use nockchain_math::noun_ext::NounMathExt;
+use nockchain_math::poly_ext::ElementEx;
+use nockchain_math::structs::HoonList;
 use nockvm::interpreter::Context;
-use nockvm::jets::util::slot;
+use nockvm::jets::util::{slot, BAIL_FAIL};
 use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::noun::*;
-use zkvm_jetpack::form::{Belt, ElementEx, Felt};
-use zkvm_jetpack::hand::structs::HoonList;
-use zkvm_jetpack::jets::utils::jet_err;
-use zkvm_jetpack::noun::noun_ext::NounExt;
 
 // +$  pelt-stack
 //   $:  alf=pelt
@@ -26,15 +27,15 @@ impl<T: ElementEx> TryFrom<Noun> for PolyStack<T> {
 
     fn try_from(value: Noun) -> std::result::Result<Self, Self::Error> {
         let [alf, alf_inv, len, dat] = value.uncell()?;
-        let Ok(alf) = T::try_from(alf) else {
-            return jet_err();
+        let Ok(alf) = T::from_noun(&alf) else {
+            return Err(BAIL_FAIL);
         };
-        let Ok(alf_inv) = T::try_from(alf_inv) else {
-            return jet_err();
+        let Ok(alf_inv) = T::from_noun(&alf_inv) else {
+            return Err(BAIL_FAIL);
         };
         let len = len.as_direct()?.data() as usize;
-        let Ok(dat) = T::try_from(dat) else {
-            return jet_err();
+        let Ok(dat) = T::from_noun(&dat) else {
+            return Err(BAIL_FAIL);
         };
 
         Ok(Self {
@@ -49,10 +50,10 @@ impl<T: ElementEx> TryFrom<Noun> for PolyStack<T> {
 impl<T: ElementEx> PolyStack<T> {
     pub fn as_noun(&self, stack: &mut NockStack) -> Noun {
         let r = [
-            self.alf.as_noun(stack),
-            self.alf_inv.as_noun(stack),
+            self.alf.to_noun(stack),
+            self.alf_inv.to_noun(stack),
             D(self.len as _),
-            self.dat.as_noun(stack),
+            self.dat.to_noun(stack),
         ];
         T(stack, &r)
     }
@@ -78,8 +79,8 @@ pub fn poly_stack_push_raw<T: ElementEx>(context: &mut Context, subject: Noun) -
     let parent_core = slot(subject, 7)?;
     let ps = slot(parent_core, 6)?;
     let x = slot(subject, 6)?;
-    let Ok(x) = T::try_from(x) else {
-        return jet_err();
+    let Ok(x) = T::from_noun(&x) else {
+        return Err(BAIL_FAIL);
     };
     poly_stack_push(&mut context.stack, ps, x)
 }
@@ -117,8 +118,8 @@ pub fn poly_stack_push_all_raw<T: ElementEx>(context: &mut Context, subject: Nou
     let ps = slot(parent_core, 6)?;
     let xs = slot(subject, 6)?;
     let xs = HoonList::try_from(xs).ok().into_iter().flatten();
-    let xs =
-        xs.map(|x| T::try_from(x).unwrap_or_else(|_| panic!("Unable to convert to rust datatype")));
+    let xs = xs
+        .map(|x| T::from_noun(&x).unwrap_or_else(|_| panic!("Unable to convert to rust datatype")));
     poly_stack_push_all(&mut context.stack, ps, xs)
 }
 

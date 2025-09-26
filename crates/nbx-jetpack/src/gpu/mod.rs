@@ -9,9 +9,9 @@ use std::time::Instant;
 use either::Either;
 pub use handle::GpuHandle;
 use nbx_shaders::get_shader_module;
+use nockchain_math::melt::Melt;
 pub use registry::GpuRegistry;
 use wgpu::{Backends, Buffer, CommandBuffer, DeviceType, Queue, SubmissionIndex};
-use zkvm_jetpack::form::Melt;
 
 use self::codewords::{
     BpShiftUniform, Hash10FixedPrependUniform, HashFixedMultipleUniform, HashVarlenMultipleUniform,

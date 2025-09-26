@@ -233,12 +233,10 @@ impl Clone for Buffer {
     #[inline]
     fn clone_from(&mut self, source: &Buffer) {
         assert!(self.capacity() >= source.len());
-        unsafe {
-            self.0
-                .as_mut_ptr()
-                .copy_from(source.0.as_ptr(), source.len());
-            self.0.set_len(source.len());
-        }
+        // Don't use Vec's clone_from as it may allocate
+        // Instead, clear and copy the data directly
+        self.0.clear();
+        self.0.extend_from_slice(&source.0);
     }
 }
 

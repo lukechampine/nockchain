@@ -215,7 +215,8 @@ pub mod util {
 
     use crate::mem::NockStack;
     use crate::noun::{
-        Atom, DirectAtom, Error, IndirectAtom, Noun, Result, D, DIRECT_MAX, NO, T, YES,
+        Atom, DirectAtom, Error, IndirectAtom, Noun, NounAllocator, Result, D, DIRECT_MAX, NO, T,
+        YES,
     };
 
     /// Addition
@@ -321,7 +322,7 @@ pub mod util {
     }
 
     /// Less than (boolean)
-    pub fn lth_b(stack: &mut NockStack, a: Atom, b: Atom) -> bool {
+    pub fn lth_b<A: NounAllocator>(stack: &mut A, a: Atom, b: Atom) -> bool {
         if let (Ok(a), Ok(b)) = (a.as_direct(), b.as_direct()) {
             a.data() < b.data()
         } else if a.bit_size() > b.bit_size() {
@@ -334,7 +335,7 @@ pub mod util {
     }
 
     /// Less than
-    pub fn lth(stack: &mut NockStack, a: Atom, b: Atom) -> Noun {
+    pub fn lth<A: NounAllocator>(stack: &mut A, a: Atom, b: Atom) -> Noun {
         if lth_b(stack, a, b) {
             YES
         } else {

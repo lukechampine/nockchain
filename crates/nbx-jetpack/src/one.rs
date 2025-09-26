@@ -1,22 +1,22 @@
 use std::iter::once;
 
 use either::Either;
+use nockchain_math::belt::*;
+use nockchain_math::handle::{
+    finalize_mary, finalize_poly, new_handle_mut_mary, new_handle_mut_slice,
+};
+use nockchain_math::noun_ext::NounMathExt;
+use nockchain_math::poly::*;
+use nockchain_math::poly_ext::{p_decompose, peval, ElementEx};
 use nockvm::interpreter::Context;
 use nockvm::jets::bits::util as bits;
 use nockvm::jets::list::util as list;
 use nockvm::jets::math::util as math;
-use nockvm::jets::util::slot;
+use nockvm::jets::util::{slot, BAIL_FAIL};
 use nockvm::jets::Result;
 use nockvm::mem::NockStack;
 use nockvm::noun::{Atom, Cell, IndirectAtom, Noun, D, T};
 use zkvm_jetpack::form::mary::MarySlice;
-use zkvm_jetpack::form::math::poly::{p_decompose, peval};
-use zkvm_jetpack::form::{binv, BPolyVec, Belt, Element, ElementEx, PolySlice};
-use zkvm_jetpack::hand::handle::{
-    finalize_mary, finalize_poly, new_handle_mut_mary, new_handle_mut_slice,
-};
-use zkvm_jetpack::jets::utils::jet_err;
-use zkvm_jetpack::noun::noun_ext::NounExt;
 
 use super::utils::*;
 
@@ -215,14 +215,14 @@ pub fn weld_step(context: &mut Context, subject: Noun) -> Result {
     let parent_core = slot(subject, 7)?;
     let ma = slot(parent_core, 6)?;
     let Ok(ma) = MarySlice::try_from(ma) else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
 
     // ~/  %weld-step
     // |=  na=mary
     let na = slot(subject, 6)?;
     let Ok(na) = MarySlice::try_from(na) else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
 
     // ^-  mary
@@ -278,7 +278,7 @@ pub fn bpcan(mut p: BPolyVec) -> BPolyVec {
 pub fn p_decompose_impl<T: ElementEx>(stack: &mut NockStack, sam: Noun) -> Result {
     let [p, d] = sam.uncell()?;
     let Ok(p) = PolySlice::try_from(p) else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
     let d = d.as_atom()?.as_u64()? as usize;
 
@@ -303,15 +303,15 @@ pub fn bp_decompose(stack: &mut NockStack, sam: Noun) -> Result {
 pub fn peval_impl<T: ElementEx>(stack: &mut NockStack, sam: Noun) -> Result {
     let [p, d] = sam.uncell()?;
     let Ok(p) = PolySlice::try_from(p) else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
-    let Ok(d) = T::try_from(d) else {
-        return jet_err();
+    let Ok(d) = T::from_noun(&d) else {
+        return Err(BAIL_FAIL);
     };
 
     let r = peval::<T>(p, d);
 
-    Ok(r.as_noun(stack))
+    Ok(r.to_noun(stack))
 }
 
 pub fn bpeval(stack: &mut NockStack, sam: Noun) -> Result {

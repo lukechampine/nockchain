@@ -2,21 +2,24 @@ use std::iter::once;
 use std::mem::MaybeUninit;
 
 use array_concat::concat_arrays;
+use nockchain_math::belt::Belt;
+use nockchain_math::felt::Felt;
+use nockchain_math::handle::{finalize_mary, new_handle_mut_mary};
+use nockchain_math::melt::Melt;
+use nockchain_math::noun_ext::NounMathExt;
+use nockchain_math::poly_ext::*;
+use nockchain_math::structs::HoonList;
 use nockvm::interpreter::Context;
-use nockvm::jets::util::{slot, BAIL_EXIT};
+use nockvm::jets::util::{slot, BAIL_EXIT, BAIL_FAIL};
 use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::noun::{Atom, Noun, D, T};
+use noun_serde::NounEncode;
 use tracing::info_span;
 use zkvm_jetpack::form::mary::{Mary, MarySlice};
 use zkvm_jetpack::form::math::tip5::{self, CAPACITY, DIGEST_LENGTH, RATE, STATE_SIZE};
-use zkvm_jetpack::form::poly::Poly;
+use zkvm_jetpack::form::poly::*;
 use zkvm_jetpack::form::tip5::permute;
-use zkvm_jetpack::form::{BPolyVec, Belt, Element, ElementEx, Felt, Melt, PolySlice, PolyVec};
-use zkvm_jetpack::hand::handle::{finalize_mary, new_handle_mut_mary};
-use zkvm_jetpack::hand::structs::HoonList;
-use zkvm_jetpack::jets::utils::jet_err;
-use zkvm_jetpack::noun::noun_ext::NounExt;
 
 use super::hash::{leaf_sequence_impl, HashEngine, NounDigest};
 use super::one::*;
@@ -274,7 +277,7 @@ pub fn hash_pairs(inp: &[NounDigest]) -> core::result::Result<Vec<NounDigest>, J
     // half. That's the point of `++  indices`.
     for v in inp.chunks(2) {
         let Ok([first, second]) = <[NounDigest; 2]>::try_from(v) else {
-            return jet_err();
+            return Err(BAIL_FAIL);
         };
         // (hash-10:tip5 (weld (snag b lis) (snag +(b) lis)))
         // :: (weld <...>)
@@ -383,7 +386,7 @@ pub fn tog_felts(context: &mut Context, subj: Noun) -> Result {
         let felts = tog.felts(n);
         let felts = felts
             .into_iter()
-            .map(|f| f.as_noun(stack))
+            .map(|f| f.to_noun(stack))
             .chain(once(D(0)))
             .collect::<Vec<_>>();
         Ok(T(stack, &felts))
@@ -400,7 +403,7 @@ pub fn hash_hashable(stack: &mut NockStack, h: Noun) -> Result {
 
 pub fn bp_build_merk_heap(stack: &mut NockStack, ma: Noun) -> Result {
     let Ok(ma) = MarySlice::try_from(ma) else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
     let (height, mh) = build_merk_heap_impl::<Belt>(ma)?;
     let height = Atom::new(stack, height as _).as_noun();
@@ -410,7 +413,7 @@ pub fn bp_build_merk_heap(stack: &mut NockStack, ma: Noun) -> Result {
 
 pub fn build_merk_heap(stack: &mut NockStack, ma: Noun) -> Result {
     let Ok(ma) = MarySlice::try_from(ma) else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
     let (height, mh) = build_merk_heap_impl::<Felt>(ma)?;
     let height = Atom::new(stack, height as _).as_noun();
@@ -596,7 +599,7 @@ fn snag_as_digest(stack: &mut NockStack, m: Noun, i: usize) -> Result {
     //   |=  [m=mary i=@]
     //   ^-  noun-digest:tip5
     let Ok(ma) = MarySlice::try_from(m) else {
-        return jet_err();
+        return Err(BAIL_FAIL);
     };
 
     //   ?>  =(5 step.m)

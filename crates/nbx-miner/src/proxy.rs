@@ -8,11 +8,11 @@ use ibig::UBig;
 use nbx_jetpack::log::*;
 use nockapp::noun::slab::NounSlab;
 use nockapp::NockAppError;
+use nockchain_math::belt::{Belt, PRIME};
+use nockchain_math::noun_ext::NounMathExt;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use uuid::Uuid;
-use zkvm_jetpack::form::{Belt, PRIME};
-use zkvm_jetpack::noun::noun_ext::NounExt as OtherNounExt;
 
 use crate::client_base::client_loops;
 use crate::device::{Device, DeviceInfoWithSockets};

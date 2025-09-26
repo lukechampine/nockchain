@@ -12,6 +12,7 @@ use jsonwebtoken::errors::{Error, ErrorKind};
 use jsonwebtoken::{decode, Algorithm, DecodingKey, TokenData, Validation};
 use nbx_jetpack::log::*;
 use nockapp::noun::slab::NounSlab;
+use nockchain_math::belt::Belt;
 use rand::random;
 use sha3::{Digest, Sha3_256};
 use strum::FromRepr;
@@ -19,7 +20,6 @@ use tokio::io::{split, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinSet;
 use uuid::Uuid;
-use zkvm_jetpack::form::Belt;
 
 use crate::device::{Device, DeviceInfo, DeviceInfoWithSockets};
 use crate::metrics::{counter, gauge, histogram};
