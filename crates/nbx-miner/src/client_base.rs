@@ -23,7 +23,7 @@ use crate::device::{Device, DeviceInfo};
 use crate::log;
 use crate::metrics::gauge;
 use crate::proto::{
-    self, ClientDataWrite, MiningAckOut, MiningDataOut, MiningResultIn, Permissions,
+    self, ClientDataWrite, HandshakeStage, MiningAckOut, MiningDataOut, MiningResultIn, Permissions,
 };
 use crate::shared::{tls_connect, TlsClientConfig};
 
@@ -349,6 +349,7 @@ async fn client_conn(
         }
     };
 
+    let mut stage = HandshakeStage::HelloPing;
     let handshake = match tokio::time::timeout(
         Duration::from_secs(20),
         proto::client_handshake(
@@ -358,19 +359,24 @@ async fn client_conn(
             &server_proto_name,
             device,
             jwt.clone(),
+            &mut stage,
         ),
     )
     .await
     {
         Ok(Ok(h)) => h,
         Ok(Err(e)) => {
-            log!(error, "Handshake failed: {e}.");
+            if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                log!(error, "Handshake failed on {addr}. Error code: {}", stage as u8);
+            } else {
+                log!(error, "Handshake failed on {addr}: Error code: {}. Error: {e}.", stage as u8);
+            }
             let c = err_cnt.fetch_add(1, Ordering::Relaxed);
             gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string()).set((c + 1) as f64);
             return;
         }
         Err(_) => {
-            log!(error, "Handshake timeout.");
+            log!(error, "Handshake timeout on {addr}.");
             let c = err_cnt.fetch_add(1, Ordering::Relaxed);
             gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string()).set((c + 1) as f64);
             return;

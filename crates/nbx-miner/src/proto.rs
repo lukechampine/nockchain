@@ -360,6 +360,15 @@ pub struct ClientHandshake<S> {
     pub device: Arc<Device>,
 }
 
+#[repr(u8)]
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum HandshakeStage {
+    HelloPing = 0,
+    HelloPong,
+    PostHelloPing,
+    PostHelloPong,
+}
+
 pub async fn client_handshake<S: AsyncRead + AsyncWrite + Unpin>(
     mut stream: S,
     server_addr: SocketAddr,
@@ -367,6 +376,7 @@ pub async fn client_handshake<S: AsyncRead + AsyncWrite + Unpin>(
     server_name: &str,
     device: Arc<Device>,
     jwt: Option<Arc<str>>,
+    stage: &mut HandshakeStage,
 ) -> io::Result<ClientHandshake<S>> {
     let (mut read, mut write) = split(&mut stream);
 
@@ -377,6 +387,7 @@ pub async fn client_handshake<S: AsyncRead + AsyncWrite + Unpin>(
     let mut crypt = ChaCha::new_chacha8(&CHACHA_KEY, &0u64.to_le_bytes());
 
     // Initial handshake
+    *stage = HandshakeStage::HelloPing;
     let session_id = random::<u32>();
     binsend(
         &mut write,
@@ -393,6 +404,7 @@ pub async fn client_handshake<S: AsyncRead + AsyncWrite + Unpin>(
 
     let mut crypt = ChaCha::new_chacha8(&CHACHA_KEY, &(session_id as u64).to_le_bytes());
 
+    *stage = HandshakeStage::HelloPong;
     let resp: HelloResp = binrecv_client(
         &mut read,
         &mut crypt,
@@ -401,6 +413,7 @@ pub async fn client_handshake<S: AsyncRead + AsyncWrite + Unpin>(
         "hello",
     )
     .await?;
+
     if resp.protocol != PROTOCOL {
         return Err(io::ErrorKind::Unsupported.into());
     }
@@ -418,6 +431,7 @@ pub async fn client_handshake<S: AsyncRead + AsyncWrite + Unpin>(
         start.elapsed().as_millis()
     );
 
+    *stage = HandshakeStage::PostHelloPing;
     binsend(
         &mut write,
         &mut crypt,
@@ -432,6 +446,7 @@ pub async fn client_handshake<S: AsyncRead + AsyncWrite + Unpin>(
     )
     .await?;
 
+    *stage = HandshakeStage::PostHelloPong;
     let perms: Permissions = binrecv_client(
         &mut read,
         &mut crypt,
