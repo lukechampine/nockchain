@@ -213,7 +213,7 @@
   ++  peek
     |=  arg=path
     ^-  (unit (unit *))
-    ~>  %slog.[0 (cat 3 'peek: %' -.arg)]
+    ~>  %slog.[3 (cat 3 'peek: %' -.arg)]
     =/  =(pole)  arg
     ?+  pole  ~
     ::
