@@ -282,8 +282,15 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
             let dig = UBig::from_be_bytes(&dig.as_ne_bytes());
 
             #[cfg(feature = "db")]
-            db.as_ref()
-                .map(|v| v.submit_share(sub.clone(), hwid.clone(), dig.clone(), proxy_diff));
+            db.as_ref().map(|v| {
+                v.submit_share(
+                    sub.clone(),
+                    hwid.clone(),
+                    dig.clone(),
+                    proxy_diff,
+                    in_data.block_height,
+                )
+            });
 
             // Local server has verified that we hit the pool target. Now, we need to verify
             // whether we hit the parent target.

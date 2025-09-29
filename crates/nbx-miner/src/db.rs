@@ -20,6 +20,7 @@ enum DbMsg {
         machine_id: Arc<str>,
         share_hash: String,
         work_done: u64,
+        block_height: u64,
     },
     TelemetryProofrate {
         machines: BTreeMap<Uuid, BTreeMap<Arc<str>, u32>>,
@@ -66,13 +67,14 @@ impl Database {
 
         while let Some(msg) = msgs.recv().await {
             let r = match msg {
-                DbMsg::Share { client_sub, machine_id, share_hash, work_done } => {
-                    sqlx::query("INSERT INTO \"shares\" (src, sub, machine_id, share_hash, accumulated_work) VALUES ( $1, $2, $3, $4, $5 )")
+                DbMsg::Share { client_sub, machine_id, share_hash, work_done, block_height } => {
+                    sqlx::query("INSERT INTO \"shares\" (src, sub, machine_id, share_hash, accumulated_work, block_height) VALUES ( $1, $2, $3, $4, $5, $6 )")
                         .bind(&*src_name)
                         .bind(client_sub)
                         .bind(&*machine_id)
                         .bind(share_hash)
                         .bind(i64::try_from(work_done).unwrap_or(i64::MAX))
+                        .bind(i64::try_from(block_height).unwrap_or(i64::MAX))
                         .execute(&pool)
                         .await
                 }
@@ -169,6 +171,7 @@ impl DatabaseHandle {
         machine_id: Arc<str>,
         share_hash: UBig,
         work_done: u64,
+        block_height: u64,
     ) {
         let share_hash = ubig_to_base58(share_hash);
         self.submit_msg(DbMsg::Share {
@@ -176,6 +179,7 @@ impl DatabaseHandle {
             machine_id,
             share_hash,
             work_done,
+            block_height,
         });
     }
 
