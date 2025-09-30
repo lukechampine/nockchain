@@ -170,14 +170,13 @@ impl Device {
     }
 }
 
-#[cfg(target_os = "linux")]
 fn machine_id() -> Option<String> {
     for p in ["/var/lib/dbus/machine-id", "/etc/machine-id"] {
         if let Ok(d) = std::fs::read_to_string(p) {
             return Some(d);
         }
     }
-    None
+    Some("unknown".to_string())
 }
 
 fn hwid(key: &str, dev: &DeviceInfo) -> Arc<str> {

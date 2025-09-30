@@ -1,38 +1,18 @@
-/*use clap::{ColorChoice, Parser};
-use clap_serde_derive::ClapSerde;
-use nbx_miner::client_base::ClientConfig;
-use serde::{Deserialize, Serialize};
-use dirs::config_dir;
-
-// When enabled, use jemalloc for more stable memory allocation
-#[cfg(feature = "jemalloc")]
-#[global_allocator]
-static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
-
-#[derive(Parser)]
-pub struct LauncherCli {
-    temp_token: Option<String>,
-}
-
-#[tokio::main]
-async fn main() {
-    let cli = LauncherCli::parse();
-}*/
-
 use std::io;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
+use sha3::digest::typenum::private::Trim;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 const API: &'static str = "https://pool-api.nockbox.org";
 
-#[derive(Clone, Copy, Debug, ValueEnum, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, ValueEnum, Serialize, Deserialize, PartialEq)]
 enum Program {
     Miner,
     Proxy,
@@ -62,8 +42,8 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Cmd {
-    /// Generate config for a NockBox miner or proxy
-    GenerateConfig {
+    /// Start the miner or proxy with authentication
+    Start {
         #[arg(value_enum)]
         program: Program,
 
@@ -71,139 +51,215 @@ enum Cmd {
         #[arg(value_enum, required_if_eq("program", "miner"))]
         target: Option<Target>,
 
+        /// Authentication token (JWT)
+        #[arg(long)]
+        auth: Option<String>,
+
         /// Overwrite existing config
         #[arg(long)]
         force_overwrite: bool,
     },
-
-    /// Ensure latest binary in cache and launch it with the config
-    Launch {
-        #[arg(value_enum)]
-        program: Program,
-    },
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct MinerConfig {
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct LocalConfig {
     program: Program,
-    target: Target,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    jwt: Option<String>,
+    access_token: String,
+    hardware_info: HardwareInfo,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct ProxyConfig {
-    program: Program,
-    jwt: String,
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+struct HardwareInfo {
+    arch: String,
+    cpu_features: String,
 }
 
 #[derive(Debug, Deserialize)]
-struct JwtResp {
+struct TokenResponse {
     token: String,
 }
 
+#[derive(Debug, Serialize)]
+struct BinaryRequest {
+    pub arch: String,
+    pub cpu_features: String,
+}
+
 #[derive(Debug, Deserialize)]
-struct ReleaseResp {
+struct BinaryResponse {
     version: String,
-    sha256: String,
+    url: String,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.cmd {
-        Cmd::GenerateConfig {
+        Cmd::Start {
             program,
             target,
-            force_overwrite,
-        } => generate_config(program, target, force_overwrite).await?,
-        Cmd::Launch { program } => launch(program).await?,
+            auth,
+            ..
+        } => start(program, target, auth).await?,
     }
     Ok(())
 }
 
-async fn generate_config(program: Program, target: Option<Target>, force: bool) -> Result<()> {
+async fn refresh_token(access_token: &str) -> Result<TokenResponse> {
+    reqwest::Client::new()
+        .post(format!("{API}/api/v1/credentials/refresh"))
+        .bearer_auth(access_token)
+        .send()
+        .await?
+        .error_for_status()
+        .context("Failed to refresh token")?
+        .json()
+        .await
+        .context("Failed to parse refresh token response")
+}
+
+async fn setup_token(access_token: &str) -> Result<TokenResponse> {
+    reqwest::Client::new()
+        .post(format!("{API}/api/v1/credentials/setup"))
+        .bearer_auth(&access_token)
+        .send()
+        .await?
+        .error_for_status()
+        .context("Failed to exchange token")?
+        .json()
+        .await
+        .context("Failed to parse token response")
+}
+
+async fn refresh_or_create_config(
+    program: Program,
+    auth_token: Option<String>,
+    cfg_path: &Path,
+) -> Result<LocalConfig> {
+    let existing_config: Result<LocalConfig> = read_toml(cfg_path).await;
+
+    if let Ok(existing_config) = existing_config.as_ref() {
+        assert_eq!(existing_config.program, program);
+    }
+
+    if let Some(auth_token) = auth_token {
+        println!("Fetching authentication token...");
+        let response = setup_token(&auth_token).await?;
+
+        if let Ok(mut existing_config) = existing_config {
+            existing_config.access_token = response.token;
+            write_toml(&cfg_path, &existing_config).await?;
+            return Ok(existing_config);
+        };
+
+        let config = LocalConfig {
+            program,
+            access_token: response.token,
+            // TODO: Implement CPU features
+            hardware_info: HardwareInfo {
+                arch: std::env::consts::ARCH.to_string(),
+                cpu_features: "".to_string(),
+            },
+        };
+
+        write_toml(&cfg_path, &config).await?;
+        return Ok(config);
+    }
+
+    let mut existing_config = existing_config
+        .map_err(|e| anyhow!("Failed to get config and no auth token was provided; {}", e))?;
+
+    println!("Refreshing authentication token...");
+    let response = refresh_token(&existing_config.access_token).await?;
+    existing_config.access_token = response.token;
+    write_toml(&cfg_path, &existing_config).await?;
+
+    Ok(existing_config)
+}
+
+async fn fetch_latest_release(program: Program, config: &LocalConfig) -> Result<BinaryResponse> {
+    let response = reqwest::Client::new()
+        .post(format!(
+            "{API}/api/v1/releases/{}/latest",
+            match program {
+                Program::Miner => "nockbox-miner",
+                Program::Proxy => "nockbox-proxy",
+            }
+        ))
+        .bearer_auth(&config.access_token)
+        .form(&config.hardware_info)
+        .send()
+        .await?;
+
+    // Check status and include error body if failed
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unable to read error body".to_string());
+        bail!("Request failed with status {}: {}", status, error_body);
+    }
+
+    response
+        .json()
+        .await
+        .context("Failed to parse release response")
+}
+
+async fn start(
+    program: Program,
+    // TODO: Handle the target
+    target: Option<Target>,
+    auth_token: Option<String>,
+) -> Result<()> {
     let cfg_path = config_file_path(program)?;
     ensure_parent_dir(&cfg_path).await?;
 
-    if fs::try_exists(&cfg_path).await? && !force {
-        bail!(
-            "Config already exists at {}. Use --force-overwrite to replace.",
-            cfg_path.display()
-        );
-    }
+    // Step 1: Fetch a fresh access token
+    let config = refresh_or_create_config(program, auth_token, &cfg_path).await?;
 
-    match program {
-        Program::Miner => {
-            let tgt = target.expect("clap enforces required_if");
-            let jwt = match tgt {
-                Target::Direct => Some(fetch_jwt().await?),
-                Target::Proxy => None,
-            };
-            let cfg = MinerConfig {
-                program,
-                target: tgt,
-                jwt,
-            };
-            write_toml(&cfg_path, &cfg).await?;
-            println!("Wrote miner config → {}", cfg_path.display());
-        }
-        Program::Proxy => {
-            let jwt = fetch_jwt().await?;
-            let cfg = ProxyConfig { program, jwt };
-            write_toml(&cfg_path, &cfg).await?;
-            println!("Wrote proxy config → {}", cfg_path.display());
-        }
-    }
-    Ok(())
-}
+    // Step 2: Request latest binary info from backend
+    println!("Checking for latest binary version...");
+    let latest_release = fetch_latest_release(program, &config).await?;
 
-async fn launch(program: Program) -> Result<()> {
-    // 1) Ensure config exists
-    let cfg_path = config_file_path(program)?;
-    if !fs::try_exists(&cfg_path).await? {
-        bail!(
-            "Missing config at {}. Run `generate-config` first.",
-            cfg_path.display()
-        );
-    }
-
-    // 2) Get release metadata
-    let rel: ReleaseResp = reqwest::Client::new()
-        .get(format!("{API}/release"))
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await
-        .context("parsing /release")?;
-
+    // Step 3: Download the latest binary if it's different from the existing binary
     let cache_bin = cache_bin_path(program)?;
-    let cache_release = cache_release_meta_path(program)?;
-    ensure_parent_dir(&cache_bin).await?;
-    ensure_parent_dir(&cache_release).await?;
+    let cache_version = cache_version_path(program)?;
 
-    // 3) Check current version we have
-    let need_download = match fs::read_to_string(&cache_release).await.ok() {
-        Some(s) => !s.lines().next().is_some_and(|v| v.trim() == rel.version),
-        None => true,
-    };
+    ensure_parent_dir(&cache_bin).await?;
+    ensure_parent_dir(&cache_version).await?;
+
+    let cached_version = fs::read_to_string(&cache_version).await.ok();
+
+    if let Some(cached_version) = cached_version.as_ref() {
+        println!("Current installed version {}", cached_version);
+    }
+
+    let need_download = cached_version
+        .is_none_or(|cached_version| cached_version.trim() != latest_release.version.trim());
 
     if need_download {
-        let url = format!("{API}/v{}/linux/{}", rel.version, program.as_str());
+        println!(
+            "Downloading {} '{}' from '{}'",
+            program.as_str(),
+            latest_release.version,
+            latest_release.url,
+        );
+
         let bytes = reqwest::Client::new()
-            .get(url)
+            .get(&latest_release.url)
             .send()
             .await?
-            .error_for_status()?
+            .error_for_status()
+            .context("Failed to download binary")?
             .bytes()
             .await
-            .context("downloading binary")?;
+            .context("Failed to read binary data")?;
 
-        // Store release metadata (version + sha)
-        let mut f = fs::File::create(&cache_release).await?;
-        f.write_all(format!("{}\n{}\n", rel.version, rel.sha256).as_bytes())
-            .await?;
+        // Write version file
+        let mut f = fs::File::create(&cache_version).await?;
+        f.write_all(latest_release.version.as_bytes()).await?;
         f.flush().await?;
 
         // Write binary
@@ -212,25 +268,21 @@ async fn launch(program: Program) -> Result<()> {
             f.write_all(&bytes).await?;
             f.flush().await?;
         }
-        // Make it executable (Tokio set_permissions; create perms via PermissionsExt)
+
+        // Make it executable
         let perms = std::fs::Permissions::from_mode(0o755);
         fs::set_permissions(&cache_bin, perms).await?;
 
         println!(
             "Installed {} v{} to {}",
             program.as_str(),
-            rel.version,
-            cache_bin.display()
-        );
-    } else {
-        println!(
-            "Latest {} is already cached at {}",
-            program.as_str(),
+            latest_release.version,
             cache_bin.display()
         );
     }
 
-    // 4) Exec binary with --config <...>
+    // Step 4: Launch the binary
+    println!("Starting {}...", program.as_str());
     let status = Command::new(&cache_bin)
         .arg("--config")
         .arg(&cfg_path)
@@ -241,19 +293,8 @@ async fn launch(program: Program) -> Result<()> {
     if !status.success() {
         bail!("Process exited with {}", status);
     }
-    Ok(())
-}
 
-async fn fetch_jwt() -> Result<String> {
-    let JwtResp { token } = reqwest::Client::new()
-        .post(format!("{API}/API/v1/generate-jwt"))
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await
-        .context("parsing jwt")?;
-    Ok(token)
+    Ok(())
 }
 
 async fn write_toml<T: Serialize>(path: &Path, val: &T) -> Result<()> {
@@ -262,6 +303,12 @@ async fn write_toml<T: Serialize>(path: &Path, val: &T) -> Result<()> {
     f.write_all(toml.as_bytes()).await?;
     f.flush().await?;
     Ok(())
+}
+
+async fn read_toml<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T> {
+    let contents = fs::read_to_string(path).await?;
+    let val = toml::from_str(&contents)?;
+    Ok(val)
 }
 
 fn config_file_path(program: Program) -> Result<PathBuf> {
@@ -278,11 +325,11 @@ fn cache_bin_path(program: Program) -> Result<PathBuf> {
     Ok(dir.join(program.as_str()))
 }
 
-fn cache_release_meta_path(program: Program) -> Result<PathBuf> {
+fn cache_version_path(program: Program) -> Result<PathBuf> {
     let dir = dirs::cache_dir()
         .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "no cache dir"))?
         .join("nbx");
-    Ok(dir.join(format!("{}.release", program.as_str())))
+    Ok(dir.join(format!("{}.version", program.as_str())))
 }
 
 async fn ensure_parent_dir(p: &Path) -> Result<()> {
