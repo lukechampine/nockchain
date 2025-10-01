@@ -281,6 +281,7 @@ async fn start(
     let status = Command::new(&cache_bin)
         .arg("--miner-connect")
         .arg(config.pool_url)
+        .env("NBX_AUTH_JWT", config.access_token)
         .status()
         .await
         .with_context(|| format!("failed to launch {}", cache_bin.display()))?;
