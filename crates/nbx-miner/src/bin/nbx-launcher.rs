@@ -2,11 +2,10 @@ use std::io;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, bail, Context, Result};
-use clap::{Parser, ValueEnum};
+use anyhow::{bail, Context, Result};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use nbx_miner::device::get_cpu_features;
 use serde::{Deserialize, Serialize};
-use sha3::digest::typenum::private::Trim;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
@@ -35,30 +34,125 @@ enum Target {
 }
 
 #[derive(Debug, Parser)]
-#[command(color=clap::ColorChoice::Auto)]
+#[command(color = clap::ColorChoice::Auto)]
 struct Cli {
-    #[arg(value_enum)]
-    program: Program,
+    #[command(subcommand)]
+    command: Commands,
+}
 
-    /// Required when program=miner
-    #[arg(value_enum, required_if_eq("program", "miner"))]
-    target: Option<Target>,
+#[derive(Debug, Subcommand)]
+enum Commands {
+    /// Run as miner
+    #[command(subcommand)]
+    Miner(MinerCommands),
+    /// Run as proxy server
+    Proxy {
+        #[command(flatten)]
+        pool_opts: PoolOptions,
 
-    /// Authentication token (JWT)
-    #[arg(long, required_if_eq("force_overwrite", "true"))]
-    auth: Option<String>,
+        #[command(flatten)]
+        common_opts: CommonOptions,
+    },
+}
 
+#[derive(Debug, Subcommand)]
+enum MinerCommands {
+    Direct {
+        #[command(flatten)]
+        miner_opts: MinerOptions,
+
+        #[command(flatten)]
+        pool_opts: PoolOptions,
+
+        #[command(flatten)]
+        common_opts: CommonOptions,
+    },
+    Proxy {
+        /// Required proxy URL to connect through
+        proxy_url: String,
+
+        #[command(flatten)]
+        miner_opts: MinerOptions,
+
+        #[command(flatten)]
+        common_opts: CommonOptions,
+    },
+}
+
+impl Commands {
+    fn program(&self) -> Program {
+        match self {
+            Commands::Miner { .. } => Program::Miner,
+            Commands::Proxy { .. } => Program::Proxy,
+        }
+    }
+
+    fn miner_connect(&self) -> &String {
+        match self {
+            Commands::Miner(MinerCommands::Direct { pool_opts, .. }) => &pool_opts.pool_url,
+            Commands::Miner(MinerCommands::Proxy { proxy_url, .. }) => &proxy_url,
+            Commands::Proxy { pool_opts, .. } => &pool_opts.pool_url,
+        }
+    }
+
+    fn auth_token(&self) -> Option<&str> {
+        match self {
+            Commands::Miner(MinerCommands::Direct { pool_opts, .. }) => pool_opts.auth.as_deref(),
+            Commands::Miner(MinerCommands::Proxy { .. }) => None,
+            Commands::Proxy { pool_opts, .. } => pool_opts.auth.as_deref(),
+        }
+    }
+
+    fn miner_opts(&self) -> Option<&MinerOptions> {
+        match self {
+            Commands::Miner(MinerCommands::Direct { miner_opts, .. }) => Some(miner_opts),
+            Commands::Miner(MinerCommands::Proxy { miner_opts, .. }) => Some(miner_opts),
+            Commands::Proxy { .. } => None,
+        }
+    }
+
+    fn common_opts(&self) -> &CommonOptions {
+        match self {
+            Commands::Miner(MinerCommands::Direct { common_opts, .. }) => common_opts,
+            Commands::Miner(MinerCommands::Proxy { common_opts, .. }) => common_opts,
+            Commands::Proxy { common_opts, .. } => common_opts,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+struct MinerOptions {
+    #[arg(
+        long,
+        help = "Number of threads to mine with defaults to one less than the number of cpus available."
+    )]
+    pub num_threads: Option<u64>,
+}
+
+#[derive(Debug, Args)]
+struct PoolOptions {
+    /// Pool URL to connect to
     #[arg(long = "pool", default_value = "pool-proxy.nockbox.org:4344")]
     pool_url: String,
 
+    /// Authentication token (JWT)
+    #[arg(long)]
+    auth: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct CommonOptions {
     /// Overwrite existing config
     #[arg(long)]
     force_overwrite: bool,
+
+    #[arg(long)]
+    client_name: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct LocalConfig {
-    pool_url: String,
+    miner_connect: String,
     program: Program,
     access_token: String,
     hardware_info: HardwareInfo,
@@ -75,12 +169,6 @@ struct TokenResponse {
     token: String,
 }
 
-#[derive(Debug, Serialize)]
-struct BinaryRequest {
-    pub arch: String,
-    pub cpu_features: String,
-}
-
 #[derive(Debug, Deserialize)]
 struct BinaryResponse {
     version: String,
@@ -90,7 +178,7 @@ struct BinaryResponse {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    start(cli).await?;
+    start(cli.command).await?;
     Ok(())
 }
 
@@ -120,52 +208,38 @@ async fn setup_token(access_token: &str) -> Result<TokenResponse> {
         .context("Failed to parse token response")
 }
 
-async fn refresh_or_create_config(
-    pool_url: String,
-    program: Program,
-    auth_token: Option<String>,
-    cfg_path: &Path,
-) -> Result<LocalConfig> {
+async fn refresh_or_create_config(settings: &Commands, cfg_path: &Path) -> Result<LocalConfig> {
     let existing_config: Result<LocalConfig> = read_toml(cfg_path).await;
 
-    if let Ok(existing_config) = existing_config.as_ref() {
-        assert_eq!(existing_config.program, program);
-    }
+    if let Ok(mut existing_config) = existing_config {
+        println!("Refreshing authentication token...");
+        let response = refresh_token(&existing_config.access_token).await?;
+        existing_config.access_token = response.token;
+        write_toml(&cfg_path, &existing_config).await?;
 
-    if let Some(auth_token) = auth_token {
-        println!("Fetching authentication token...");
-        let response = setup_token(&auth_token).await?;
+        return Ok(existing_config);
+    };
 
-        if let Ok(mut existing_config) = existing_config {
-            existing_config.access_token = response.token;
-            write_toml(&cfg_path, &existing_config).await?;
-            return Ok(existing_config);
-        };
+    let auth_token = settings
+        .auth_token()
+        .expect("The authentication token was not set");
 
-        let config = LocalConfig {
-            pool_url,
-            program,
-            access_token: response.token,
-            // TODO: Implement CPU features
-            hardware_info: HardwareInfo {
-                arch: std::env::consts::ARCH.to_string(),
-                cpu_features: get_cpu_features(),
-            },
-        };
+    println!("Fetching authentication token...");
+    let response = setup_token(auth_token).await?;
 
-        write_toml(&cfg_path, &config).await?;
-        return Ok(config);
-    }
+    let config = LocalConfig {
+        program: settings.program(),
+        miner_connect: settings.miner_connect().to_string(),
+        access_token: response.token,
+        hardware_info: HardwareInfo {
+            arch: std::env::consts::ARCH.to_string(),
+            cpu_features: get_cpu_features(),
+        },
+    };
 
-    let mut existing_config = existing_config
-        .map_err(|e| anyhow!("Failed to get config and no auth token was provided; {}", e))?;
+    write_toml(&cfg_path, &config).await?;
 
-    println!("Refreshing authentication token...");
-    let response = refresh_token(&existing_config.access_token).await?;
-    existing_config.access_token = response.token;
-    write_toml(&cfg_path, &existing_config).await?;
-
-    Ok(existing_config)
+    Ok(config)
 }
 
 async fn fetch_latest_release(program: Program, config: &LocalConfig) -> Result<BinaryResponse> {
@@ -198,12 +272,12 @@ async fn fetch_latest_release(program: Program, config: &LocalConfig) -> Result<
         .context("Failed to parse release response")
 }
 
-async fn start(settings: Cli) -> Result<()> {
-    let cfg_path = config_file_path(settings.program)?;
+async fn start(settings: Commands) -> Result<()> {
+    let cfg_path = config_file_path(settings.program())?;
     ensure_parent_dir(&cfg_path).await?;
 
     // Preparation: Remove the existing configuration when requested
-    if settings.force_overwrite {
+    if settings.common_opts().force_overwrite {
         if cfg_path.exists() {
             println!("Removing existing configuration...");
             fs::remove_file(&cfg_path).await?;
@@ -211,18 +285,15 @@ async fn start(settings: Cli) -> Result<()> {
     }
 
     // Step 1: Fetch a fresh access token
-    let config = refresh_or_create_config(
-        settings.pool_url, settings.program, settings.auth, &cfg_path,
-    )
-    .await?;
+    let config = refresh_or_create_config(&settings, &cfg_path).await?;
 
     // Step 2: Request latest binary info from backend
     println!("Checking for latest binary version...");
-    let latest_release = fetch_latest_release(settings.program, &config).await?;
+    let latest_release = fetch_latest_release(config.program, &config).await?;
 
     // Step 3: Download the latest binary if it's different from the existing binary
-    let cache_bin = cache_bin_path(settings.program)?;
-    let cache_version = cache_version_path(settings.program)?;
+    let cache_bin = cache_bin_path(config.program)?;
+    let cache_version = cache_version_path(config.program)?;
 
     ensure_parent_dir(&cache_bin).await?;
     ensure_parent_dir(&cache_version).await?;
@@ -239,7 +310,7 @@ async fn start(settings: Cli) -> Result<()> {
     if need_download {
         println!(
             "Downloading {} '{}' from '{}'",
-            settings.program.as_str(),
+            config.program.as_str(),
             latest_release.version,
             latest_release.url,
         );
@@ -272,19 +343,34 @@ async fn start(settings: Cli) -> Result<()> {
 
         println!(
             "Installed {} v{} to {}",
-            settings.program.as_str(),
+            config.program.as_str(),
             latest_release.version,
             cache_bin.display()
         );
     }
 
     // Step 4: Launch the binary
-    println!("Starting {}...", settings.program.as_str());
+    println!("Starting {}...", config.program.as_str());
+
+    let mut args = vec![
+        "--miner-connect".to_string(),
+        config.miner_connect,
+        "--jwt-auth-client".to_string(),
+        config.access_token,
+    ];
+
+    if let Some(client_name) = settings.common_opts().client_name.as_ref() {
+        args.extend(["--client-name".to_string(), client_name.to_string()]);
+    };
+
+    if let Some(miner_settings) = settings.miner_opts() {
+        if let Some(num_threads) = miner_settings.num_threads {
+            args.extend(["--num-threads".to_string(), num_threads.to_string()]);
+        }
+    }
+
     let status = Command::new(&cache_bin)
-        .arg("--miner-connect")
-        .arg(config.pool_url)
-        .arg("--jwt-auth-client")
-        .arg(config.access_token)
+        .args(args)
         .status()
         .await
         .with_context(|| format!("failed to launch {}", cache_bin.display()))?;
