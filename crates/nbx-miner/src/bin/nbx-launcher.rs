@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use nbx_miner::device::get_cpu_features;
+use nbx_miner::device::runtime_cpu_level;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
@@ -155,13 +155,7 @@ struct LocalConfig {
     miner_connect: String,
     program: Program,
     access_token: String,
-    hardware_info: HardwareInfo,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-struct HardwareInfo {
-    arch: String,
-    cpu_features: String,
+    cpu_level: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -231,10 +225,7 @@ async fn refresh_or_create_config(settings: &Commands, cfg_path: &Path) -> Resul
         program: settings.program(),
         miner_connect: settings.miner_connect().to_string(),
         access_token: response.token,
-        hardware_info: HardwareInfo {
-            arch: std::env::consts::ARCH.to_string(),
-            cpu_features: get_cpu_features(),
-        },
+        cpu_level: runtime_cpu_level().to_string(),
     };
 
     write_toml(&cfg_path, &config).await?;
@@ -247,12 +238,14 @@ async fn fetch_latest_release(program: Program, config: &LocalConfig) -> Result<
         .post(format!(
             "{API}/api/v1/releases/{}/latest",
             match program {
-                Program::Miner => "nockbox-miner",
-                Program::Proxy => "nockbox-proxy",
-            }
+                Program::Miner => format!(
+                    "nbx-miner-{}",
+                    config.cpu_level.strip_prefix("x86_64-").unwrap_or("v2")
+                ),
+                Program::Proxy => "nbx-proxy".to_string(),
+            },
         ))
         .bearer_auth(&config.access_token)
-        .form(&config.hardware_info)
         .send()
         .await?;
 
@@ -342,7 +335,7 @@ async fn start(settings: Commands) -> Result<()> {
         fs::set_permissions(&cache_bin, perms).await?;
 
         println!(
-            "Installed {} v{} to {}",
+            "Installed {} {} to {}",
             config.program.as_str(),
             latest_release.version,
             cache_bin.display()
