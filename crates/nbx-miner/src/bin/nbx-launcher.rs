@@ -42,11 +42,13 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    #[command(subcommand)]
-    Start(Settings),
+    Start {
+        #[command(subcommand)]
+        settings: Settings,
+    },
     // Restart using the existing configuration
     Restart {
-        program: Program
+        program: Program,
     },
 }
 
@@ -62,6 +64,12 @@ enum Settings {
 
         #[command(flatten)]
         common_opts: CommonOptions,
+
+        #[arg(
+            last = true,
+            help = "Additional arguments to forward to the proxy (after --, e.g. --prometheus-bind 0.0.0.0:9000. Use --help for help)"
+        )]
+        forward: Vec<String>,
     },
 }
 
@@ -69,23 +77,29 @@ enum Settings {
 enum MinerCommands {
     Direct {
         #[command(flatten)]
-        miner_opts: MinerOptions,
-
-        #[command(flatten)]
         pool_opts: PoolOptions,
 
         #[command(flatten)]
         common_opts: CommonOptions,
+
+        #[arg(
+            last = true,
+            help = "Additional arguments to forward to miner (after --, e.g. --num-threads 4. Use --help for help)"
+        )]
+        forward: Vec<String>,
     },
     Proxy {
         /// Required proxy URL to connect through
         proxy_url: String,
 
         #[command(flatten)]
-        miner_opts: MinerOptions,
-
-        #[command(flatten)]
         common_opts: CommonOptions,
+
+        #[arg(
+            last = true,
+            help = "Additional arguments to forward to miner (after --, e.g. --num-threads 4. Use --help for help)"
+        )]
+        forward: Vec<String>,
     },
 }
 
@@ -105,19 +119,19 @@ impl Settings {
         }
     }
 
+    fn needs_token(&self) -> bool {
+        match self {
+            Self::Miner(MinerCommands::Direct { pool_opts, .. }) => true,
+            Self::Miner(MinerCommands::Proxy { .. }) => false,
+            Self::Proxy { pool_opts, .. } => true,
+        }
+    }
+
     fn auth_token(&self) -> Option<&str> {
         match self {
             Self::Miner(MinerCommands::Direct { pool_opts, .. }) => pool_opts.auth.as_deref(),
             Self::Miner(MinerCommands::Proxy { .. }) => None,
             Self::Proxy { pool_opts, .. } => pool_opts.auth.as_deref(),
-        }
-    }
-
-    fn miner_opts(&self) -> Option<&MinerOptions> {
-        match self {
-            Self::Miner(MinerCommands::Direct { miner_opts, .. }) => Some(miner_opts),
-            Self::Miner(MinerCommands::Proxy { miner_opts, .. }) => Some(miner_opts),
-            Self::Proxy { .. } => None,
         }
     }
 
@@ -128,15 +142,14 @@ impl Settings {
             Self::Proxy { common_opts, .. } => common_opts,
         }
     }
-}
 
-#[derive(Debug, Args, Serialize, Deserialize, PartialEq, Clone)]
-struct MinerOptions {
-    #[arg(
-        long,
-        help = "Number of threads to mine with defaults to one less than the number of cpus available."
-    )]
-    pub num_threads: Option<u64>,
+    fn forward_args(&self) -> &Vec<String> {
+        match self {
+            Self::Miner(MinerCommands::Direct { forward, .. }) => forward,
+            Self::Miner(MinerCommands::Proxy { forward, .. }) => forward,
+            Self::Proxy { forward, .. } => forward,
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -164,11 +177,12 @@ struct CommonOptions {
 struct LocalConfig {
     miner_connect: String,
     program: Program,
+    needs_token: bool,
     access_token: String,
     cpu_level: String,
 
     common_options: CommonOptions,
-    miner_options: Option<MinerOptions>,
+    forward_args: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -187,8 +201,8 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Start(settings) => start(settings).await?,
-        Commands::Restart{program} => restart(program).await?,
+        Commands::Start { settings } => start(settings).await?,
+        Commands::Restart { program } => restart(program).await?,
     };
 
     Ok(())
@@ -223,29 +237,29 @@ async fn setup_token(access_token: &str) -> Result<TokenResponse> {
 async fn refresh_or_create_config(settings: &Settings, cfg_path: &Path) -> Result<LocalConfig> {
     let existing_config: Result<LocalConfig> = read_toml(cfg_path).await;
 
-    if let Ok(mut existing_config) = existing_config {
+    let access_token = if let Ok(existing_config) = existing_config {
         println!("Refreshing authentication token...");
         let response = refresh_token(&existing_config.access_token).await?;
-        existing_config.access_token = response.token;
-        write_toml(&cfg_path, &existing_config).await?;
+        response.token
+    } else {
+        let Some(auth_token) = settings.auth_token() else {
+            eprintln!("The authentication token was not set (--auth). This is needed for binary updates and direct connections.");
+            std::process::exit(1);
+        };
 
-        return Ok(existing_config);
+        println!("Fetching authentication token...");
+        let response = setup_token(auth_token).await?;
+        response.token
     };
-
-    let auth_token = settings
-        .auth_token()
-        .expect("The authentication token was not set");
-
-    println!("Fetching authentication token...");
-    let response = setup_token(auth_token).await?;
 
     let config = LocalConfig {
         program: settings.program(),
         miner_connect: settings.miner_connect().to_string(),
-        access_token: response.token,
+        needs_token: settings.needs_token(),
+        access_token,
         cpu_level: runtime_cpu_level().to_string(),
         common_options: settings.common_opts().clone(),
-        miner_options: settings.miner_opts().cloned(),
+        forward_args: settings.forward_args().clone(),
     };
 
     write_toml(&cfg_path, &config).await?;
@@ -289,7 +303,10 @@ async fn restart(program: Program) -> Result<()> {
     let cfg_path = config_file_path(program)?;
     ensure_parent_dir(&cfg_path).await?;
 
-    let mut existing_config: LocalConfig = read_toml(&cfg_path).await.expect("Existing configuration not found");
+    let Ok(mut existing_config) = read_toml::<LocalConfig>(&cfg_path).await else {
+        eprintln!("Existing configuration not found");
+        std::process::exit(1);
+    };
 
     // Step 1: Fetch a fresh access token
     println!("Refreshing authentication token...");
@@ -340,8 +357,10 @@ async fn execute(config: LocalConfig) -> Result<()> {
         println!("Current installed version {}", cached_version);
     }
 
-    let need_download = cached_version
-        .is_none_or(|cached_version| cached_version.trim() != latest_release.version.trim());
+    let target_release = format!("{} {}", latest_release.version.trim(), config.cpu_level);
+
+    let need_download =
+        cached_version.is_none_or(|cached_version| cached_version.trim() != target_release);
 
     if need_download {
         println!(
@@ -361,10 +380,8 @@ async fn execute(config: LocalConfig) -> Result<()> {
             .await
             .context("Failed to read binary data")?;
 
-        // Write version file
-        let mut f = fs::File::create(&cache_version).await?;
-        f.write_all(latest_release.version.as_bytes()).await?;
-        f.flush().await?;
+        // Remove version file
+        let _ = fs::remove_file(&cache_version).await;
 
         // Write binary
         {
@@ -377,6 +394,11 @@ async fn execute(config: LocalConfig) -> Result<()> {
         let perms = std::fs::Permissions::from_mode(0o755);
         fs::set_permissions(&cache_bin, perms).await?;
 
+        // Write version file
+        let mut f = fs::File::create(&cache_version).await?;
+        f.write_all(target_release.as_bytes()).await?;
+        f.flush().await?;
+
         println!(
             "Installed {} {} to {}",
             config.program.as_str(),
@@ -388,25 +410,22 @@ async fn execute(config: LocalConfig) -> Result<()> {
     // Step 4: Launch the binary
     println!("Starting {}...", config.program.as_str());
 
-    let mut args = vec![
-        "--miner-connect".to_string(),
-        config.miner_connect,
-        "--jwt-auth-client".to_string(),
-        config.access_token,
-    ];
+    let mut args = vec!["--miner-connect".to_string(), config.miner_connect];
+
+    let mut envs = vec![];
+
+    if config.needs_token {
+        envs.push(("NBX_AUTH_JWT", config.access_token));
+    }
 
     if let Some(client_name) = config.common_options.client_name.as_ref() {
         args.extend(["--client-name".to_string(), client_name.to_string()]);
     };
 
-    if let Some(miner_settings) = config.miner_options {
-        if let Some(num_threads) = miner_settings.num_threads {
-            args.extend(["--num-threads".to_string(), num_threads.to_string()]);
-        }
-    }
-
     let status = Command::new(&cache_bin)
         .args(args)
+        .args(&config.forward_args)
+        .envs(envs)
         .status()
         .await
         .with_context(|| format!("failed to launch {}", cache_bin.display()))?;

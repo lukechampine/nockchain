@@ -108,7 +108,7 @@ let
     inherit (craneLib.crateNameFromCargoToml { src = ../crates/nbx-miner; }) version;
     pname = "nbx-miner";
     CARGO_PROFILE = profile;
-    cargoExtraArgs = (ica.cargoExtraArgs or "") + " -p nbx-miner --bin nbx-miner --features nbx-miner/jemalloc,nbx-miner/client ${extraArgs}";
+    cargoExtraArgs = (ica.cargoExtraArgs or "") + " -p nbx-miner --bin nbx-miner --features nbx-miner/jemalloc,nbx-miner/client,nbx-miner/jwt-auth-client ${extraArgs}";
     buildInputs = [ hoonc.hoonc ];
     preBuild = "mkdir -p assets && cp ${jam-pkg.miner-jam.out} './assets/miner.jam'";
   });
@@ -121,6 +121,14 @@ let
     cargoExtraArgs = (ica.cargoExtraArgs or "") + " -p nbx-miner --bin nbx-proxy --features nbx-miner/jemalloc,nbx-miner/prom-exporter,nbx-miner/jwt-auth-client ${extraArgs}";
     buildInputs = [ hoonc.hoonc ];
     preBuild = "mkdir -p assets && cp ${jam-pkg.verifier-jam.out} './assets/verifier.jam'";
+  });
+
+  nbx-launcher-base = profile: extraArgs: ica: craneLib.buildPackage (
+  ica // {
+    inherit (craneLib.crateNameFromCargoToml { src = ../crates/nbx-miner; }) version;
+    pname = "nbx-launcher";
+    CARGO_PROFILE = profile;
+    cargoExtraArgs = (ica.cargoExtraArgs or "") + " -p nbx-miner --bin nbx-launcher --features nbx-miner/jemalloc,nbx-miner/launcher ${extraArgs}";
   });
 
   profile-v = v: if lib.strings.hasInfix "x86_64-" pkgs.system then "release-v${v}" else throw "release-v${v} is only supported on x86_64 targets!";
@@ -141,7 +149,11 @@ let
   nbx-miner = profile: {
     prod = nbx-miner-base profile "${prodFeatures}" individualCrateArgsImmediateAbort;
     prod-gpu = nbx-miner-base profile "${prodFeatures} ${gpuFeatures}" individualCrateArgsImmediateAbort;
-    internal = nbx-miner-base profile "${gpuFeatures} --features nbx-miner/jwt-auth-client,nbx-miner/prom-exporter,nbx-miner/instrument,nbx-miner/slog" individualCrateArgsAbort;
+    internal = nbx-miner-base profile "${gpuFeatures} --features nbx-miner/prom-exporter,nbx-miner/instrument,nbx-miner/slog" individualCrateArgsAbort;
+  };
+
+  nbx-launcher = profile: {
+    prod = nbx-launcher-base profile "${prodFeatures}" individualCrateArgsImmediateAbort;
   };
 
   bddisasm = stdenv.mkDerivation {
@@ -292,6 +304,7 @@ in
   nockchain-jamfiles = jam-pkg;
 
   nbx-publish = lib.attrsets.mapAttrs (k: v: packageUp v.prod) {
+    nbx-launcher = nbx-launcher profile-v2;
     nbx-proxy = nbx-proxy profile-v2;
     nbx-miner-v2 = nbx-miner profile-v2;
     nbx-miner-v3 = nbx-miner profile-v3;
