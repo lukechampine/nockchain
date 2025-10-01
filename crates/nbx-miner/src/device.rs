@@ -188,6 +188,6 @@ fn hwid(key: &str, dev: &DeviceInfo) -> Arc<str> {
         state.update(cpu);
     }
     let mut ret = format!("{:x}", state.finalize());
-    ret.truncate(NAME_MAX_LENGTH);
+    ret.truncate(core::cmp::min(NAME_MAX_LENGTH, 8));
     ret.into()
 }
