@@ -42,6 +42,16 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    #[command(subcommand)]
+    Start(Settings),
+    // Restart using the existing configuration
+    Restart {
+        program: Program
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum Settings {
     /// Run as miner
     #[command(subcommand)]
     Miner(MinerCommands),
@@ -79,48 +89,48 @@ enum MinerCommands {
     },
 }
 
-impl Commands {
+impl Settings {
     fn program(&self) -> Program {
         match self {
-            Commands::Miner { .. } => Program::Miner,
-            Commands::Proxy { .. } => Program::Proxy,
+            Self::Miner { .. } => Program::Miner,
+            Self::Proxy { .. } => Program::Proxy,
         }
     }
 
     fn miner_connect(&self) -> &String {
         match self {
-            Commands::Miner(MinerCommands::Direct { pool_opts, .. }) => &pool_opts.pool_url,
-            Commands::Miner(MinerCommands::Proxy { proxy_url, .. }) => &proxy_url,
-            Commands::Proxy { pool_opts, .. } => &pool_opts.pool_url,
+            Self::Miner(MinerCommands::Direct { pool_opts, .. }) => &pool_opts.pool_url,
+            Self::Miner(MinerCommands::Proxy { proxy_url, .. }) => &proxy_url,
+            Self::Proxy { pool_opts, .. } => &pool_opts.pool_url,
         }
     }
 
     fn auth_token(&self) -> Option<&str> {
         match self {
-            Commands::Miner(MinerCommands::Direct { pool_opts, .. }) => pool_opts.auth.as_deref(),
-            Commands::Miner(MinerCommands::Proxy { .. }) => None,
-            Commands::Proxy { pool_opts, .. } => pool_opts.auth.as_deref(),
+            Self::Miner(MinerCommands::Direct { pool_opts, .. }) => pool_opts.auth.as_deref(),
+            Self::Miner(MinerCommands::Proxy { .. }) => None,
+            Self::Proxy { pool_opts, .. } => pool_opts.auth.as_deref(),
         }
     }
 
     fn miner_opts(&self) -> Option<&MinerOptions> {
         match self {
-            Commands::Miner(MinerCommands::Direct { miner_opts, .. }) => Some(miner_opts),
-            Commands::Miner(MinerCommands::Proxy { miner_opts, .. }) => Some(miner_opts),
-            Commands::Proxy { .. } => None,
+            Self::Miner(MinerCommands::Direct { miner_opts, .. }) => Some(miner_opts),
+            Self::Miner(MinerCommands::Proxy { miner_opts, .. }) => Some(miner_opts),
+            Self::Proxy { .. } => None,
         }
     }
 
     fn common_opts(&self) -> &CommonOptions {
         match self {
-            Commands::Miner(MinerCommands::Direct { common_opts, .. }) => common_opts,
-            Commands::Miner(MinerCommands::Proxy { common_opts, .. }) => common_opts,
-            Commands::Proxy { common_opts, .. } => common_opts,
+            Self::Miner(MinerCommands::Direct { common_opts, .. }) => common_opts,
+            Self::Miner(MinerCommands::Proxy { common_opts, .. }) => common_opts,
+            Self::Proxy { common_opts, .. } => common_opts,
         }
     }
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Serialize, Deserialize, PartialEq, Clone)]
 struct MinerOptions {
     #[arg(
         long,
@@ -140,7 +150,7 @@ struct PoolOptions {
     auth: Option<String>,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Serialize, Deserialize, PartialEq, Clone)]
 struct CommonOptions {
     /// Overwrite existing config
     #[arg(long)]
@@ -156,6 +166,9 @@ struct LocalConfig {
     program: Program,
     access_token: String,
     cpu_level: String,
+
+    common_options: CommonOptions,
+    miner_options: Option<MinerOptions>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -172,7 +185,12 @@ struct BinaryResponse {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    start(cli.command).await?;
+
+    match cli.command {
+        Commands::Start(settings) => start(settings).await?,
+        Commands::Restart{program} => restart(program).await?,
+    };
+
     Ok(())
 }
 
@@ -202,7 +220,7 @@ async fn setup_token(access_token: &str) -> Result<TokenResponse> {
         .context("Failed to parse token response")
 }
 
-async fn refresh_or_create_config(settings: &Commands, cfg_path: &Path) -> Result<LocalConfig> {
+async fn refresh_or_create_config(settings: &Settings, cfg_path: &Path) -> Result<LocalConfig> {
     let existing_config: Result<LocalConfig> = read_toml(cfg_path).await;
 
     if let Ok(mut existing_config) = existing_config {
@@ -226,6 +244,8 @@ async fn refresh_or_create_config(settings: &Commands, cfg_path: &Path) -> Resul
         miner_connect: settings.miner_connect().to_string(),
         access_token: response.token,
         cpu_level: runtime_cpu_level().to_string(),
+        common_options: settings.common_opts().clone(),
+        miner_options: settings.miner_opts().cloned(),
     };
 
     write_toml(&cfg_path, &config).await?;
@@ -265,7 +285,24 @@ async fn fetch_latest_release(program: Program, config: &LocalConfig) -> Result<
         .context("Failed to parse release response")
 }
 
-async fn start(settings: Commands) -> Result<()> {
+async fn restart(program: Program) -> Result<()> {
+    let cfg_path = config_file_path(program)?;
+    ensure_parent_dir(&cfg_path).await?;
+
+    let mut existing_config: LocalConfig = read_toml(&cfg_path).await.expect("Existing configuration not found");
+
+    // Step 1: Fetch a fresh access token
+    println!("Refreshing authentication token...");
+    let response = refresh_token(&existing_config.access_token).await?;
+    existing_config.access_token = response.token;
+    write_toml(&cfg_path, &existing_config).await?;
+
+    execute(existing_config).await?;
+
+    Ok(())
+}
+
+async fn start(settings: Settings) -> Result<()> {
     let cfg_path = config_file_path(settings.program())?;
     ensure_parent_dir(&cfg_path).await?;
 
@@ -280,6 +317,12 @@ async fn start(settings: Commands) -> Result<()> {
     // Step 1: Fetch a fresh access token
     let config = refresh_or_create_config(&settings, &cfg_path).await?;
 
+    execute(config).await?;
+
+    Ok(())
+}
+
+async fn execute(config: LocalConfig) -> Result<()> {
     // Step 2: Request latest binary info from backend
     println!("Checking for latest binary version...");
     let latest_release = fetch_latest_release(config.program, &config).await?;
@@ -352,11 +395,11 @@ async fn start(settings: Commands) -> Result<()> {
         config.access_token,
     ];
 
-    if let Some(client_name) = settings.common_opts().client_name.as_ref() {
+    if let Some(client_name) = config.common_options.client_name.as_ref() {
         args.extend(["--client-name".to_string(), client_name.to_string()]);
     };
 
-    if let Some(miner_settings) = settings.miner_opts() {
+    if let Some(miner_settings) = config.miner_options {
         if let Some(num_threads) = miner_settings.num_threads {
             args.extend(["--num-threads".to_string(), num_threads.to_string()]);
         }
