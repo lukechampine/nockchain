@@ -3,7 +3,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Parser, ValueEnum};
 use serde::{Deserialize, Serialize};
 use sha3::digest::typenum::private::Trim;
 use tokio::fs;
@@ -36,33 +36,28 @@ enum Target {
 #[derive(Debug, Parser)]
 #[command(color=clap::ColorChoice::Auto)]
 struct Cli {
-    #[command(subcommand)]
-    cmd: Cmd,
-}
+    #[arg(value_enum)]
+    program: Program,
 
-#[derive(Debug, Subcommand)]
-enum Cmd {
-    /// Start the miner or proxy with authentication
-    Start {
-        #[arg(value_enum)]
-        program: Program,
+    /// Required when program=miner
+    #[arg(value_enum, required_if_eq("program", "miner"))]
+    target: Option<Target>,
 
-        /// Required when program=miner
-        #[arg(value_enum, required_if_eq("program", "miner"))]
-        target: Option<Target>,
+    /// Authentication token (JWT)
+    #[arg(long, required_if_eq("force_overwrite", "true"))]
+    auth: Option<String>,
 
-        /// Authentication token (JWT)
-        #[arg(long)]
-        auth: Option<String>,
+    #[arg(long = "pool", default_value = "pool-proxy.nockbox.org:4344")]
+    pool_url: String,
 
-        /// Overwrite existing config
-        #[arg(long)]
-        force_overwrite: bool,
-    },
+    /// Overwrite existing config
+    #[arg(long)]
+    force_overwrite: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct LocalConfig {
+    pool_url: String,
     program: Program,
     access_token: String,
     hardware_info: HardwareInfo,
@@ -94,14 +89,7 @@ struct BinaryResponse {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    match cli.cmd {
-        Cmd::Start {
-            program,
-            target,
-            auth,
-            ..
-        } => start(program, target, auth).await?,
-    }
+    start(cli).await?;
     Ok(())
 }
 
@@ -132,6 +120,7 @@ async fn setup_token(access_token: &str) -> Result<TokenResponse> {
 }
 
 async fn refresh_or_create_config(
+    pool_url: String,
     program: Program,
     auth_token: Option<String>,
     cfg_path: &Path,
@@ -153,6 +142,7 @@ async fn refresh_or_create_config(
         };
 
         let config = LocalConfig {
+            pool_url,
             program,
             access_token: response.token,
             // TODO: Implement CPU features
@@ -208,24 +198,29 @@ async fn fetch_latest_release(program: Program, config: &LocalConfig) -> Result<
 }
 
 async fn start(
-    program: Program,
-    // TODO: Handle the target
-    target: Option<Target>,
-    auth_token: Option<String>,
+    settings: Cli
 ) -> Result<()> {
-    let cfg_path = config_file_path(program)?;
+    let cfg_path = config_file_path(settings.program)?;
     ensure_parent_dir(&cfg_path).await?;
 
+    // Preparation: Remove the existing configuration when requested
+    if settings.force_overwrite {
+        if cfg_path.exists() {
+            println!("Removing existing configuration...");
+            fs::remove_file(&cfg_path).await?;
+        }
+    }
+
     // Step 1: Fetch a fresh access token
-    let config = refresh_or_create_config(program, auth_token, &cfg_path).await?;
+    let config = refresh_or_create_config(settings.pool_url, settings.program, settings.auth, &cfg_path).await?;
 
     // Step 2: Request latest binary info from backend
     println!("Checking for latest binary version...");
-    let latest_release = fetch_latest_release(program, &config).await?;
+    let latest_release = fetch_latest_release(settings.program, &config).await?;
 
     // Step 3: Download the latest binary if it's different from the existing binary
-    let cache_bin = cache_bin_path(program)?;
-    let cache_version = cache_version_path(program)?;
+    let cache_bin = cache_bin_path(settings.program)?;
+    let cache_version = cache_version_path(settings.program)?;
 
     ensure_parent_dir(&cache_bin).await?;
     ensure_parent_dir(&cache_version).await?;
@@ -242,7 +237,7 @@ async fn start(
     if need_download {
         println!(
             "Downloading {} '{}' from '{}'",
-            program.as_str(),
+            settings.program.as_str(),
             latest_release.version,
             latest_release.url,
         );
@@ -275,17 +270,17 @@ async fn start(
 
         println!(
             "Installed {} v{} to {}",
-            program.as_str(),
+            settings.program.as_str(),
             latest_release.version,
             cache_bin.display()
         );
     }
 
     // Step 4: Launch the binary
-    println!("Starting {}...", program.as_str());
+    println!("Starting {}...", settings.program.as_str());
     let status = Command::new(&cache_bin)
-        .arg("--config")
-        .arg(&cfg_path)
+        .arg("--miner-connect")
+        .arg(config.pool_url)
         .status()
         .await
         .with_context(|| format!("failed to launch {}", cache_bin.display()))?;
