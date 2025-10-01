@@ -17,6 +17,104 @@ macro_rules! cfg_feature {
     };
 }
 
+#[cfg(target_arch = "x86_64")]
+pub fn get_cpu_features() -> String {
+    let mut features = Vec::new();
+
+    // SSE family
+    if is_x86_feature_detected!("sse") {
+        features.push("sse");
+    }
+    if is_x86_feature_detected!("sse2") {
+        features.push("sse2");
+    }
+    if is_x86_feature_detected!("sse3") {
+        features.push("sse3");
+    }
+    if is_x86_feature_detected!("ssse3") {
+        features.push("ssse3");
+    }
+    if is_x86_feature_detected!("sse4.1") {
+        features.push("sse4.1");
+    }
+    if is_x86_feature_detected!("sse4.2") {
+        features.push("sse4.2");
+    }
+
+    // x86_64-v2 features
+    if is_x86_feature_detected!("popcnt") {
+        features.push("popcnt");
+    }
+
+    // x86_64-v3 features
+    if is_x86_feature_detected!("avx") {
+        features.push("avx");
+    }
+    if is_x86_feature_detected!("avx2") {
+        features.push("avx2");
+    }
+    if is_x86_feature_detected!("bmi1") {
+        features.push("bmi1");
+    }
+    if is_x86_feature_detected!("bmi2") {
+        features.push("bmi2");
+    }
+    if is_x86_feature_detected!("f16c") {
+        features.push("f16c");
+    }
+    if is_x86_feature_detected!("fma") {
+        features.push("fma");
+    }
+    if is_x86_feature_detected!("lzcnt") {
+        features.push("lzcnt");
+    }
+    if is_x86_feature_detected!("movbe") {
+        features.push("movbe");
+    }
+    // Note: xsave detection not available via is_x86_feature_detected!
+
+    // x86_64-v4 features (AVX-512)
+    if is_x86_feature_detected!("avx512f") {
+        features.push("avx512f");
+    }
+    if is_x86_feature_detected!("avx512cd") {
+        features.push("avx512cd");
+    }
+    if is_x86_feature_detected!("avx512dq") {
+        features.push("avx512dq");
+    }
+    if is_x86_feature_detected!("avx512bw") {
+        features.push("avx512bw");
+    }
+    if is_x86_feature_detected!("avx512vl") {
+        features.push("avx512vl");
+    }
+
+    // Additional useful features
+    if is_x86_feature_detected!("aes") {
+        features.push("aes");
+    }
+    if is_x86_feature_detected!("pclmulqdq") {
+        features.push("pclmulqdq");
+    }
+    if is_x86_feature_detected!("rdrand") {
+        features.push("rdrand");
+    }
+    if is_x86_feature_detected!("rdseed") {
+        features.push("rdseed");
+    }
+    if is_x86_feature_detected!("sha") {
+        features.push("sha");
+    }
+
+    features.join(",")
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+pub fn get_cpu_features() -> String {
+    String::new()
+}
+
 #[cfg(target_arch = "aarch64")]
 macro_rules! cpu_arch {
     ($feature:ident) => {

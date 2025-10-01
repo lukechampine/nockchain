@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, ValueEnum};
+use nbx_miner::device::get_cpu_features;
 use serde::{Deserialize, Serialize};
 use sha3::digest::typenum::private::Trim;
 use tokio::fs;
@@ -148,7 +149,7 @@ async fn refresh_or_create_config(
             // TODO: Implement CPU features
             hardware_info: HardwareInfo {
                 arch: std::env::consts::ARCH.to_string(),
-                cpu_features: "".to_string(),
+                cpu_features: get_cpu_features(),
             },
         };
 
@@ -197,9 +198,7 @@ async fn fetch_latest_release(program: Program, config: &LocalConfig) -> Result<
         .context("Failed to parse release response")
 }
 
-async fn start(
-    settings: Cli
-) -> Result<()> {
+async fn start(settings: Cli) -> Result<()> {
     let cfg_path = config_file_path(settings.program)?;
     ensure_parent_dir(&cfg_path).await?;
 
@@ -212,7 +211,10 @@ async fn start(
     }
 
     // Step 1: Fetch a fresh access token
-    let config = refresh_or_create_config(settings.pool_url, settings.program, settings.auth, &cfg_path).await?;
+    let config = refresh_or_create_config(
+        settings.pool_url, settings.program, settings.auth, &cfg_path,
+    )
+    .await?;
 
     // Step 2: Request latest binary info from backend
     println!("Checking for latest binary version...");
