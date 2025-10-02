@@ -10,6 +10,7 @@ use sysinfo::{MemoryRefreshKind, System};
 use crate::proto::NAME_MAX_LENGTH;
 
 const LOG_TARGET: &str = "nbx::device";
+pub const RANDOMNESS_ENV: &str = "NBX_DEVICE_RANDOMNESS";
 
 macro_rules! cfg_feature {
     ($feature:expr) => {
@@ -182,6 +183,10 @@ fn machine_id() -> Option<String> {
 fn hwid(key: &str, dev: &DeviceInfo) -> Arc<str> {
     let mut state = Sha3_256::new();
     state.update(&key);
+    if let Ok(rnd) = std::env::var(RANDOMNESS_ENV) {
+        state.update(&rnd);
+    }
+    state.update(&dev.hostname.as_deref().unwrap_or_default());
     state.update(&machine_id().unwrap());
     state.update(&dev.os_version);
     for cpu in &dev.cpu_models {

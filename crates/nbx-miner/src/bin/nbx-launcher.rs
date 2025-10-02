@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use nbx_miner::device::runtime_cpu_level;
+use jsonwebtoken::{DecodingKey, Validation};
+use nbx_miner::device::{runtime_cpu_level, RANDOMNESS_ENV};
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
@@ -121,17 +122,17 @@ impl Settings {
 
     fn needs_token(&self) -> bool {
         match self {
-            Self::Miner(MinerCommands::Direct { pool_opts, .. }) => true,
+            Self::Miner(MinerCommands::Direct { .. }) => true,
             Self::Miner(MinerCommands::Proxy { .. }) => false,
-            Self::Proxy { pool_opts, .. } => true,
+            Self::Proxy { .. } => true,
         }
     }
 
     fn auth_token(&self) -> Option<&str> {
         match self {
-            Self::Miner(MinerCommands::Direct { pool_opts, .. }) => pool_opts.auth.as_deref(),
-            Self::Miner(MinerCommands::Proxy { .. }) => None,
-            Self::Proxy { pool_opts, .. } => pool_opts.auth.as_deref(),
+            Self::Miner(MinerCommands::Direct { common_opts, .. }) => common_opts.auth.as_deref(),
+            Self::Miner(MinerCommands::Proxy { common_opts, .. }) => common_opts.auth.as_deref(),
+            Self::Proxy { common_opts, .. } => common_opts.auth.as_deref(),
         }
     }
 
@@ -157,20 +158,19 @@ struct PoolOptions {
     /// Pool URL to connect to
     #[arg(long = "pool", default_value = "pool-proxy.nockbox.org:4344")]
     pool_url: String,
+}
 
+#[derive(Debug, Args, Serialize, Deserialize, PartialEq, Clone)]
+struct CommonOptions {
     /// Authentication token (JWT)
     #[arg(long)]
     auth: Option<String>,
 }
 
-#[derive(Debug, Args, Serialize, Deserialize, PartialEq, Clone)]
-struct CommonOptions {
-    /// Overwrite existing config
-    #[arg(long)]
-    force_overwrite: bool,
-
-    #[arg(long)]
-    client_name: Option<String>,
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct SharedConfig {
+    access_token: String,
+    randomness: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -178,16 +178,17 @@ struct LocalConfig {
     miner_connect: String,
     program: Program,
     needs_token: bool,
-    access_token: String,
-    cpu_level: String,
-
-    common_options: CommonOptions,
     forward_args: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct TokenResponse {
     token: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct Claims {
+    iat: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -209,6 +210,24 @@ async fn main() -> Result<()> {
 }
 
 async fn refresh_token(access_token: &str) -> Result<TokenResponse> {
+    let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
+    validation.insecure_disable_signature_validation();
+    validation.validate_aud = false;
+    validation.validate_nbf = false;
+    validation.validate_exp = false;
+
+    match jsonwebtoken::decode::<Claims>(access_token, &DecodingKey::from_secret(&[]), &validation)
+    {
+        Ok(c) if jsonwebtoken::get_current_timestamp().saturating_sub(c.claims.iat) < 60 => {
+            return Ok(TokenResponse {
+                token: access_token.into(),
+            });
+        }
+        _ => {
+            println!("Refreshing authentication token...");
+        }
+    }
+
     reqwest::Client::new()
         .post(format!("{API}/api/v1/credentials/refresh"))
         .bearer_auth(access_token)
@@ -234,31 +253,47 @@ async fn setup_token(access_token: &str) -> Result<TokenResponse> {
         .context("Failed to parse token response")
 }
 
-async fn refresh_or_create_config(settings: &Settings, cfg_path: &Path) -> Result<LocalConfig> {
-    let existing_config: Result<LocalConfig> = read_toml(cfg_path).await;
+async fn refresh_or_create_config(settings: &Settings) -> Result<SharedConfig> {
+    let cfg_path = shared_config_file_path()?;
+    let existing_config: Result<SharedConfig> = read_toml(&cfg_path).await;
 
-    let access_token = if let Ok(existing_config) = existing_config {
-        println!("Refreshing authentication token...");
+    let access_token = if let Some(auth_token) = settings.auth_token() {
+        println!("Fetching new authentication token (remove --auth to skip)");
+        let response = setup_token(auth_token).await?;
+        response.token
+    } else if let Ok(ref existing_config) = existing_config {
         let response = refresh_token(&existing_config.access_token).await?;
         response.token
     } else {
-        let Some(auth_token) = settings.auth_token() else {
-            eprintln!("The authentication token was not set (--auth). This is needed for binary updates and direct connections.");
-            std::process::exit(1);
-        };
-
-        println!("Fetching authentication token...");
-        let response = setup_token(auth_token).await?;
-        response.token
+        eprintln!("The authentication token was not set (--auth), and no previous token saved. This is needed for binary updates and direct connections.");
+        std::process::exit(1);
     };
+
+    let config = if let Ok(cfg) = existing_config {
+        SharedConfig {
+            access_token,
+            ..cfg
+        }
+    } else {
+        SharedConfig {
+            access_token,
+            randomness: rand::random::<u64>().to_string(),
+        }
+    };
+
+    write_toml(&cfg_path, &config).await?;
+
+    Ok(config)
+}
+
+async fn create_config(settings: &Settings) -> Result<LocalConfig> {
+    let cfg_path = config_file_path(settings.program())?;
+    ensure_parent_dir(&cfg_path).await?;
 
     let config = LocalConfig {
         program: settings.program(),
         miner_connect: settings.miner_connect().to_string(),
         needs_token: settings.needs_token(),
-        access_token,
-        cpu_level: runtime_cpu_level().to_string(),
-        common_options: settings.common_opts().clone(),
         forward_args: settings.forward_args().clone(),
     };
 
@@ -267,14 +302,14 @@ async fn refresh_or_create_config(settings: &Settings, cfg_path: &Path) -> Resul
     Ok(config)
 }
 
-async fn fetch_latest_release(program: Program, config: &LocalConfig) -> Result<BinaryResponse> {
+async fn fetch_latest_release(program: Program, config: &SharedConfig) -> Result<BinaryResponse> {
     let response = reqwest::Client::new()
         .post(format!(
             "{API}/api/v1/releases/{}/latest",
             match program {
                 Program::Miner => format!(
                     "nbx-miner-{}",
-                    config.cpu_level.strip_prefix("x86_64-").unwrap_or("v2")
+                    runtime_cpu_level().strip_prefix("x86_64-").unwrap_or("v2")
                 ),
                 Program::Proxy => "nbx-proxy".to_string(),
             },
@@ -301,48 +336,42 @@ async fn fetch_latest_release(program: Program, config: &LocalConfig) -> Result<
 
 async fn restart(program: Program) -> Result<()> {
     let cfg_path = config_file_path(program)?;
+    let shared_cfg_path = shared_config_file_path()?;
     ensure_parent_dir(&cfg_path).await?;
 
-    let Ok(mut existing_config) = read_toml::<LocalConfig>(&cfg_path).await else {
-        eprintln!("Existing configuration not found");
+    let Ok(local_config) = read_toml::<LocalConfig>(&cfg_path).await else {
+        eprintln!("Existing {} configuration not found", program.as_str());
         std::process::exit(1);
     };
 
-    // Step 1: Fetch a fresh access token
-    println!("Refreshing authentication token...");
-    let response = refresh_token(&existing_config.access_token).await?;
-    existing_config.access_token = response.token;
-    write_toml(&cfg_path, &existing_config).await?;
+    let Ok(mut shared_config) = read_toml::<SharedConfig>(&shared_cfg_path).await else {
+        eprintln!("Existing shared configuration not found");
+        std::process::exit(1);
+    };
 
-    execute(existing_config).await?;
+    let response = refresh_token(&shared_config.access_token).await?;
+    shared_config.access_token = response.token;
+    write_toml(&shared_cfg_path, &shared_config).await?;
+
+    execute(shared_config, local_config).await?;
 
     Ok(())
 }
 
 async fn start(settings: Settings) -> Result<()> {
-    let cfg_path = config_file_path(settings.program())?;
-    ensure_parent_dir(&cfg_path).await?;
-
-    // Preparation: Remove the existing configuration when requested
-    if settings.common_opts().force_overwrite {
-        if cfg_path.exists() {
-            println!("Removing existing configuration...");
-            fs::remove_file(&cfg_path).await?;
-        }
-    }
-
     // Step 1: Fetch a fresh access token
-    let config = refresh_or_create_config(&settings, &cfg_path).await?;
+    let shared_config = refresh_or_create_config(&settings).await?;
+    let config = create_config(&settings).await?;
 
-    execute(config).await?;
+    execute(shared_config, config).await?;
 
     Ok(())
 }
 
-async fn execute(config: LocalConfig) -> Result<()> {
+async fn execute(shared_config: SharedConfig, config: LocalConfig) -> Result<()> {
     // Step 2: Request latest binary info from backend
     println!("Checking for latest binary version...");
-    let latest_release = fetch_latest_release(config.program, &config).await?;
+    let latest_release = fetch_latest_release(config.program, &shared_config).await?;
 
     // Step 3: Download the latest binary if it's different from the existing binary
     let cache_bin = cache_bin_path(config.program)?;
@@ -357,7 +386,7 @@ async fn execute(config: LocalConfig) -> Result<()> {
         println!("Current installed version {}", cached_version);
     }
 
-    let target_release = format!("{} {}", latest_release.version.trim(), config.cpu_level);
+    let target_release = format!("{} {}", latest_release.version.trim(), runtime_cpu_level());
 
     let need_download =
         cached_version.is_none_or(|cached_version| cached_version.trim() != target_release);
@@ -412,15 +441,11 @@ async fn execute(config: LocalConfig) -> Result<()> {
 
     let mut args = vec!["--miner-connect".to_string(), config.miner_connect];
 
-    let mut envs = vec![];
+    let mut envs = vec![(RANDOMNESS_ENV, shared_config.randomness)];
 
     if config.needs_token {
-        envs.push(("NBX_AUTH_JWT", config.access_token));
+        envs.push(("NBX_AUTH_JWT", shared_config.access_token));
     }
-
-    if let Some(client_name) = config.common_options.client_name.as_ref() {
-        args.extend(["--client-name".to_string(), client_name.to_string()]);
-    };
 
     let status = Command::new(&cache_bin)
         .args(args)
@@ -449,6 +474,13 @@ async fn read_toml<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T> {
     let contents = fs::read_to_string(path).await?;
     let val = toml::from_str(&contents)?;
     Ok(val)
+}
+
+fn shared_config_file_path() -> Result<PathBuf> {
+    let dir = dirs::config_dir()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "no config dir"))?
+        .join("nbx");
+    Ok(dir.join(format!("shared.toml")))
 }
 
 fn config_file_path(program: Program) -> Result<PathBuf> {
