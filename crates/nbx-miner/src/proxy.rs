@@ -60,9 +60,10 @@ pub struct ProxyConfig {
     pub min_share_difficulty: u64,
     #[arg(
         long,
-        help = "Disable forwarding telemetry (hardware info + proofrate)"
+        help = "Whether to forward telemetry (hardware info + proofrate)",
+        default_value = "true"
     )]
-    pub miner_no_telemetry: bool,
+    pub miner_telemetry: bool,
     #[cfg(feature = "db")]
     #[arg(long, help = "URL to database. e.g.: postgres://localhost:3243/pool")]
     pub database_url: Option<String>,
@@ -445,7 +446,7 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
                     for tl in out_tl {
                         for (server_id, e) in server_extras.iter().enumerate() {
                             let shared = e.shared();
-                            if !shared.live || shared.session_id == 0 || !shared.perms.telemetry || !cfg.miner_no_telemetry {
+                            if !shared.live || shared.session_id == 0 || !shared.perms.telemetry || !cfg.miner_telemetry {
                                 continue;
                             }
 
