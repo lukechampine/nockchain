@@ -158,9 +158,7 @@ impl Device {
         sys.refresh_memory_specifics(MemoryRefreshKind::default().with_ram());
 
         let info = DeviceInfo::new(client_name.clone(), is_proxy, &sys);
-
-        let key = client_name.as_deref().unwrap_or("hwid");
-        let hwid: Arc<str> = hwid(&format!("{is_proxy}-{key}"), &info);
+        let hwid: Arc<str> = hwid(&is_proxy.to_string(), &info);
 
         crate::log!(
             trace, "Device info: cpu_arch = {}; cpu_count = {}; ram_mb = {}; hwid = {hwid}",
