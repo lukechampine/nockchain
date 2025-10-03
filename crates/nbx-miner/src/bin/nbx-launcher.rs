@@ -250,6 +250,7 @@ async fn setup_token(access_token: &str) -> Result<TokenResponse> {
 
 async fn refresh_or_create_config(settings: &Settings) -> Result<SharedConfig> {
     let cfg_path = shared_config_file_path()?;
+    ensure_parent_dir(&cfg_path).await?;
     let existing_config: Result<SharedConfig> = read_toml(&cfg_path).await;
 
     let access_token = if let Some(auth_token) = settings.auth_token() {
