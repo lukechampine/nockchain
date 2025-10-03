@@ -55,7 +55,7 @@ const LOG_TARGET: &str = "nbx::server";
 #[derive(ClapSerde, Args, Clone, Debug, Serialize, Deserialize)]
 pub struct MiningConfig {
     #[default(None)]
-    #[arg(long, help = "Where to bind the mining server to [default: [::]:0]")]
+    #[arg(long, help = "Where to bind the mining server to [default: [::]:4344]")]
     pub miner_bind: Option<SocketAddr>,
     #[cfg(feature = "server-tls-key-load")]
     #[arg(long, help = "Path to custom TLS private key")]
@@ -84,7 +84,7 @@ pub struct MiningConfig {
 impl MiningConfig {
     pub fn miner_bind(&self) -> SocketAddr {
         self.miner_bind
-            .unwrap_or_else(|| (Ipv6Addr::LOCALHOST, 0).into())
+            .unwrap_or_else(|| (Ipv6Addr::LOCALHOST, 4344).into())
     }
 }
 

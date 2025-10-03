@@ -134,7 +134,7 @@ pub fn client_loops(
 }
 
 async fn client_pool(
-    client_connect: Vec<String>,
+    mut client_connect: Vec<String>,
     device: Arc<Device>,
     mut client_extras: Vec<ClientExtras>,
     mining_tx: mpsc::Sender<MiningDataOut>,
@@ -155,6 +155,12 @@ async fn client_pool(
     let tls_dns = Arc::new(TlsClientConfig::forced_server_name(
         obfstr::obfstr!("pool-proxy.intra.nockbox.org").into(),
     ));
+
+    for c in &mut client_connect {
+        if !c.contains(":") {
+            c.push_str(":4344");
+        }
+    }
 
     loop {
         let mut backoff = None;

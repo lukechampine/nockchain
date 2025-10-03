@@ -161,7 +161,7 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
     }
 
     crate::log!(
-        debug,
+        info,
         "Starting NockBox proxy {} on {}",
         device.info.binary_version,
         server_cfg.miner_bind()
