@@ -32,12 +32,13 @@ use nockvm::noun::D;
 use nockvm::noun::T;
 #[cfg(feature = "verifier")]
 use nockvm_macros::tas;
+use rand::seq::SliceRandom;
 use rustls::crypto::ring::default_provider;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 #[cfg(feature = "verifier")]
 use tokio::sync::Mutex;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::task::{AbortHandle, Id, JoinSet};
 use tokio::time::sleep;
 use tokio_stream::wrappers::BroadcastStream;
@@ -79,6 +80,15 @@ pub struct MiningConfig {
         help = "JWT keys to verify client connections with. Multiple to allow failover. Used in addition to NBX_JWT_KEY[1-9] environment variables."
     )]
     miner_jwt_keys: Vec<String>,
+    #[default(None)]
+    #[arg(
+        long,
+        help = "Fraction of connections to drop on an interval. Helps equalize connections."
+    )]
+    miner_conndrop_fraction: Option<f64>,
+    #[default(None)]
+    #[arg(long, help = "Seconds interval to activate conndrop. [default: 60]")]
+    miner_conndrop_interval_seconds: Option<u64>,
 }
 
 impl MiningConfig {
@@ -173,7 +183,7 @@ impl AbortReason {
 }
 
 pub(crate) struct Clients<M> {
-    handles: BTreeMap<usize, (AbortHandle, M)>,
+    handles: BTreeMap<usize, (AbortHandle, Option<oneshot::Sender<()>>, M)>,
     ids: HashMap<Id, usize>,
 }
 
@@ -200,13 +210,38 @@ impl<M> Clients<M> {
         Some(client)
     }
 
-    pub fn add(&mut self, client: usize, handle: AbortHandle, metadata: M) {
+    pub fn add(
+        &mut self,
+        client: usize,
+        handle: AbortHandle,
+        graceful_stop: oneshot::Sender<()>,
+        metadata: M,
+    ) {
         self.ids.insert(handle.id(), client);
-        self.handles.insert(client, (handle, metadata));
+        self.handles
+            .insert(client, (handle, Some(graceful_stop), metadata));
     }
 
     pub fn lookup(&self, client: usize) -> Option<&M> {
-        self.handles.get(&client).map(|(_, v)| v)
+        self.handles.get(&client).map(|(_, _, v)| v)
+    }
+
+    pub fn drop_fraction(&mut self, frac: f64) {
+        let mut handles = self.handles.values_mut().collect::<Vec<_>>();
+        let amt = core::cmp::min(
+            ((handles.len() as f64) * frac.min(1.0).max(0.0)) as usize,
+            handles.len(),
+        );
+        let handles = handles.partial_shuffle(&mut rand::thread_rng(), amt).0;
+        counter!("nbx_miner_server_dropped_count").increment(handles.len() as u64);
+        for h in handles {
+            if let Some(h) = h.1.take() {
+                let _ = h.send(());
+            } else {
+                debug!("No graceful stop handle. Aborting.");
+                h.0.abort();
+            }
+        }
     }
 }
 
@@ -503,6 +538,10 @@ pub async fn mining_server<
     let mut metrics_interval = tokio::time::interval(Duration::from_secs(10));
     let mut stats_interval = tokio::time::interval(Duration::from_secs(60));
     stats_interval.reset();
+    let mut conndrop_interval = tokio::time::interval(Duration::from_secs(
+        cfg.miner_conndrop_interval_seconds.unwrap_or(60),
+    ));
+    conndrop_interval.reset();
 
     loop {
         tokio::select! {
@@ -514,9 +553,10 @@ pub async fn mining_server<
                 crate::log!(debug, "Accepted {a} with client_id = {client_cnt}; client_hwid = {hwid}; client_sub = {sub}");
                 replay_mining_data.retain(|(_, v)| v.get().is_none());
                 let cmd = futures::stream::iter(replay_mining_data.clone()).chain(BroadcastStream::new(mining_data_tx.subscribe()).filter_map(|v| async move { v.ok() }));
-                let srv = server(handshake, cmd, client_cnt, tx.clone());
+                let (otx, orx) = oneshot::channel();
+                let srv = server(handshake, cmd, client_cnt, tx.clone(), orx);
                 let srv = client_set.spawn(srv);
-                clients.add(client_cnt, srv, (sub, hwid, perms));
+                clients.add(client_cnt, srv, otx, (sub, hwid, perms));
                 client_cnt += 1;
             },
             v = client_set.join_next_with_id() => {
@@ -540,6 +580,11 @@ pub async fn mining_server<
                 let clients = conntrack.emit_metrics();
                 if let Some(cc) = connected_clients {
                     cc.store(clients, Ordering::Relaxed);
+                }
+            }
+            _ = conndrop_interval.tick() => {
+                if let Some(frac) = cfg.miner_conndrop_fraction {
+                    clients.drop_fraction(frac);
                 }
             }
             data = rx.recv() => {

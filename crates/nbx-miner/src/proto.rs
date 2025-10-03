@@ -17,7 +17,7 @@ use rand::random;
 use sha3::{Digest, Sha3_256};
 use strum::FromRepr;
 use tokio::io::{split, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinSet;
 use uuid::Uuid;
 
@@ -858,6 +858,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
     mining_data: impl Stream<Item = (Arc<shared::MiningData>, Arc<OnceLock<Instant>>)>,
     client_id: usize,
     results_out: mpsc::Sender<ClientDataRead>,
+    graceful_stop: oneshot::Receiver<()>,
 ) -> io::Result<()> {
     let ServerHandshake {
         stream,
@@ -881,7 +882,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
     #[derive(Default)]
     struct DataTracker {
         data_id: u32,
-        data_map: BTreeMap<u32, (Arc<shared::MiningData>, Arc<OnceLock<Instant>>)>,
+        data_map: BTreeMap<u32, (Arc<shared::MiningData>, Arc<OnceLock<Instant>>, bool)>,
         recently_expired_map: BTreeMap<u32, (Arc<shared::MiningData>, Instant)>,
     }
 
@@ -893,8 +894,14 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
         ) -> u32 {
             let data_id = self.data_id;
             self.data_id = self.data_id.wrapping_add(1);
-            self.data_map.insert(data_id, (data, expire));
+            self.data_map.insert(data_id, (data, expire, false));
             data_id
+        }
+
+        fn expire_all(&mut self) {
+            self.data_map
+                .values_mut()
+                .for_each(|(_, _, force_expire)| *force_expire = true);
         }
 
         fn remove_recently_expired(&mut self) {
@@ -908,13 +915,13 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
             let expired = self
                 .data_map
                 .iter()
-                .filter(|(_, (_, v))| v.get().is_some())
+                .filter(|(_, (_, v, e))| v.get().is_some() || *e)
                 .map(|(v, _)| *v)
                 .collect::<Vec<_>>();
             for i in &expired {
                 let d = self.data_map.remove(&i).unwrap();
                 self.recently_expired_map
-                    .insert(*i, (d.0, *d.1.get().unwrap()));
+                    .insert(*i, (d.0, d.1.get().copied().unwrap_or_else(Instant::now)));
             }
             expired
         }
@@ -923,7 +930,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
             self.remove_recently_expired();
             self.data_map
                 .get(&data_id)
-                .and_then(|(v, e)| {
+                .and_then(|(v, e, _)| {
                     if e.get()
                         .filter(|v| v.elapsed() >= RECENTLY_EXPIRED_DURATION)
                         .is_none()
@@ -963,8 +970,12 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
 
     let sender = async {
         let mut expiries = JoinSet::new();
+        let mut graceful_stop = pin!(graceful_stop);
 
         loop {
+            let graceful_stop = graceful_stop.as_mut();
+            let is_stopping = graceful_stop.is_terminated();
+
             let mut set_data = MiningDatas {
                 expire: vec![],
                 new_datas: vec![],
@@ -977,7 +988,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                     };
                     let mut guard = tracker.lock().await;
 
-                    if expiration.get().is_none() {
+                    if expiration.get().is_none() && !is_stopping {
                         gauge!(
                             "nbx_miner_proto_server_block_height",
                             "client_id" => client_id_str.clone(),
@@ -1008,6 +1019,32 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                 Some(_) = expiries.join_next() => {
                     while expiries.try_join_next().is_some() {}
                     tracker.lock().await
+                }
+                v = async {
+                    if is_stopping {
+                        tokio::time::sleep(RECENTLY_EXPIRED_DURATION).await;
+                        None
+                    } else {
+                        Some(graceful_stop.await)
+                    }
+                } => {
+                    let Some(Ok(_)) = v else {
+                        debug!("Aborting the send loop");
+                        break;
+                    };
+                    debug!("Gracefully disconnecting client_id={client_id}, client_sub={client_sub}, client_hwid={client_hwid}");
+                    counter!(
+                        "nbx_proto_server_graceful_stop_count",
+                        "client_id" => client_id_str.clone(),
+                        "client_sub" => client_sub.to_string(),
+                        "client_hwid" => client_hwid.clone(),
+                    ).increment(1);
+                    counter!(
+                        "nbx_proto_server_global_graceful_stop_count",
+                    ).increment(1);
+                    let mut guard = tracker.lock().await;
+                    guard.expire_all();
+                    guard
                 }
             };
 
