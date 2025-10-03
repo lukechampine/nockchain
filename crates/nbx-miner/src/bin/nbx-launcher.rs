@@ -12,6 +12,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 const API: &'static str = "https://pool-api.nockbox.org";
+const DEFAULT_CONNECT: &'static str = "pool-proxy.nockbox.org:4344";
 
 #[derive(Clone, Copy, Debug, ValueEnum, Serialize, Deserialize, PartialEq)]
 enum Program {
@@ -61,9 +62,6 @@ enum Settings {
     /// Run as proxy server
     Proxy {
         #[command(flatten)]
-        pool_opts: PoolOptions,
-
-        #[command(flatten)]
         common_opts: CommonOptions,
 
         #[arg(
@@ -77,9 +75,6 @@ enum Settings {
 #[derive(Debug, Subcommand)]
 enum MinerCommands {
     Direct {
-        #[command(flatten)]
-        pool_opts: PoolOptions,
-
         #[command(flatten)]
         common_opts: CommonOptions,
 
@@ -112,11 +107,11 @@ impl Settings {
         }
     }
 
-    fn miner_connect(&self) -> &String {
+    fn miner_connect(&self) -> &str {
         match self {
-            Self::Miner(MinerCommands::Direct { pool_opts, .. }) => &pool_opts.pool_url,
+            Self::Miner(MinerCommands::Direct { .. }) => DEFAULT_CONNECT,
             Self::Miner(MinerCommands::Proxy { proxy_url, .. }) => &proxy_url,
-            Self::Proxy { pool_opts, .. } => &pool_opts.pool_url,
+            Self::Proxy { .. } => DEFAULT_CONNECT,
         }
     }
 
@@ -154,10 +149,10 @@ impl Settings {
 }
 
 #[derive(Debug, Args)]
-struct PoolOptions {
+struct ProxyOptions {
     /// Pool URL to connect to
     #[arg(long = "pool", default_value = "pool-proxy.nockbox.org:4344")]
-    pool_url: String,
+    proxy_url: String,
 }
 
 #[derive(Debug, Args, Serialize, Deserialize, PartialEq, Clone)]
