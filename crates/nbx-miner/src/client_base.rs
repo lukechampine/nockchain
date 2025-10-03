@@ -404,10 +404,16 @@ async fn client_conn(
     shared.lock().unwrap().live = false;
 
     if let Err(e) = res {
-        log!(error, "Connection finished: {e}.");
+        if e.kind() == std::io::ErrorKind::UnexpectedEof {
+            log!(debug, "Connection finished.");
+        } else {
+            log!(error, "Connection finished: {e}.");
+        }
         let c = err_cnt.fetch_add(1, Ordering::Relaxed);
         gauge!("nbx_miner_client_loop_connect_error_count", "server_id" => server_id.to_string())
             .set((c + 1) as f64);
+    } else {
+        log!(debug, "Connection finished.");
     }
 }
 
