@@ -65,6 +65,12 @@ enum Settings {
         common_opts: CommonOptions,
 
         #[arg(
+            help = "Socket to bind the proxy on for downstream miners to connect to",
+            default_value = "[::]:4344"
+        )]
+        bind_addr: String,
+
+        #[arg(
             last = true,
             help = "Additional arguments to forward to the proxy (after --, e.g. --prometheus-bind 0.0.0.0:9000. Use --help for help)"
         )]
@@ -112,6 +118,13 @@ impl Settings {
             Self::Miner(MinerCommands::Direct { .. }) => DEFAULT_CONNECT,
             Self::Miner(MinerCommands::Proxy { proxy_url, .. }) => &proxy_url,
             Self::Proxy { .. } => DEFAULT_CONNECT,
+        }
+    }
+
+    fn miner_bind(&self) -> Option<&str> {
+        match self {
+            Self::Miner(_) => None,
+            Self::Proxy { bind_addr, .. } => Some(&bind_addr),
         }
     }
 
@@ -171,6 +184,8 @@ struct SharedConfig {
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct LocalConfig {
     miner_connect: String,
+    #[serde(default)]
+    miner_bind: Option<String>,
     program: Program,
     needs_token: bool,
     forward_args: Vec<String>,
@@ -289,6 +304,7 @@ async fn create_config(settings: &Settings) -> Result<LocalConfig> {
     let config = LocalConfig {
         program: settings.program(),
         miner_connect: settings.miner_connect().to_string(),
+        miner_bind: settings.miner_bind().map(|v| v.to_string()),
         needs_token: settings.needs_token(),
         forward_args: settings.forward_args().clone(),
     };
@@ -436,6 +452,10 @@ async fn execute(shared_config: SharedConfig, config: LocalConfig) -> Result<()>
     println!("Starting {}...", config.program.as_str());
 
     let mut args = vec!["--miner-connect".to_string(), config.miner_connect];
+
+    if let Some(bind) = config.miner_bind {
+        args.extend(["--miner-bind".to_string(), bind]);
+    }
 
     let mut envs = vec![(RANDOMNESS_ENV, shared_config.randomness)];
 
