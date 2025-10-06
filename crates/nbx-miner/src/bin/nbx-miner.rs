@@ -19,9 +19,8 @@ pub struct MinerCfg {
     #[command(flatten)]
     client: ClientConfig,
     #[cfg(feature = "prom-exporter")]
-    #[default("127.0.0.1:9006".to_string())]
     #[arg(long)]
-    prometheus_bind: String,
+    prometheus_bind: Option<String>,
 }
 
 #[derive(Parser)]
@@ -58,19 +57,28 @@ async fn main() {
     }
 
     #[cfg(feature = "prom-exporter")]
-    metrics_exporter_prometheus::PrometheusBuilder::new()
-        .with_http_listener(
-            config
-                .prometheus_bind
-                .parse::<std::net::SocketAddr>()
-                .expect("Invalid socket address"),
-        )
-        .idle_timeout(
-            metrics_util::MetricKindMask::ALL,
-            Some(std::time::Duration::from_secs(300)),
-        )
-        .install()
-        .expect("Unable to install prometheus exporter");
+    if let Some(prometheus_bind) = config.prometheus_bind {
+        metrics_exporter_prometheus::PrometheusBuilder::new()
+            .with_http_listener(
+                prometheus_bind
+                    .parse::<std::net::SocketAddr>()
+                    .map_err(|_| {
+                        println!("Invalid socket address for the prometheus exporter");
+                        std::process::exit(1);
+                    })
+                    .unwrap(),
+            )
+            .idle_timeout(
+                metrics_util::MetricKindMask::ALL,
+                Some(std::time::Duration::from_secs(300)),
+            )
+            .install()
+            .map_err(|e| {
+                println!("Unable to install prometheus exporter");
+                std::process::exit(1);
+            })
+            .unwrap();
+    }
 
     nockvm::check_endian();
     nbx_miner::init_default_tracing(cli.color);
