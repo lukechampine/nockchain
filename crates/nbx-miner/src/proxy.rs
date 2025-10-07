@@ -88,6 +88,7 @@ struct DifficultyTracker {
     accumulated_work: u64,
     target_interval: Duration,
     last_updated: Instant,
+    update_cnt: usize,
 }
 
 #[cfg(feature = "verifier")]
@@ -146,6 +147,7 @@ impl DifficultyTracker {
         );
         self.current_diff10 = new_diff10;
         self.current_target = difficulty_to_target(self.current_diff10 / 10);
+        self.update_cnt += 1;
     }
 }
 
@@ -202,6 +204,8 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
 
     #[cfg(feature = "verifier")]
     let mut last_updated = Instant::now();
+    #[cfg(feature = "verifier")]
+    let mut update_cnt = 0;
     #[cfg(feature = "verifier")]
     let diff_tracker = Arc::new(SyncMutex::new(DifficultyTracker {
         current_diff10: cfg.min_share_difficulty * 10,
@@ -398,17 +402,8 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
                         }
                     }
                     // We need to expire after inserting to tracker
-                    // However, unlike with proxy difficulty adjustment, here we immediately expire
-                    // the data.
-                    let mut immediate_expire = vec![];
                     for e in expire {
-                        if let Some(r) = requests.remove(&(server_id, e)) {
-                            immediate_expire.push(r.0);
-                        }
-                    }
-                    let mut server_id_guard = server_id_map.lock().unwrap();
-                    for e in immediate_expire {
-                        server_id_guard.remove(&Arc::as_ptr(&e));
+                        requests.remove(&(server_id, e));
                     }
                 }
                 v = ack_rx.recv() => {
@@ -524,8 +519,9 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
                             guard.update_difficulty();
                         }
 
-                        if last_updated != guard.last_updated {
+                        if guard.last_updated.elapsed_since(&last_updated) >= RECENTLY_EXPIRED_DURATION || guard.update_cnt - update_cnt >= 5 {
                             last_updated = guard.last_updated;
+                            update_cnt = guard.update_cnt;
                             let new_target = guard.current_target.clone();
                             debug!("Update difficulty to min {}", target_to_difficulty(new_target.clone()));
                             core::mem::drop(guard);

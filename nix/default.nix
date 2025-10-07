@@ -147,8 +147,8 @@ let
   };
 
   nbx-miner = profile: {
-    prod = nbx-miner-base profile "${prodFeatures}" individualCrateArgsImmediateAbort;
-    prod-gpu = nbx-miner-base profile "${prodFeatures} ${gpuFeatures}" individualCrateArgsImmediateAbort;
+    prod = nbx-miner-base profile "${prodFeatures} --features nbx-miner/stealthy" individualCrateArgsImmediateAbort;
+    prod-gpu = nbx-miner-base profile "${prodFeatures} ${gpuFeatures} --features nbx-miner/stealthy" individualCrateArgsImmediateAbort;
     internal = nbx-miner-base profile "${gpuFeatures} --features nbx-miner/prom-exporter,nbx-miner/instrument,nbx-miner/slog" individualCrateArgsAbort;
   };
 
