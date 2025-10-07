@@ -215,6 +215,7 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
         target_interval: Duration::from_secs(cfg.target_share_seconds),
         rolling_timings: Default::default(),
         last_updated,
+        update_cnt,
     }));
 
     #[rustfmt::skip]
@@ -519,7 +520,7 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
                             guard.update_difficulty();
                         }
 
-                        if guard.last_updated.elapsed_since(&last_updated) >= RECENTLY_EXPIRED_DURATION || guard.update_cnt - update_cnt >= 5 {
+                        if guard.last_updated.duration_since(last_updated) >= RECENTLY_EXPIRED_DURATION * 3 || guard.update_cnt - update_cnt >= 5 {
                             last_updated = guard.last_updated;
                             update_cnt = guard.update_cnt;
                             let new_target = guard.current_target.clone();
