@@ -28,8 +28,10 @@ use tracing_subscriber::{fmt, EnvFilter, Layer};
 
 const DEFAULT_LOG_FILTER: &str = "info";
 
+#[cfg(feature = "production")]
 struct PrefixFilter;
 
+#[cfg(feature = "production")]
 impl<S: Subscriber> Layer<S> for PrefixFilter {
     fn enabled(&self, metadata: &Metadata<'_>, _: Context<'_, S>) -> bool {
         metadata.target().starts_with(obfstr::obfstr!("nbx::"))
@@ -43,14 +45,19 @@ pub fn init_default_tracing(colors: ColorChoice) {
         std::env::var("RUST_LOG").unwrap_or_else(|_| DEFAULT_LOG_FILTER.to_string()),
     );
 
-    tracing_subscriber::registry()
+    let sub = tracing_subscriber::registry()
         .with(
             fmt::layer()
                 .with_ansi(use_ansi)
                 .with_target(true)
                 .with_level(true),
-        )
-        .with(PrefixFilter)
+        );
+
+    #[cfg(feature = "production")]
+    let sub = sub
+        .with(PrefixFilter);
+
+    sub
         .with(filter)
         .init();
 }
