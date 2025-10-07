@@ -21,7 +21,7 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinSet;
 use uuid::Uuid;
 
-use crate::device::{Device, DeviceInfo, DeviceInfoWithSockets};
+use crate::device::{Device, DeviceInfoWithSockets};
 use crate::metrics::{counter, gauge, histogram};
 use crate::shared::{self, JwtClaims};
 
@@ -231,6 +231,7 @@ async fn binsend_err(
     stream.write_u32_le((d.len() as u32) | (1u32 << 31)).await?;
     stream.write_all(&d).await?;
     stream.flush().await?;
+    #[cfg(not(feature = "production"))]
     histogram!(
         "nbx_miner_binsend_seconds",
         "target_sub" => target_sub.to_string(),
@@ -258,6 +259,7 @@ async fn binsend(
     stream.write_u32_le(d.len() as _).await?;
     stream.write_all(&d).await?;
     stream.flush().await?;
+    #[cfg(not(feature = "production"))]
     histogram!(
         "nbx_miner_binsend_seconds",
         "target_sub" => target_sub.to_string(),
@@ -323,7 +325,7 @@ async fn binrecv_limited<T: Decode<()>, const PARSE_ERR: bool, const MAX_READ: u
 
     let mut buf = vec![0; len as usize];
     stream.read_exact(&mut buf).await?;
-    chacha
+    let _ = chacha
         .xor_read(&mut buf)
         .map_err(|_| io::ErrorKind::BrokenPipe);
 
@@ -336,6 +338,7 @@ async fn binrecv_limited<T: Decode<()>, const PARSE_ERR: bool, const MAX_READ: u
     let (res, _) = bincode::decode_from_slice(&buf, bincode::config::standard())
         .map_err(|_| io::ErrorKind::InvalidData)?;
 
+    #[cfg(not(feature = "production"))]
     histogram!(
         "nbx_miner_binrecv_seconds",
         "target_sub" => target_sub.to_string(),
@@ -490,10 +493,10 @@ pub async fn client<S: AsyncRead + AsyncWrite + Unpin>(
     let mut read_crypt = ChaCha::new_chacha8(&CHACHA_KEY, &(session_id as u64).to_le_bytes());
     let mut write_crypt = ChaCha::new_chacha8(&CHACHA_KEY, &(session_id as u64).to_le_bytes());
 
-    #[cfg(feature = "stealthy")]
+    #[cfg(feature = "production")]
     let channel_mon = std::future::pending::<()>();
 
-    #[cfg(not(feature = "stealthy"))]
+    #[cfg(not(feature = "production"))]
     let channel_mon = async {
         loop {
             gauge!(
@@ -595,9 +598,14 @@ pub async fn client<S: AsyncRead + AsyncWrite + Unpin>(
             .await?;
         }
 
-        while let Some(ClientDataWrite { session_id, data }) = data_out.recv().await {
+        while let Some(ClientDataWrite {
+            session_id: data_session_id,
+            data,
+        }) = data_out.recv().await
+        {
             // Broadcast may contain previous session's datapoints. Skip them.
-            if session_id != session_id {
+            if data_session_id != session_id {
+                #[cfg(not(feature = "production"))]
                 counter!(
                     "nbx_miner_proto_client_session_id_mismatch_count",
                     "server_name" => server_name.clone(),
@@ -950,10 +958,10 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
 
     let tracker = Mutex::new(DataTracker::default());
 
-    #[cfg(feature = "stealthy")]
+    #[cfg(feature = "production")]
     let channel_mon = std::future::pending::<()>();
 
-    #[cfg(not(feature = "stealthy"))]
+    #[cfg(not(feature = "production"))]
     let channel_mon = async {
         loop {
             gauge!(
