@@ -94,8 +94,9 @@ enum MinerCommands {
         /// Required proxy URL to connect through
         proxy_url: String,
 
-        #[command(flatten)]
-        common_opts: CommonOptions,
+        // Not used as the binary can be download without a token, but here for backwards compatibility
+        #[arg(long, hide(true))]
+        auth: Option<String>,
 
         #[arg(
             last = true,
@@ -139,16 +140,8 @@ impl Settings {
     fn auth_token(&self) -> Option<&str> {
         match self {
             Self::Miner(MinerCommands::Direct { common_opts, .. }) => common_opts.auth.as_deref(),
-            Self::Miner(MinerCommands::Proxy { common_opts, .. }) => common_opts.auth.as_deref(),
+            Self::Miner(MinerCommands::Proxy { auth, .. }) => auth.as_deref(),
             Self::Proxy { common_opts, .. } => common_opts.auth.as_deref(),
-        }
-    }
-
-    fn common_opts(&self) -> &CommonOptions {
-        match self {
-            Self::Miner(MinerCommands::Direct { common_opts, .. }) => common_opts,
-            Self::Miner(MinerCommands::Proxy { common_opts, .. }) => common_opts,
-            Self::Proxy { common_opts, .. } => common_opts,
         }
     }
 
@@ -177,7 +170,7 @@ struct CommonOptions {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct SharedConfig {
-    access_token: String,
+    access_token: Option<String>,
     randomness: String,
 }
 
@@ -271,12 +264,18 @@ async fn refresh_or_create_config(settings: &Settings) -> Result<SharedConfig> {
     let access_token = if let Some(auth_token) = settings.auth_token() {
         println!("Fetching new authentication token (remove --auth to skip)");
         let response = setup_token(auth_token).await?;
-        response.token
-    } else if let Ok(ref existing_config) = existing_config {
-        let response = refresh_token(&existing_config.access_token).await?;
-        response.token
+        Some(response.token)
+    } else if let Ok(SharedConfig {
+        access_token: Some(ref access_token),
+        ..
+    }) = existing_config
+    {
+        let response = refresh_token(access_token).await?;
+        Some(response.token)
+    } else if !settings.needs_token() {
+        None
     } else {
-        eprintln!("The authentication token was not set (--auth), and no previous token saved. This is needed for binary updates and direct connections.");
+        eprintln!("The authentication token was not set (--auth), and no previous token saved. This is needed for direct connections.");
         std::process::exit(1);
     };
 
@@ -314,7 +313,7 @@ async fn create_config(settings: &Settings) -> Result<LocalConfig> {
     Ok(config)
 }
 
-async fn fetch_latest_release(program: Program, config: &SharedConfig) -> Result<BinaryResponse> {
+async fn fetch_latest_release(program: Program) -> Result<BinaryResponse> {
     let response = reqwest::Client::new()
         .post(format!(
             "{API}/api/v1/releases/{}/latest",
@@ -326,7 +325,6 @@ async fn fetch_latest_release(program: Program, config: &SharedConfig) -> Result
                 Program::Proxy => "nbx-proxy".to_string(),
             },
         ))
-        .bearer_auth(&config.access_token)
         .send()
         .await?;
 
@@ -361,9 +359,16 @@ async fn restart(program: Program) -> Result<()> {
         std::process::exit(1);
     };
 
-    let response = refresh_token(&shared_config.access_token).await?;
-    shared_config.access_token = response.token;
-    write_toml(&shared_cfg_path, &shared_config).await?;
+    if local_config.needs_token {
+        let Some(access_token) = shared_config.access_token.as_ref() else {
+            eprintln!("The authentication token was not set");
+            std::process::exit(1);
+        };
+
+        let response = refresh_token(access_token).await?;
+        shared_config.access_token = Some(response.token);
+        write_toml(&shared_cfg_path, &shared_config).await?;
+    }
 
     execute(shared_config, local_config).await?;
 
@@ -383,7 +388,7 @@ async fn start(settings: Settings) -> Result<()> {
 async fn execute(shared_config: SharedConfig, config: LocalConfig) -> Result<()> {
     // Step 2: Request latest binary info from backend
     println!("Checking for latest binary version...");
-    let latest_release = fetch_latest_release(config.program, &shared_config).await?;
+    let latest_release = fetch_latest_release(config.program).await?;
 
     // Step 3: Download the latest binary if it's different from the existing binary
     let cache_bin = cache_bin_path(config.program)?;
@@ -460,7 +465,12 @@ async fn execute(shared_config: SharedConfig, config: LocalConfig) -> Result<()>
     let mut envs = vec![(RANDOMNESS_ENV, shared_config.randomness)];
 
     if config.needs_token {
-        envs.push(("NBX_AUTH_JWT", shared_config.access_token));
+        let Some(access_token) = shared_config.access_token else {
+            eprintln!("The authentication token was not set");
+            std::process::exit(1);
+        };
+
+        envs.push(("NBX_AUTH_JWT", access_token));
     }
 
     let status = Command::new(&cache_bin)
