@@ -12,28 +12,32 @@
   };
 
   outputs = { self, nixpkgs, flake-utils, rust-overlay, crane }:
-    flake-utils.lib.eachDefaultSystem (system:
+    flake-utils.lib.eachDefaultSystem (localSystem:
       let
         pkgs = (import nixpkgs) {
-          inherit system;
+          inherit localSystem;
 
           overlays = [
             (import rust-overlay)
           ];
         };
-        lib = pkgs.lib;
 
-        rustToolchainFor = p: p.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+        code = crossPkgs: let
+          lib = crossPkgs.lib;
+          rustToolchainFor = p: p.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+          craneLib = (crane.mkLib crossPkgs).overrideToolchain rustToolchainFor;
+          localCraneLib = (crane.mkLib pkgs).overrideToolchain rustToolchainFor;
+        in
+          crossPkgs.callPackage ./nix/. { inherit localSystem lib craneLib localCraneLib rustToolchainFor; pkgs = crossPkgs; localPkgs = pkgs; };
 
-        craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchainFor;
-
-        code = pkgs.callPackage ./nix/. { inherit pkgs system lib craneLib rustToolchainFor; };
+        localCode = code pkgs;
       in rec {
-        packages = code // code.nbx-internal // {
+        packages = localCode // localCode.nbx-internal // {
           all = pkgs.symlinkJoin {
             name = "all";
-            paths = with code; [ hoonc nockchain nockchain-wallet nockchain-metrics-exporter ];
+            paths = with localCode; [ hoonc nockchain nockchain-wallet nockchain-metrics-exporter ];
           };
+          cross = pkgs.lib.mapAttrs (n: v: code v) pkgs.pkgsCross;
           default = packages.all;
         };
         defaultPackage = packages.default;

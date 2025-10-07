@@ -14,6 +14,11 @@ use tokio::process::Command;
 const API: &'static str = "https://pool-api.nockbox.org";
 const DEFAULT_CONNECT: &'static str = "pool-proxy.nockbox.org:4344";
 
+#[cfg(target_arch = "aarch64")]
+const ARCH: &str = "aarch64";
+#[cfg(target_arch = "x86_64")]
+const ARCH: &str = "x86_64";
+
 #[derive(Clone, Copy, Debug, ValueEnum, Serialize, Deserialize, PartialEq)]
 enum Program {
     Miner,
@@ -316,12 +321,15 @@ async fn create_config(settings: &Settings) -> Result<LocalConfig> {
 async fn fetch_latest_release(program: Program) -> Result<BinaryResponse> {
     let response = reqwest::Client::new()
         .post(format!(
-            "{API}/api/v1/releases/{}/latest",
+            "{API}/api/v1/releases/{}/{ARCH}-linux/latest",
             match program {
+                #[cfg(target_arch = "x86_64")]
                 Program::Miner => format!(
                     "nbx-miner-{}",
                     runtime_cpu_level().strip_prefix("x86_64-").unwrap_or("v2")
                 ),
+                #[cfg(not(target_arch = "x86_64"))]
+                Program::Miner => "nbx-miner".to_string(),
                 Program::Proxy => "nbx-proxy".to_string(),
             },
         ))

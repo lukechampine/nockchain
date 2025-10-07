@@ -1,8 +1,9 @@
-{ stdenv, pkgs, lib, craneLib, rustToolchainFor, ... }:
+{ stdenv, localPkgs, pkgs, lib, localCraneLib, craneLib, rustToolchainFor, ... }:
 let
-  base = pkgs.callPackage ./base.nix { inherit pkgs lib; };
-  hoonc = pkgs.callPackage ./hoonc.nix { inherit stdenv lib base craneLib; };
-  jam-pkg = pkgs.callPackage ./jam.nix { inherit base hoonc; };
+  base = localPkgs.callPackage ./base.nix { pkgs = localPkgs; lib = localPkgs.lib; };
+  hoonc = localPkgs.callPackage ./hoonc.nix { inherit stdenv base; craneLib = localCraneLib; lib = localPkgs.lib; };
+  jam-pkg = localPkgs.callPackage ./jam.nix { inherit base hoonc; };
+  isX86 = lib.strings.hasInfix "x86_64-" pkgs.stdenv.targetPlatform.system;
 
   rustToolchain = rustToolchainFor pkgs;
 
@@ -12,7 +13,7 @@ let
     strictDeps = true;
     pname = "nockchain-deps";
     # Additional environment variables can be set directly
-    SHADERC_LIB_DIR="${pkgs.shaderc.static}/lib";
+    SHADERC_LIB_DIR="${localPkgs.shaderc.static}/lib";
   };
 
   immediateAbortArgs = "-Zbuild-std=std,panic_abort -Zbuild-std-features=panic_immediate_abort";
@@ -83,8 +84,7 @@ let
     pname = "nockchain";
     CARGO_PROFILE = profile;
     cargoExtraArgs = "-p nockchain --features nockchain/jemalloc,nbx-miner/miner-save-attempts ${extraArgs}";
-    buildInputs = [ hoonc.hoonc ];
-    nativeBuildInputs = [ pkgs.protobuf_29 ];
+    nativeBuildInputs = [ hoonc.hoonc localPkgs.protobuf_29 ];
     preBuild = "mkdir -p assets && cp ${jam-pkg.dumb-jam.out} './assets/dumb.jam' && cp ${jam-pkg.miner-jam.out} './assets/miner.jam'";
   });
 
@@ -92,7 +92,7 @@ let
   individualCrateArgs // {
     pname = "nockchain-wallet";
     cargoExtraArgs = "-p nockchain-wallet";
-    nativeBuildInputs = [ hoonc.hoonc pkgs.protobuf_29 ];
+    nativeBuildInputs = [ hoonc.hoonc localPkgs.protobuf_29 ];
     preBuild = "mkdir -p assets && cp ${jam-pkg.wallet-jam.out} './assets/wal.jam'";
   });
 
@@ -100,7 +100,7 @@ let
   individualCrateArgs // {
     pname = "nockchain-metrics-exporter";
     cargoExtraArgs = "-p nockchain-metrics-exporter";
-    nativeBuildInputs = [ pkgs.protobuf_29 ];
+    nativeBuildInputs = [ localPkgs.protobuf_29 ];
   });
 
   nbx-miner-base = profile: extraArgs: ica: craneLib.buildPackage (
@@ -109,7 +109,7 @@ let
     pname = "nbx-miner";
     CARGO_PROFILE = profile;
     cargoExtraArgs = (ica.cargoExtraArgs or "") + " -p nbx-miner --bin nbx-miner --features nbx-miner/jemalloc,nbx-miner/client,nbx-miner/jwt-auth-client ${extraArgs}";
-    buildInputs = [ hoonc.hoonc ];
+    nativeBuildInputs = [ hoonc.hoonc ];
     preBuild = "mkdir -p assets && cp ${jam-pkg.miner-jam.out} './assets/miner.jam'";
   });
 
@@ -119,7 +119,7 @@ let
     pname = "nbx-proxy";
     CARGO_PROFILE = profile;
     cargoExtraArgs = (ica.cargoExtraArgs or "") + " -p nbx-miner --bin nbx-proxy --features nbx-miner/jemalloc,nbx-miner/prom-exporter,nbx-miner/jwt-auth-client ${extraArgs}";
-    buildInputs = [ hoonc.hoonc ];
+    nativeBuildInputs = [ hoonc.hoonc ];
     preBuild = "mkdir -p assets && cp ${jam-pkg.verifier-jam.out} './assets/verifier.jam'";
   });
 
@@ -131,10 +131,16 @@ let
     cargoExtraArgs = (ica.cargoExtraArgs or "") + " -p nbx-miner --bin nbx-launcher --features nbx-miner/jemalloc,nbx-miner/launcher ${extraArgs}";
   });
 
-  profile-v = v: if lib.strings.hasInfix "x86_64-" pkgs.system then "release-v${v}" else throw "release-v${v} is only supported on x86_64 targets!";
-  profile-v4 = profile-v "4";
-  profile-v3 = profile-v "3";
-  profile-v2 = profile-v "2";
+  profile = if isX86 then let 
+    profile-v = v: "release-v${v}";
+  in {
+    v4 = profile-v "4";
+    v3 = profile-v "3";
+    v2 = profile-v "2";
+    release = "release";
+  } else {
+    release = "release";
+  };
 
   nockchain = extraArgs: (nockchain-base "release" extraArgs);
 
@@ -156,16 +162,16 @@ let
     prod = nbx-launcher-base profile "${prodFeatures}" individualCrateArgsImmediateAbort;
   };
 
-  bddisasm = stdenv.mkDerivation {
+  bddisasm = localPkgs.stdenv.mkDerivation {
     pname = "bddisasm";
     version = "unstable";
-    src = pkgs.fetchFromGitHub {
+    src = localPkgs.fetchFromGitHub {
       owner = "bitdefender";
       repo = "bddisasm";
       rev = "83ee0d120d796f0751897468c38e7c6f41b380cf";
       sha256 = "4UMyP29AbBRlWziobAISYJ0Xtq1VvalwVt4QAmrIWWQ=";
     };
-    nativeBuildInputs = with pkgs; [ gcc cmake gnumake ];
+    nativeBuildInputs = with localPkgs; [ gcc cmake gnumake ];
     installPhase = ''
       runHook preInstall
 
@@ -180,16 +186,16 @@ let
     cmakeFlags = [ "-DCMAKE_INSTALL_PREFIX=$out" ];
   };
 
-  kiteshield = stdenv.mkDerivation {
+  kiteshield = localPkgs.stdenv.mkDerivation {
     pname = "kiteshield";
     version = "unstable";
-    src = pkgs.fetchFromGitHub {
+    src = localPkgs.fetchFromGitHub {
       owner = "GunshipPenguin";
       repo = "kiteshield";
       rev = "3c6aaceda5aa7b4317138eb20ce365e1527e1e62";
       sha256 = "35iP/BT2IqSyWNEXSCD0/gM+zV69AyHhpsj2DjZBzsU=";
     };
-    nativeBuildInputs = with pkgs; [ gcc ninja bddisasm python311 ];
+    nativeBuildInputs = with localPkgs; [ gcc ninja bddisasm python311 ];
     NIX_CFLAGS_COMPILE = [
       "-Wno-error=array-bounds"
       "-Wno-error=dangling-pointer"
@@ -212,16 +218,16 @@ let
     '';
   };
 
-  polyfill = stdenv.mkDerivation {
+  polyfill = localPkgs.stdenv.mkDerivation {
     pname = "polyfill-glibc";
     version = "unstable";
-    src = pkgs.fetchFromGitHub {
+    src = localPkgs.fetchFromGitHub {
       owner = "corsix";
       repo = "polyfill-glibc";
       rev = "dd59051faaa10ee63c1b96f1b47bf9fcd3770ee2";
       sha256 = "Qkzy33dIGnv9BOmRwql+LpYaEukZZIADSux09Fz3h7E=";
     };
-    nativeBuildInputs = with pkgs; [ gcc ninja ];
+    nativeBuildInputs = with localPkgs; [ gcc ninja ];
     buildPhase = ''
       ninja polyfill-glibc
       ls build
@@ -241,7 +247,7 @@ let
     dontConfigure = true;
     dontBuild = true;
 
-    buildInputs = with pkgs; [ binutils upx patchelf polyfill perl kiteshield ];
+    nativeBuildInputs = with pkgs.buildPackages; [ which binutils upx patchelf polyfill perl ];
 
     installPhase = ''
       mkdir -p $out/bin
@@ -253,33 +259,39 @@ let
         # These symbols are weakly imported by rust stdlib when creating processes.
         # These symbols are coming from glibc 2.39, and polyfill cannot handle the getpid one atm.
         # Let's just make the symbols not available, because we don't really need them in the first place.
-        if readelf -Ws $bname | egrep 'pidfd_getpid|pidfd_spawnp' | grep GLOBAL; then
+        echo ${stdenv.cc.bintools.targetPrefix}
+        if ${stdenv.cc.bintools.targetPrefix}readelf -Ws $bname | egrep 'pidfd_getpid|pidfd_spawnp' | grep GLOBAL; then
           echo "There is non-weak pidfd_getpid or pidfd_spawnp. Cannot patch glibc!"
           exit 1
         fi
         polyfill-glibc --clear-symbol-version=pidfd_spawnp,pidfd_getpid $bname
         polyfill-glibc --target-glibc=2.35 $bname
-        patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 $bname
+        full_interp="${stdenv.cc.bintools.dynamicLinker}"
+        interp_dir=$(basename $(dirname "$full_interp"))
+        interp_name=$(basename "$full_interp")
+        patchelf --set-interpreter /$interp_dir/$interp_name $bname
 
         dbg="$debug/bin/$(basename "$bname").debug"
 
-        objcopy --only-keep-debug "$bname" "$dbg"
+        which ${pkgs.stdenv.cc.bintools.targetPrefix}objcopy
+        echo ${pkgs.stdenv.cc.bintools.targetPrefix}
+        ${pkgs.stdenv.cc.bintools.targetPrefix}objcopy --only-keep-debug "$bname" "$dbg"
         # append symtab and strtab sections
-        objcopy --dump-section .symtab="$dbg.symtab" "$bin" || true
-        objcopy --dump-section .strtab="$dbg.strtab" "$bin" || true
+        ${pkgs.stdenv.cc.bintools.targetPrefix}objcopy --dump-section .symtab="$dbg.symtab" "$bin" || true
+        ${pkgs.stdenv.cc.bintools.targetPrefix}objcopy --dump-section .strtab="$dbg.strtab" "$bin" || true
         # merge them back into debug file if present
         if [ -f "$dbg.symtab" ]; then
-          objcopy --add-section .symtab="$dbg.symtab" "$dbg"
+          ${pkgs.stdenv.cc.bintools.targetPrefix}objcopy --add-section .symtab="$dbg.symtab" "$dbg"
           rm "$dbg.symtab"
         fi
         if [ -f "$dbg.strtab" ]; then
-          objcopy --add-section .strtab="$dbg.strtab" "$dbg"
+          ${pkgs.stdenv.cc.bintools.targetPrefix}objcopy --add-section .strtab="$dbg.strtab" "$dbg"
           rm "$dbg.strtab"
         fi
 
         chmod -wx "$dbg"
 
-        strip -s "$bname"
+        ${pkgs.stdenv.cc.bintools.targetPrefix}strip -s "$bname"
         # objcopy --add-gnu-debuglink="$dbg" "$bname"
 
         upx -9 $bname
@@ -289,8 +301,10 @@ let
         rm -f $bname.upx $bname
         mv $bname.cleancompress $bname
         chmod +x $bname
-        kiteshield -n $bname $bname.new
-        mv $bname.new $bname
+        if [ "${toString isX86}" = "true" ]; then
+          ${kiteshield}/bin/kiteshield -n $bname $bname.new
+          mv $bname.new $bname
+        fi
         chmod -w $bname
       done
     '';
@@ -303,27 +317,36 @@ in
   nockchain-metrics-exporter = metrics-exporter-base;
   nockchain-jamfiles = jam-pkg;
 
-  nbx-publish = lib.attrsets.mapAttrs (k: v: packageUp v.prod) {
-    nbx-launcher = nbx-launcher profile-v2;
-    nbx-proxy = nbx-proxy profile-v2;
-    nbx-miner-v2 = nbx-miner profile-v2;
-    nbx-miner-v3 = nbx-miner profile-v3;
-    nbx-miner-v4 = nbx-miner profile-v4;
-  };
+  nbx-publish = lib.attrsets.mapAttrs (k: v: packageUp v.prod) (if isX86 then {
+    nbx-launcher = nbx-launcher profile.v2;
+    nbx-proxy = nbx-proxy profile.v2;
+    nbx-miner-v2 = nbx-miner profile.v2;
+    nbx-miner-v3 = nbx-miner profile.v3;
+    nbx-miner-v4 = nbx-miner profile.v4;
+  } else {
+    nbx-launcher = nbx-launcher profile.release;
+    nbx-proxy = nbx-proxy profile.release;
+    nbx-miner = nbx-miner profile.release;
+  });
 
-  nbx-unpublished = lib.attrsets.mapAttrs (k: v: packageUp v.prod-gpu) {
-    nbx-miner-v2-gpu = nbx-miner profile-v2;
-    nbx-miner-v3-gpu = nbx-miner profile-v3;
-    nbx-miner-v4-gpu = nbx-miner profile-v4;
-  };
+  nbx-unpublished = lib.attrsets.mapAttrs (k: v: packageUp v.prod-gpu) (if isX86 then {
+    nbx-miner-v2-gpu = nbx-miner profile.v2;
+    nbx-miner-v3-gpu = nbx-miner profile.v3;
+    nbx-miner-v4-gpu = nbx-miner profile.v4;
+  } else {
+    nbx-miner-gpu = nbx-miner profile.release;
+  });
 
-  nbx-internal = lib.attrsets.mapAttrs(k: v: v.internal) {
-    nbx-proxy = nbx-proxy profile-v2;
-    nbx-miner = nbx-miner profile-v2;
-    nbx-miner-v3 = nbx-miner profile-v3;
-    nbx-miner-v4 = nbx-miner profile-v4;
-  };
+  nbx-internal = lib.attrsets.mapAttrs(k: v: v.internal) (if isX86 then {
+    nbx-proxy = nbx-proxy profile.v2;
+    nbx-miner = nbx-miner profile.v2;
+    nbx-miner-v3 = nbx-miner profile.v3;
+    nbx-miner-v4 = nbx-miner profile.v4;
+  } else {
+    nbx-proxy = nbx-proxy profile.release;
+    nbx-miner = nbx-miner profile.release;
+  });
 
-  polyfill-glibc = polyfill;
-  kiteshield = kiteshield;
+  # polyfill-glibc = polyfill;
+  # kiteshield = kiteshield;
 }
