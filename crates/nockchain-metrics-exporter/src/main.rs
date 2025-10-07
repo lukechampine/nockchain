@@ -18,6 +18,7 @@ use nockapp::wire::WireTag;
 use nockapp::{Bytes, NockAppError, NockAppExit, Noun};
 use nockapp_grpc::services::private_nockapp::PrivateNockAppGrpcClient;
 use nockapp_grpc_proto::pb::common::v1::Wire as GrpcWire;
+use nockvm::jets::cold::Nounable;
 use nockvm::noun::{IndirectAtom, D, T};
 use nockvm_macros::tas;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -82,11 +83,14 @@ impl GrpcHandle {
     }
 
     pub async fn peek(&mut self, path: &[&str]) -> Result<NounSlab, NockAppError> {
-        let path_strings: Vec<String> = path.iter().map(|s| s.to_string()).collect();
+        let mut path_slab: NounSlab = NounSlab::new();
+        let path_noun = path.into_noun(&mut path_slab);
+        path_slab.set_root(path_noun);
+        let path_bytes = path_slab.jam().to_vec();
 
         let jam_bytes = self
             .client
-            .peek(self.pid, path_strings)
+            .peek(self.pid, path_bytes)
             .await
             .map_err(|e| NockAppError::OtherError(format!("gRPC peek failed: {}", e)))?;
 
