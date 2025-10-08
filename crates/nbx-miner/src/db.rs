@@ -33,6 +33,7 @@ enum DbMsg {
         machine_id: Arc<str>,
         reason: AbortReason,
     },
+    PartitionMaintenance,
 }
 
 pub(crate) struct Database {
@@ -141,6 +142,22 @@ impl Database {
                         .execute(&pool)
                         .await
                 }
+                DbMsg::PartitionMaintenance => {
+                    let drop_result = sqlx::query("SELECT * FROM drop_old_proofrate_partitions(2)")
+                        .execute(&pool)
+                        .await;
+
+                    if let Err(e) = drop_result {
+                        error!("Unable to execute query: {e}");
+                        counter!("nbx_miner_db_query_errors_total").increment(1);
+                    }
+
+                    let create_result = sqlx::query("SELECT ensure_proofrate_partitions()")
+                        .execute(&pool)
+                        .await;
+
+                    create_result
+                }
             };
 
             if let Err(e) = r {
@@ -202,5 +219,9 @@ impl DatabaseHandle {
             machine_id,
             reason,
         });
+    }
+
+    pub fn partition_maintenance(&self) {
+        self.submit_msg(DbMsg::PartitionMaintenance);
     }
 }
