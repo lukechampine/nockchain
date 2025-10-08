@@ -45,21 +45,17 @@ pub fn init_default_tracing(colors: ColorChoice) {
         std::env::var("RUST_LOG").unwrap_or_else(|_| DEFAULT_LOG_FILTER.to_string()),
     );
 
-    let sub = tracing_subscriber::registry()
-        .with(
-            fmt::layer()
-                .with_ansi(use_ansi)
-                .with_target(true)
-                .with_level(true),
-        );
+    let sub = tracing_subscriber::registry().with(
+        fmt::layer()
+            .with_ansi(use_ansi)
+            .with_target(true)
+            .with_level(true),
+    );
 
     #[cfg(feature = "production")]
-    let sub = sub
-        .with(PrefixFilter);
+    let sub = sub.with(PrefixFilter);
 
-    sub
-        .with(filter)
-        .init();
+    sub.with(filter).init();
 }
 
 #[cfg(feature = "stealthy")]

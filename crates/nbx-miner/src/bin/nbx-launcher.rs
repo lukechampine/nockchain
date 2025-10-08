@@ -1,6 +1,7 @@
 use std::io;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use anyhow::{bail, Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -197,6 +198,7 @@ struct TokenResponse {
 #[derive(Debug, Deserialize)]
 struct Claims {
     iat: u64,
+    exp: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -217,6 +219,27 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+async fn api_request<T: for<'de> Deserialize<'de>>(
+    request: reqwest::RequestBuilder,
+    context_msg: &str,
+) -> Result<T> {
+    let response = request.send().await?;
+    let status = response.status();
+
+    if !status.is_success() {
+        let error_body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unable to read error body".to_string());
+        bail!("{} ({}): {}", context_msg, status, error_body);
+    }
+
+    response
+        .json()
+        .await
+        .with_context(|| format!("{}: Failed to parse response", context_msg))
+}
+
 async fn refresh_token(access_token: &str) -> Result<TokenResponse> {
     let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
     validation.insecure_disable_signature_validation();
@@ -224,41 +247,51 @@ async fn refresh_token(access_token: &str) -> Result<TokenResponse> {
     validation.validate_nbf = false;
     validation.validate_exp = false;
 
-    match jsonwebtoken::decode::<Claims>(access_token, &DecodingKey::from_secret(&[]), &validation)
-    {
-        Ok(c) if jsonwebtoken::get_current_timestamp().saturating_sub(c.claims.iat) < 60 => {
+    let current_timestamp = jsonwebtoken::get_current_timestamp();
+
+    let decoded =
+        jsonwebtoken::decode::<Claims>(access_token, &DecodingKey::from_secret(&[]), &validation);
+
+    // If token is recently issued, return it immediately
+    if let Ok(ref c) = decoded {
+        if current_timestamp.saturating_sub(c.claims.iat) < 5 * 60 {
             return Ok(TokenResponse {
                 token: access_token.into(),
             });
         }
-        _ => {
-            println!("Refreshing authentication token...");
-        }
     }
 
-    reqwest::Client::new()
-        .post(format!("{API}/api/v1/credentials/refresh"))
-        .bearer_auth(access_token)
-        .send()
-        .await?
-        .error_for_status()
-        .context("Failed to refresh token")?
-        .json()
-        .await
-        .context("Failed to parse refresh token response")
+    println!("Refreshing authentication token...");
+
+    match api_request(
+        reqwest::Client::new()
+            .post(format!("{API}/api/v1/credentials/refresh"))
+            .bearer_auth(access_token),
+        "Failed to refresh token",
+    )
+    .await
+    {
+        Ok(response) => Ok(response),
+        Err(e) => match decoded {
+            Ok(c) if c.claims.exp.saturating_sub(current_timestamp) >= 86400 => {
+                println!("Refresh failed but existing token still valid, using existing token");
+                Ok(TokenResponse {
+                    token: access_token.into(),
+                })
+            }
+            _ => Err(e),
+        },
+    }
 }
 
 async fn setup_token(access_token: &str) -> Result<TokenResponse> {
-    reqwest::Client::new()
-        .post(format!("{API}/api/v1/credentials/setup"))
-        .bearer_auth(&access_token)
-        .send()
-        .await?
-        .error_for_status()
-        .context("Failed to exchange token")?
-        .json()
-        .await
-        .context("Failed to parse token response")
+    api_request(
+        reqwest::Client::new()
+            .post(format!("{API}/api/v1/credentials/setup"))
+            .bearer_auth(access_token),
+        "Failed to exchange token",
+    )
+    .await
 }
 
 async fn refresh_or_create_config(settings: &Settings) -> Result<SharedConfig> {
@@ -319,8 +352,8 @@ async fn create_config(settings: &Settings) -> Result<LocalConfig> {
 }
 
 async fn fetch_latest_release(program: Program) -> Result<BinaryResponse> {
-    let response = reqwest::Client::new()
-        .post(format!(
+    api_request(
+        reqwest::Client::new().post(format!(
             "{API}/api/v1/releases/{}/{ARCH}-linux/latest",
             match program {
                 #[cfg(target_arch = "x86_64")]
@@ -332,24 +365,10 @@ async fn fetch_latest_release(program: Program) -> Result<BinaryResponse> {
                 Program::Miner => "nbx-miner".to_string(),
                 Program::Proxy => "nbx-proxy".to_string(),
             },
-        ))
-        .send()
-        .await?;
-
-    // Check status and include error body if failed
-    if !response.status().is_success() {
-        let status = response.status();
-        let error_body = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unable to read error body".to_string());
-        bail!("Request failed with status {}: {}", status, error_body);
-    }
-
-    response
-        .json()
-        .await
-        .context("Failed to parse release response")
+        )),
+        "Failed to fetch latest release",
+    )
+    .await
 }
 
 async fn restart(program: Program) -> Result<()> {
@@ -394,11 +413,6 @@ async fn start(settings: Settings) -> Result<()> {
 }
 
 async fn execute(shared_config: SharedConfig, config: LocalConfig) -> Result<()> {
-    // Step 2: Request latest binary info from backend
-    println!("Checking for latest binary version...");
-    let latest_release = fetch_latest_release(config.program).await?;
-
-    // Step 3: Download the latest binary if it's different from the existing binary
     let cache_bin = cache_bin_path(config.program)?;
     let cache_version = cache_version_path(config.program)?;
 
@@ -411,58 +425,106 @@ async fn execute(shared_config: SharedConfig, config: LocalConfig) -> Result<()>
         println!("Current installed version {}", cached_version);
     }
 
-    let target_release = format!("{} {}", latest_release.version.trim(), runtime_cpu_level());
-
-    let need_download =
-        cached_version.is_none_or(|cached_version| cached_version.trim() != target_release);
-
-    if need_download {
-        println!(
-            "Downloading {} '{}' from '{}'",
-            config.program.as_str(),
-            latest_release.version,
-            latest_release.url,
-        );
-
-        let bytes = reqwest::Client::new()
-            .get(&latest_release.url)
-            .send()
-            .await?
-            .error_for_status()
-            .context("Failed to download binary")?
-            .bytes()
-            .await
-            .context("Failed to read binary data")?;
-
-        // Remove version file
-        let _ = fs::remove_file(&cache_version).await;
-
-        // Write binary
-        {
-            let mut f = fs::File::create(&cache_bin).await?;
-            f.write_all(&bytes).await?;
-            f.flush().await?;
+    // Step 2: Request latest binary info from backend
+    println!("Checking for latest binary version...");
+    let latest_release = match fetch_latest_release(config.program).await {
+        Ok(release) => Some(release),
+        Err(error) => {
+            if cached_version.is_some() {
+                println!(
+                    "Failed to retrieve the latest binary version, continuing with the current version; {}",
+                    error
+                );
+                None
+            } else {
+                return Err(error);
+            }
         }
+    };
 
-        // Make it executable
-        let perms = std::fs::Permissions::from_mode(0o755);
-        fs::set_permissions(&cache_bin, perms).await?;
+    // Step 3: Download the latest binary if it's different from the existing binary
+    if let Some(latest_release) = latest_release {
+        let target_release = format!("{} {}", latest_release.version.trim(), runtime_cpu_level());
 
-        // Write version file
-        let mut f = fs::File::create(&cache_version).await?;
-        f.write_all(target_release.as_bytes()).await?;
-        f.flush().await?;
+        let need_download = cached_version.as_ref().map_or(true, |cached_version| {
+            cached_version.trim() != target_release
+        });
 
-        println!(
-            "Installed {} {} to {}",
-            config.program.as_str(),
-            latest_release.version,
-            cache_bin.display()
-        );
+        if need_download {
+            println!(
+                "Downloading {} '{}' from '{}'",
+                config.program.as_str(),
+                latest_release.version,
+                latest_release.url,
+            );
+
+            // Download to binary to a temporary file first
+            let temp_bin = cache_bin.with_file_name(format!(
+                "{}.tmp",
+                cache_bin.file_name().unwrap().to_string_lossy()
+            ));
+
+            let download_result = async {
+                let bytes = reqwest::Client::new()
+                    .get(&latest_release.url)
+                    .send()
+                    .await?
+                    .error_for_status()
+                    .context("Failed to download binary")?
+                    .bytes()
+                    .await
+                    .context("Failed to read binary data")?;
+
+                // Write to temporary binary file
+                {
+                    let mut f = fs::File::create(&temp_bin).await?;
+                    f.write_all(&bytes).await?;
+                    f.flush().await?;
+                }
+
+                // Make it executable
+                let perms = std::fs::Permissions::from_mode(0o755);
+                fs::set_permissions(&temp_bin, perms).await?;
+
+                // Only now, replace the old binary
+                fs::rename(&temp_bin, &cache_bin).await?;
+
+                // Write to version file
+                {
+                    let mut f = fs::File::create(&cache_version).await?;
+                    f.write_all(target_release.as_bytes()).await?;
+                    f.flush().await?;
+                }
+
+                Ok(())
+            }
+            .await;
+
+            match download_result {
+                Ok(_) => {
+                    println!(
+                        "Installed {} {} to {}",
+                        config.program.as_str(),
+                        latest_release.version,
+                        cache_bin.display()
+                    );
+                }
+                Err(error) => {
+                    // Clean up the temporary file
+                    let _ = fs::remove_file(temp_bin).await;
+
+                    if cached_version.is_some() {
+                        println!(
+                            "Failed to download new version, continuing with cached version; {}",
+                            error
+                        );
+                    } else {
+                        return Err(error);
+                    }
+                }
+            }
+        }
     }
-
-    // Step 4: Launch the binary
-    println!("Starting {}...", config.program.as_str());
 
     let mut args = vec!["--miner-connect".to_string(), config.miner_connect];
 
@@ -481,16 +543,40 @@ async fn execute(shared_config: SharedConfig, config: LocalConfig) -> Result<()>
         envs.push(("NBX_AUTH_JWT", access_token));
     }
 
-    let status = Command::new(&cache_bin)
-        .args(args)
-        .args(&config.forward_args)
-        .envs(envs)
-        .status()
-        .await
-        .with_context(|| format!("failed to launch {}", cache_bin.display()))?;
+    // Step 4: Launch the binary with auto-restart on crash
+    loop {
+        println!("Starting {}...", config.program.as_str());
 
-    if !status.success() {
-        bail!("Process exited with {}", status);
+        let start_time = Instant::now();
+
+        let status = Command::new(&cache_bin)
+            .args(&args)
+            .args(&config.forward_args)
+            .envs(envs.clone())
+            .status()
+            .await
+            .with_context(|| format!("failed to launch {}", cache_bin.display()))?;
+
+        let elapsed = start_time.elapsed();
+
+        if status.success() {
+            // Clean exit, break out of the loop
+            break;
+        }
+
+        // If the process failed early, don't attempt to restart
+        if elapsed.as_secs() < 60 {
+            bail!("Process exited with {}", status);
+        }
+
+        eprintln!(
+            "Process exited with {} after running for {} seconds. Auto-restarting...",
+            status,
+            elapsed.as_secs()
+        );
+
+        // Brief delay before restarting
+        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
     }
 
     Ok(())
