@@ -14,6 +14,7 @@
 ?-  -.order
     %multiple  (create-multiple-inputs build-multiple-ledger)
     %single  (create-single-inputs build-single-ledger names)
+    %split  (create-split-inputs build-split-ledger names)
 ==
 ::
 ++  build-multiple-ledger
@@ -48,6 +49,22 @@
     ~|("insufficient funds: need {<(add gift.order fee)>}, have {<total-assets>}" !!)
   ::  create single ledger entry
   ~[[-.names recipient gift.order timelock-intent]]
+::
+++  build-split-ledger
+  ?>  ?=(%split -.order)
+  ?.  =(1 (lent names))
+    ~|("split mode requires exactly one name" !!)
+  =/  recipients=(list lock:transact)  (parse-recipients recipients.order)
+  =/  gifts=(list coins:transact)  gifts.order
+  ?.  (gth (lent recipients) 1)
+    ~|("split mode requires at least two recipients" !!)
+  ?.  =((lent recipients) (lent gifts))
+    ~|("different number of recipients and gifts" !!)
+  :*  -.names
+      recipients
+      gifts
+      timelock-intent
+  ==
 ::
 ++  create-multiple-inputs
   |=  =ledger:wt
@@ -86,6 +103,55 @@
   =/  gifts=coins:transact  gifts.i.ledger
   =/  =timelock-intent:transact  timelock-intent.i.ledger
   (distribute-single-spend names recipient gifts timelock-intent)
+::
+++  create-split-inputs
+  |=  $:  split-ledger=[name=nname:transact recipients=(list lock:transact) gifts=(list coins:transact) =timelock-intent:transact]
+          names=(list nname:transact)
+      ==
+  ^-  inputs:transact
+  =/  name=nname:transact  name.split-ledger
+  =/  note=nnote:transact  (get-note name)
+  =/  total-gift=coins:transact
+    %+  roll  gifts.split-ledger
+    |=  [gift=coins:transact acc=coins:transact]
+    (add acc gift)
+  ?.  (gte assets.note (add total-gift fee))
+    ~|("split note has insufficient assets: need {<(add total-gift fee)>}, have {<assets.note>}" !!)
+  =/  zipped
+    =/  rs  recipients.split-ledger
+    =/  gs  gifts.split-ledger
+    =|  zip=(list [lock:transact coins:transact])
+    |-
+    ?~  rs  zip
+    ?~  gs  zip
+    [[i.rs i.gs] $(rs t.rs, gs t.gs)]
+  =/  gift-seeds=(list seed:transact)
+    %+  turn  zipped
+    |=  [recipient=lock:transact gift=coins:transact]
+    %-  new:seed:transact
+    :*  *(unit source:transact)
+        recipient
+        timelock-intent.split-ledger
+        gift
+        (hash:nnote:transact note)
+    ==
+  =/  refund=coins:transact  (sub assets.note (add total-gift fee))
+  =/  seeds-with-refund=(list seed:transact)
+    ?:  =(0 refund)
+      gift-seeds
+    =/  refund-seed
+      %-  new:seed:transact
+      :*  *(unit source:transact)
+          lock.note
+          *timelock-intent:transact
+          refund
+          (hash:nnote:transact note)
+      ==
+    (weld gift-seeds ~[refund-seed])
+  =/  seeds-set=seeds:transact  (new:seeds:transact seeds-with-refund)
+  =/  spend-obj=spend:transact  (new:spend:transact seeds-set fee)
+  =.  spend-obj  (sign:spend:transact spend-obj sign-key)
+  (multi:new:inputs:transact ~[[note spend-obj]])
 ::
 ++  distribute-single-spend
   |=  $:  names=(list nname:transact)

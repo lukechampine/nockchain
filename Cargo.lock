@@ -3999,6 +3999,7 @@ dependencies = [
  "kernels",
  "nockapp",
  "nockapp-grpc",
+ "nockchain-math",
  "nockchain-types",
  "nockvm",
  "nockvm_macros",

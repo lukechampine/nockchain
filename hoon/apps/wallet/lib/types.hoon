@@ -203,6 +203,7 @@
   ::
   +$  order
     $%  [%multiple recipients=(list [m=@ pks=(list @t)]) gifts=(list coins:transact)]
+        [%split recipients=(list [m=@ pks=(list @t)]) gifts=(list coins:transact)]
         [%single recipient=[m=@ pks=(list @t)] gift=coins:transact]
     ==
   ::
