@@ -299,20 +299,38 @@ async fn refresh_or_create_config(settings: &Settings) -> Result<SharedConfig> {
     ensure_parent_dir(&cfg_path).await?;
     let existing_config: Result<SharedConfig> = read_toml(&cfg_path).await;
 
-    let access_token = if let Some(auth_token) = settings.auth_token() {
+    let mut access_token = existing_config
+        .as_ref()
+        .ok()
+        .and_then(|c| c.access_token.clone());
+
+    if let Some(auth_token) = settings.auth_token() {
         println!("Fetching new authentication token (remove --auth to skip)");
-        let response = setup_token(auth_token).await?;
-        Some(response.token)
-    } else if let Ok(SharedConfig {
-        access_token: Some(ref access_token),
-        ..
-    }) = existing_config
-    {
-        let response = refresh_token(access_token).await?;
-        Some(response.token)
-    } else if !settings.needs_token() {
-        None
-    } else {
+
+        match setup_token(auth_token).await {
+            Ok(response) => access_token = Some(response.token),
+            Err(e) => {
+                // Only error if this program requires a token and there is not already a local
+                //  access token. Otherwise, the launcher should continue and refresh the existing
+                //  token or proceed without access token at all.
+                if settings.needs_token() && access_token.is_none() {
+                    return Err(e);
+                }
+
+                eprintln!(
+                    "Failed to fetch new authentication token, \
+                    falling back to existing authentication token. {}",
+                    e,
+                );
+            }
+        }
+    }
+
+    if let Some(access_token) = access_token.as_mut() {
+        *access_token = refresh_token(access_token).await?.token;
+    }
+
+    if settings.needs_token() && access_token.is_none() {
         eprintln!("The authentication token was not set (--auth), and no previous token saved. This is needed for direct connections.");
         std::process::exit(1);
     };
