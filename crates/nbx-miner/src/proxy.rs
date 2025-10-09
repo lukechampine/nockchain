@@ -396,7 +396,7 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
 
     let main_iter = async {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
-        let mut telemetry_interval = tokio::time::interval(TELEMETRY_PROOFRATE_INTERVAL * 5);
+        let mut telemetry_interval = tokio::time::interval(TELEMETRY_PROOFRATE_INTERVAL);
         telemetry_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         #[cfg(feature = "db")]
         let db = db.clone();

@@ -25,9 +25,6 @@ enum DbMsg {
     TelemetryProofrate {
         machines: BTreeMap<Uuid, BTreeMap<Arc<str>, u32>>,
     },
-    TelemetryAggregateProofrate {
-        machines: BTreeMap<Uuid, BTreeMap<Arc<str>, u32>>,
-    },
     TelemetryHwinfo {
         machines: BTreeMap<Uuid, BTreeMap<Arc<str>, DeviceInfoWithSockets>>,
     },
@@ -83,31 +80,6 @@ impl Database {
                         .await
                 }
                 DbMsg::TelemetryProofrate {
-                    machines
-                } => {
-                    let query = "INSERT INTO \"proofrate\" (src, sub, machine_id, proof_rate)".to_string();
-                    let mut values = vec![];
-                    let mut binding = 2;
-                    for (_, m) in &machines {
-                        let sub_binding = binding;
-                        binding += 1;
-                        for _ in m {
-                            values.push(format!("( $1, ${sub_binding}, ${}, ${} )", binding, binding + 1));
-                            binding += 2;
-                        }
-                    }
-                    let query = format!("{query} VALUES {}", values.join(", "));
-                    let mut q = sqlx::query(&query)
-                        .bind(&*src_name);
-                    for (sub, m) in machines {
-                        q = q.bind(sub);
-                        for (mid, pr) in m {
-                            q = q.bind(mid.to_string()).bind(pr as i64);
-                        }
-                    }
-                    q.execute(&pool).await
-                }
-                DbMsg::TelemetryAggregateProofrate {
                     machines
                 } => {
                     let query = r#"
@@ -253,9 +225,6 @@ impl DatabaseHandle {
 
     pub fn submit_telemetry_proofrate(&self, proofrate: BTreeMap<Uuid, BTreeMap<Arc<str>, u32>>) {
         self.submit_msg(DbMsg::TelemetryProofrate {
-            machines: proofrate.clone(),
-        });
-        self.submit_msg(DbMsg::TelemetryAggregateProofrate {
             machines: proofrate,
         });
     }
