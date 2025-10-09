@@ -787,7 +787,10 @@ impl Wallet {
     ///
     /// Returns `NockAppError` if:
     /// - Name pairs are not properly formatted as "[first last]"
-    /// - Number of names, recipients, and gifts don't match
+    /// - Number of recipients and gifts don't match
+    /// - No names or recipients are provided
+    /// - Split mode is requested without exactly one name
+    /// - Multiple recipient mode is requested without matching name, recipient, and gift counts
     /// - Any input parsing fails
     ///
     /// # Example
@@ -875,20 +878,51 @@ impl Wallet {
 
         let gifts_vec: Vec<u64> = gifts.split(',').filter_map(|s| s.parse().ok()).collect();
 
-        // Verify lengths based on single vs multiple mode
-        if recipients_vec.len() == 1 && gifts_vec.len() == 1 {
-            // Single mode: can spend from multiple notes to single recipient
-            // No additional validation needed - any number of names is allowed
-        } else {
-            // Multiple mode: all lengths must match
-            if names_vec.len() != recipients_vec.len() || names_vec.len() != gifts_vec.len() {
-                return Err(CrownError::Unknown(
-                    "Multiple recipient mode requires names, recipients, and gifts to have the same length"
-                        .to_string(),
-                )
-                .into());
-            }
+        let names_len = names_vec.len();
+        let recipients_len = recipients_vec.len();
+        let gifts_len = gifts_vec.len();
+
+        if names_len == 0 {
+            return Err(
+                CrownError::Unknown("At least one note name must be provided".to_string()).into(),
+            );
         }
+
+        if recipients_len == 0 {
+            return Err(
+                CrownError::Unknown("At least one recipient must be provided".to_string()).into(),
+            );
+        }
+
+        if recipients_len != gifts_len {
+            return Err(CrownError::Unknown(
+                "Number of recipients must match number of gifts".to_string(),
+            )
+            .into());
+        }
+
+        enum OrderMode {
+            Single,
+            Split,
+            Multiple,
+        }
+
+        let order_mode = if recipients_len == 1 {
+            OrderMode::Single
+        } else if names_len == 1 {
+            OrderMode::Split
+        } else {
+            if names_len != recipients_len {
+                return Err(
+                    CrownError::Unknown(
+                        "Multiple recipient mode requires names, recipients, and gifts to have the same length"
+                            .to_string(),
+                    )
+                    .into(),
+                );
+            }
+            OrderMode::Multiple
+        };
 
         // Convert names to list of pairs
         let names_noun = names_vec
@@ -914,52 +948,53 @@ impl Wallet {
             None => D(0),
         };
 
-        // Create the order noun - use single or multiple mode based on input
-        let order_noun = if recipients_vec.len() == 1 && gifts_vec.len() == 1 {
-            // Single mode: [%single recipient_data gift_amount]
-            let single_tag = make_tas(&mut slab, "single").as_noun();
-            let single_recipient = recipients_vec.into_iter().next().unwrap();
-            let single_gift = gifts_vec.into_iter().next().unwrap();
+        // Create helper functions to convert vectors into nouns
+        fn recipients_to_noun(slab: &mut NounSlab, recipients: &[(u64, Vec<String>)]) -> Noun {
+            recipients.iter().rev().fold(D(0), |acc, (num, pubkeys)| {
+                let pubkeys_noun = pubkeys.iter().rev().fold(D(0), |acc_pub, pubkey| {
+                    let pubkey_noun = make_tas(slab, pubkey).as_noun();
+                    Cell::new(slab, pubkey_noun, acc_pub).as_noun()
+                });
 
-            // Create the recipient data [number pubkeys_list] for single case
-            let pubkeys_noun = single_recipient
-                .1
-                .into_iter()
-                .rev()
-                .fold(D(0), |acc, pubkey| {
-                    let pubkey_noun = make_tas(&mut slab, &pubkey).as_noun();
+                let pair = T(slab, &[D(*num), pubkeys_noun]);
+                Cell::new(slab, pair, acc).as_noun()
+            })
+        }
+
+        fn gifts_to_noun(slab: &mut NounSlab, gifts: &[u64]) -> Noun {
+            gifts.iter().rev().fold(D(0), |acc, amount| {
+                Cell::new(slab, D(*amount), acc).as_noun()
+            })
+        }
+
+        let order_noun = match order_mode {
+            OrderMode::Single => {
+                let single_tag = make_tas(&mut slab, "single").as_noun();
+                let single_recipient = &recipients_vec[0];
+                let single_gift = gifts_vec[0];
+
+                let pubkeys_noun = single_recipient.1.iter().rev().fold(D(0), |acc, pubkey| {
+                    let pubkey_noun = make_tas(&mut slab, pubkey).as_noun();
                     Cell::new(&mut slab, pubkey_noun, acc).as_noun()
                 });
-            let recipient_data = T(&mut slab, &[D(single_recipient.0), pubkeys_noun]);
+                let recipient_data = T(&mut slab, &[D(single_recipient.0), pubkeys_noun]);
 
-            T(&mut slab, &[single_tag, recipient_data, D(single_gift)])
-        } else {
-            // Multiple mode: [%multiple recipients_list gifts_list]
-            let multiple_tag = make_tas(&mut slab, "multiple").as_noun();
+                T(&mut slab, &[single_tag, recipient_data, D(single_gift)])
+            }
+            OrderMode::Split => {
+                let split_tag = make_tas(&mut slab, "split").as_noun();
+                let recipients_noun = recipients_to_noun(&mut slab, &recipients_vec);
+                let gifts_noun = gifts_to_noun(&mut slab, &gifts_vec);
 
-            // Convert recipients to list
-            let recipients_noun =
-                recipients_vec
-                    .into_iter()
-                    .rev()
-                    .fold(D(0), |acc, (num, pubkeys)| {
-                        // Create the inner list of pubkeys
-                        let pubkeys_noun = pubkeys.into_iter().rev().fold(D(0), |acc, pubkey| {
-                            let pubkey_noun = make_tas(&mut slab, &pubkey).as_noun();
-                            Cell::new(&mut slab, pubkey_noun, acc).as_noun()
-                        });
+                T(&mut slab, &[split_tag, recipients_noun, gifts_noun])
+            }
+            OrderMode::Multiple => {
+                let multiple_tag = make_tas(&mut slab, "multiple").as_noun();
+                let recipients_noun = recipients_to_noun(&mut slab, &recipients_vec);
+                let gifts_noun = gifts_to_noun(&mut slab, &gifts_vec);
 
-                        // Create the pair of [number pubkeys_list]
-                        let pair = T(&mut slab, &[D(num), pubkeys_noun]);
-                        Cell::new(&mut slab, pair, acc).as_noun()
-                    });
-
-            // Convert gifts to list
-            let gifts_noun = gifts_vec.into_iter().rev().fold(D(0), |acc, amount| {
-                Cell::new(&mut slab, D(amount), acc).as_noun()
-            });
-
-            T(&mut slab, &[multiple_tag, recipients_noun, gifts_noun])
+                T(&mut slab, &[multiple_tag, recipients_noun, gifts_noun])
+            }
         };
 
         // Convert timelock intent to noun. `~` encodes the absence of intent.
