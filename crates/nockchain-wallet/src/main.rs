@@ -5,16 +5,19 @@ mod connection;
 mod error;
 
 use std::fs;
+use std::io::{self, Write};
 use std::path::PathBuf;
 
 use clap::Parser;
 #[cfg(test)]
+use command::TimelockRangeCli;
+#[cfg(test)]
 use command::WalletWire;
-use command::{ClientType, CommandNoun, Commands, TimelockIntent, TimelockRange, WalletCli};
+use command::{ClientType, CommandNoun, Commands, TimelockIntentCli, WalletCli};
 use kernels::wallet::KERNEL;
 use nockapp::driver::*;
 use nockapp::kernel::boot;
-use nockapp::noun::slab::NounSlab;
+use nockapp::noun::slab::{NockJammer, NounSlab};
 use nockapp::utils::bytes::Byts;
 use nockapp::utils::make_tas;
 use nockapp::wire::{SystemWire, Wire};
@@ -25,11 +28,14 @@ use nockapp::{
 use nockapp_grpc::pb::common::v1::Base58Hash as PbBase58Hash;
 use nockapp_grpc::pb::public::v1::transaction_accepted_response;
 use nockapp_grpc::{private_nockapp, public_nockchain};
-use nockchain_types::tx_engine::note::{BalanceUpdate, Hash as DomainHash};
+use nockchain_types::tx_engine::note::{
+    BalanceUpdate, Hash as DomainHash, TimelockIntent, TimelockRangeAbsolute, TimelockRangeRelative,
+};
 use nockchain_types::SchnorrPubkey;
 use nockvm::jets::cold::Nounable;
-use nockvm::noun::{Atom, Cell, IndirectAtom, Noun, D, NO, SIG, T, YES};
-use noun_serde::{NounDecode, NounDecodeError, NounEncode};
+use nockvm::noun::{Atom, Cell, FullDebugCell, IndirectAtom, Noun, D, NO, SIG, T, YES};
+use noun_serde::prelude::*;
+use noun_serde::NounDecodeError;
 use termimad::MadSkin;
 use tokio::fs as tokio_fs;
 use tracing::{error, info};
@@ -266,23 +272,20 @@ async fn main() -> Result<(), NockAppError> {
             index,
             hardened,
             timelock_intent,
-            timelock_min,
         } => {
-            let parsed_timelock_intent = match timelock_intent.as_str() {
-                "absolute" => {
-                    TimelockIntent::absolute_only(TimelockRange::new(*timelock_min, None))
+            let parsed_timelock_intent = match timelock_intent {
+                Some(intent) => {
+                    let absolute_range = intent.absolute_range();
+                    let relative_range = intent.relative_range();
+
+                    let has_upper_bound = intent.has_upper_bound();
+
+                    if has_upper_bound {
+                        confirm_upper_bound_warning()?;
+                    }
+                    Wallet::timelock_intent_from_ranges(absolute_range, relative_range)
                 }
-                "relative" => {
-                    TimelockIntent::relative_only(TimelockRange::new(*timelock_min, None))
-                }
-                "none" => TimelockIntent::none(),
-                _ => {
-                    return Err(CrownError::Unknown(format!(
-                        "Unknown timelock intent: {}",
-                        timelock_intent
-                    ))
-                    .into())
-                }
+                None => None,
             };
 
             Wallet::create_tx(
@@ -292,7 +295,7 @@ async fn main() -> Result<(), NockAppError> {
                 *fee,
                 *index,
                 *hardened,
-                vec![parsed_timelock_intent],
+                parsed_timelock_intent,
             )
         }
         Commands::SendTx { transaction } => Wallet::send_tx(transaction),
@@ -717,6 +720,41 @@ impl Wallet {
         )
     }
 
+    fn timelock_intent_none() -> TimelockIntent {
+        TimelockIntent {
+            absolute: TimelockRangeAbsolute::none(),
+            relative: TimelockRangeRelative::none(),
+        }
+    }
+
+    fn timelock_intent_absolute(range: TimelockRangeAbsolute) -> TimelockIntent {
+        TimelockIntent {
+            absolute: range,
+            relative: TimelockRangeRelative::none(),
+        }
+    }
+
+    fn timelock_intent_relative(range: TimelockRangeRelative) -> TimelockIntent {
+        TimelockIntent {
+            absolute: TimelockRangeAbsolute::none(),
+            relative: range,
+        }
+    }
+
+    fn timelock_intent_from_ranges(
+        absolute: Option<TimelockRangeAbsolute>,
+        relative: Option<TimelockRangeRelative>,
+    ) -> Option<TimelockIntent> {
+        if absolute.is_none() && relative.is_none() {
+            None
+        } else {
+            Some(TimelockIntent {
+                absolute: absolute.unwrap_or_else(TimelockRangeAbsolute::none),
+                relative: relative.unwrap_or_else(TimelockRangeRelative::none),
+            })
+        }
+    }
+
     /// Creates a transaction by building transaction inputs from notes.
     ///
     /// Takes a list of note names, recipient addresses, and gift amounts to create
@@ -749,7 +787,10 @@ impl Wallet {
     ///
     /// Returns `NockAppError` if:
     /// - Name pairs are not properly formatted as "[first last]"
-    /// - Number of names, recipients, and gifts don't match
+    /// - Number of recipients and gifts don't match
+    /// - No names or recipients are provided
+    /// - Split mode is requested without exactly one name
+    /// - Multiple recipient mode is requested without matching name, recipient, and gift counts
     /// - Any input parsing fails
     ///
     /// # Example
@@ -759,7 +800,15 @@ impl Wallet {
     /// let recipients = "[1 pk1],[2 pk2,pk3,pk4]";
     /// let gifts = "100,200";
     /// let fee = 10;
-    /// wallet.create_tx(names.to_string(), recipients.to_string(), gifts.to_string(), fee)?;
+    /// wallet.create_tx(
+    ///     names.to_string(),
+    ///     recipients.to_string(),
+    ///     gifts.to_string(),
+    ///     fee,
+    ///     None,
+    ///     false,
+    ///     None,
+    /// )?;
     /// ```
     fn create_tx(
         names: String,
@@ -768,7 +817,7 @@ impl Wallet {
         fee: u64,
         index: Option<u64>,
         hardened: bool,
-        timelock_intents: Vec<TimelockIntent>,
+        timelock_intent: Option<TimelockIntent>,
     ) -> CommandNoun<NounSlab> {
         let mut slab = NounSlab::new();
 
@@ -829,29 +878,50 @@ impl Wallet {
 
         let gifts_vec: Vec<u64> = gifts.split(',').filter_map(|s| s.parse().ok()).collect();
 
-        // Verify lengths based on single vs multiple mode
-        if recipients_vec.len() == 1 && gifts_vec.len() == 1 {
-            // Single mode: can spend from multiple notes to single recipient
-            // No additional validation needed - any number of names is allowed
-        } else {
-            // Multiple mode: all lengths must match
-            if names_vec.len() != recipients_vec.len() || names_vec.len() != gifts_vec.len() {
-                return Err(CrownError::Unknown(
-                    "Multiple recipient mode requires names, recipients, and gifts to have the same length"
-                        .to_string(),
-                )
-                .into());
-            }
+        let names_len = names_vec.len();
+        let recipients_len = recipients_vec.len();
+        let gifts_len = gifts_vec.len();
+
+        if names_len == 0 {
+            return Err(
+                CrownError::Unknown("At least one note name must be provided".to_string()).into(),
+            );
         }
 
-        // Use the first timelock intent if provided, or a default one
-        let timelock_intent = if timelock_intents.is_empty() {
-            TimelockIntent::none()
+        if recipients_len == 0 {
+            return Err(
+                CrownError::Unknown("At least one recipient must be provided".to_string()).into(),
+            );
+        }
+
+        if recipients_len != gifts_len {
+            return Err(CrownError::Unknown(
+                "Number of recipients must match number of gifts".to_string(),
+            )
+            .into());
+        }
+
+        enum OrderMode {
+            Single,
+            Split,
+            Multiple,
+        }
+
+        let order_mode = if recipients_len == 1 {
+            OrderMode::Single
+        } else if names_len == 1 {
+            OrderMode::Split
         } else {
-            timelock_intents
-                .into_iter()
-                .next()
-                .unwrap_or(TimelockIntent::none())
+            if names_len != recipients_len {
+                return Err(
+                    CrownError::Unknown(
+                        "Multiple recipient mode requires names, recipients, and gifts to have the same length"
+                            .to_string(),
+                    )
+                    .into(),
+                );
+            }
+            OrderMode::Multiple
         };
 
         // Convert names to list of pairs
@@ -878,56 +948,65 @@ impl Wallet {
             None => D(0),
         };
 
-        // Create the order noun - use single or multiple mode based on input
-        let order_noun = if recipients_vec.len() == 1 && gifts_vec.len() == 1 {
-            // Single mode: [%single recipient_data gift_amount]
-            let single_tag = make_tas(&mut slab, "single").as_noun();
-            let single_recipient = recipients_vec.into_iter().next().unwrap();
-            let single_gift = gifts_vec.into_iter().next().unwrap();
+        // Create helper functions to convert vectors into nouns
+        fn recipients_to_noun(slab: &mut NounSlab, recipients: &[(u64, Vec<String>)]) -> Noun {
+            recipients.iter().rev().fold(D(0), |acc, (num, pubkeys)| {
+                let pubkeys_noun = pubkeys.iter().rev().fold(D(0), |acc_pub, pubkey| {
+                    let pubkey_noun = make_tas(slab, pubkey).as_noun();
+                    Cell::new(slab, pubkey_noun, acc_pub).as_noun()
+                });
 
-            // Create the recipient data [number pubkeys_list] for single case
-            let pubkeys_noun = single_recipient
-                .1
-                .into_iter()
-                .rev()
-                .fold(D(0), |acc, pubkey| {
-                    let pubkey_noun = make_tas(&mut slab, &pubkey).as_noun();
+                let pair = T(slab, &[D(*num), pubkeys_noun]);
+                Cell::new(slab, pair, acc).as_noun()
+            })
+        }
+
+        fn gifts_to_noun(slab: &mut NounSlab, gifts: &[u64]) -> Noun {
+            gifts.iter().rev().fold(D(0), |acc, amount| {
+                Cell::new(slab, D(*amount), acc).as_noun()
+            })
+        }
+
+        let order_noun = match order_mode {
+            OrderMode::Single => {
+                let single_tag = make_tas(&mut slab, "single").as_noun();
+                let single_recipient = &recipients_vec[0];
+                let single_gift = gifts_vec[0];
+
+                let pubkeys_noun = single_recipient.1.iter().rev().fold(D(0), |acc, pubkey| {
+                    let pubkey_noun = make_tas(&mut slab, pubkey).as_noun();
                     Cell::new(&mut slab, pubkey_noun, acc).as_noun()
                 });
-            let recipient_data = T(&mut slab, &[D(single_recipient.0), pubkeys_noun]);
+                let recipient_data = T(&mut slab, &[D(single_recipient.0), pubkeys_noun]);
 
-            T(&mut slab, &[single_tag, recipient_data, D(single_gift)])
-        } else {
-            // Multiple mode: [%multiple recipients_list gifts_list]
-            let multiple_tag = make_tas(&mut slab, "multiple").as_noun();
+                T(&mut slab, &[single_tag, recipient_data, D(single_gift)])
+            }
+            OrderMode::Split => {
+                let split_tag = make_tas(&mut slab, "split").as_noun();
+                let recipients_noun = recipients_to_noun(&mut slab, &recipients_vec);
+                let gifts_noun = gifts_to_noun(&mut slab, &gifts_vec);
 
-            // Convert recipients to list
-            let recipients_noun =
-                recipients_vec
-                    .into_iter()
-                    .rev()
-                    .fold(D(0), |acc, (num, pubkeys)| {
-                        // Create the inner list of pubkeys
-                        let pubkeys_noun = pubkeys.into_iter().rev().fold(D(0), |acc, pubkey| {
-                            let pubkey_noun = make_tas(&mut slab, &pubkey).as_noun();
-                            Cell::new(&mut slab, pubkey_noun, acc).as_noun()
-                        });
+                T(&mut slab, &[split_tag, recipients_noun, gifts_noun])
+            }
+            OrderMode::Multiple => {
+                let multiple_tag = make_tas(&mut slab, "multiple").as_noun();
+                let recipients_noun = recipients_to_noun(&mut slab, &recipients_vec);
+                let gifts_noun = gifts_to_noun(&mut slab, &gifts_vec);
 
-                        // Create the pair of [number pubkeys_list]
-                        let pair = T(&mut slab, &[D(num), pubkeys_noun]);
-                        Cell::new(&mut slab, pair, acc).as_noun()
-                    });
-
-            // Convert gifts to list
-            let gifts_noun = gifts_vec.into_iter().rev().fold(D(0), |acc, amount| {
-                Cell::new(&mut slab, D(amount), acc).as_noun()
-            });
-
-            T(&mut slab, &[multiple_tag, recipients_noun, gifts_noun])
+                T(&mut slab, &[multiple_tag, recipients_noun, gifts_noun])
+            }
         };
 
-        // Convert timelock intent to noun
+        // Convert timelock intent to noun. `~` encodes the absence of intent.
         let timelock_intent_noun = timelock_intent.to_noun(&mut slab);
+
+        if timelock_intent.is_some() {
+            tracing::debug!(
+                "Converted timelock intent {:?} to noun: {:?}",
+                timelock_intent,
+                FullDebugCell(&timelock_intent_noun.as_cell()?)
+            );
+        }
 
         Self::wallet(
             "create-tx",
@@ -974,7 +1053,12 @@ impl Wallet {
         for (index, key) in pubkeys.iter().enumerate() {
             let mut slab = NounSlab::new(); // Define slab - adjust as needed
             let peek_path = vec!["balance-by-pubkey".to_string(), key.clone()];
-            let response = client.peek(index as i32, peek_path).await.map_err(|e| {
+            let mut path_slab = NounSlab::<NockJammer>::new();
+            let path_noun = peek_path.to_noun(&mut path_slab);
+            path_slab.set_root(path_noun);
+            let path_bytes = path_slab.jam().to_vec();
+
+            let response = client.peek(index as i32, path_bytes).await.map_err(|e| {
                 NockAppError::OtherError(format!("Failed to peek current balance: {}", e))
             })?;
             let balance = slab.cue_into(response.as_bytes()?)?;
@@ -1126,6 +1210,29 @@ pub async fn wallet_data_dir() -> Result<PathBuf, NockAppError> {
     Ok(wallet_data_dir)
 }
 
+fn confirm_upper_bound_warning() -> Result<(), NockAppError> {
+    println!(
+        "Warning: specifying an upper timelock bound will make the output unspendable after that height. Only use this feature if you know what you're doing."
+    );
+    print!("Type 'YES' to continue: ");
+    io::stdout()
+        .flush()
+        .map_err(|e| CrownError::Unknown(format!("Failed to flush stdout: {}", e)))?;
+    let mut response = String::new();
+    io::stdin()
+        .read_line(&mut response)
+        .map_err(|e| CrownError::Unknown(format!("Failed to read confirmation: {}", e)))?;
+
+    if response.trim() == "YES" {
+        Ok(())
+    } else {
+        Err(CrownError::Unknown(
+            "Aborted create-tx because upper bound was not confirmed with YES".into(),
+        )
+        .into())
+    }
+}
+
 async fn run_transaction_accepted(
     connection: &connection::ConnectionCli,
     tx_id: &str,
@@ -1218,6 +1325,8 @@ mod tests {
     use nockapp::kernel::boot::{self, Cli as BootCli};
     use nockapp::wire::SystemWire;
     use nockapp::{exit_driver, AtomExt, Bytes};
+    use nockchain_math::belt::Belt;
+    use nockchain_types::{BlockHeight, BlockHeightDelta};
     use tokio::sync::mpsc;
 
     use super::*;
@@ -1229,6 +1338,100 @@ mod tests {
             let cli = boot::default_boot_cli(true);
             boot::init_default_tracing(&cli);
         });
+    }
+
+    #[test]
+    fn timelock_intent_none_matches_domain_defaults() {
+        let intent = Wallet::timelock_intent_none();
+
+        assert_eq!(intent.absolute, TimelockRangeAbsolute::none());
+        assert_eq!(intent.relative, TimelockRangeRelative::none());
+    }
+
+    #[test]
+    fn timelock_intent_absolute_converts_cli_range() {
+        let range_cli = TimelockRangeCli::from_bounds(Some(42), Some(84)).unwrap();
+
+        let intent = Wallet::timelock_intent_absolute(range_cli.absolute());
+
+        let expected = TimelockIntent {
+            absolute: TimelockRangeAbsolute::new(
+                Some(BlockHeight(Belt(42))),
+                Some(BlockHeight(Belt(84))),
+            ),
+            relative: TimelockRangeRelative::none(),
+        };
+
+        assert_eq!(intent, expected);
+    }
+
+    #[test]
+    fn timelock_intent_relative_converts_cli_range() {
+        let range_cli = TimelockRangeCli::from_bounds(Some(5), Some(9)).unwrap();
+
+        let intent = Wallet::timelock_intent_relative(range_cli.relative());
+
+        let expected = TimelockIntent {
+            absolute: TimelockRangeAbsolute::none(),
+            relative: TimelockRangeRelative::new(
+                Some(BlockHeightDelta(Belt(5))),
+                Some(BlockHeightDelta(Belt(9))),
+            ),
+        };
+
+        assert_eq!(intent, expected);
+    }
+
+    #[test]
+    fn timelock_cli_accepts_open_upper_bound() {
+        let range: TimelockRangeCli = "..5".parse().unwrap();
+        let absolute = range.absolute();
+        assert_eq!(absolute.min, None);
+        assert_eq!(absolute.max, Some(BlockHeight(Belt(5))));
+    }
+
+    #[test]
+    fn timelock_cli_accepts_open_lower_bound() {
+        let range: TimelockRangeCli = "7..".parse().unwrap();
+        let relative = range.relative();
+        assert_eq!(relative.min, Some(BlockHeightDelta(Belt(7))));
+        assert_eq!(relative.max, None);
+    }
+
+    #[test]
+    fn timelock_cli_rejects_descending_bounds() {
+        let err = TimelockRangeCli::from_bounds(Some(10), Some(5)).unwrap_err();
+        assert!(err.contains("min <= max"));
+    }
+
+    #[test]
+    fn timelock_cli_allows_fully_open_interval() {
+        let range: TimelockRangeCli = "..".parse().unwrap();
+        assert!(range.absolute().min.is_none() && range.absolute().max.is_none());
+        assert!(range.relative().min.is_none() && range.relative().max.is_none());
+        assert!(!range.has_upper_bound());
+    }
+
+    #[test]
+    fn timelock_intent_from_ranges_handles_none() {
+        assert!(Wallet::timelock_intent_from_ranges(None, None).is_none());
+
+        let explicit_none = Wallet::timelock_intent_from_ranges(
+            Some(TimelockRangeAbsolute::none()),
+            Some(TimelockRangeRelative::none()),
+        )
+        .expect("expected explicit timelock intent");
+
+        assert_eq!(explicit_none, Wallet::timelock_intent_none());
+    }
+
+    #[test]
+    fn timelock_intent_from_ranges_accepts_partial_specs() {
+        let absolute = TimelockRangeAbsolute::none();
+        let intent = Wallet::timelock_intent_from_ranges(Some(absolute.clone()), None)
+            .expect("absolute range should produce intent");
+        assert_eq!(intent.absolute, absolute);
+        assert_eq!(intent.relative, TimelockRangeRelative::none());
     }
 
     #[tokio::test]
@@ -1604,7 +1807,7 @@ mod tests {
             fee,
             None,
             false,
-            vec![TimelockIntent::none()],
+            Some(Wallet::timelock_intent_none()),
         )?;
         let wire = WalletWire::Command(Commands::CreateTx {
             names: names.clone(),
@@ -1613,8 +1816,7 @@ mod tests {
             fee: fee.clone(),
             index: None,
             hardened: false,
-            timelock_intent: "none".to_string(),
-            timelock_min: None,
+            timelock_intent: None,
         })
         .to_wire();
         let spend_result = wallet.app.poke(wire, noun.clone()).await?;
@@ -1649,7 +1851,7 @@ mod tests {
             fee,
             None,
             false,
-            vec![TimelockIntent::none()],
+            Some(Wallet::timelock_intent_none()),
         )?;
 
         let wire1 = WalletWire::Command(Commands::ImportKeys {
@@ -1671,8 +1873,7 @@ mod tests {
             fee: fee.clone(),
             index: None,
             hardened: false,
-            timelock_intent: "none".to_string(),
-            timelock_min: None,
+            timelock_intent: None,
         })
         .to_wire();
         let spend_result = wallet.app.poke(wire2, spend_noun.clone()).await?;

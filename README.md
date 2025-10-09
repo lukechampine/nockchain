@@ -84,7 +84,7 @@ This will save your keys to a file called `keys.export` in the current directory
 They can be imported later with:
 
 ```
-nockchain-wallet import-keys --input keys.export
+nockchain-wallet import-keys --file keys.export
 ```
 
 ## Running Nodes
@@ -227,7 +227,7 @@ To check your wallet balance:
 
 ```bash
 # List all notes by pubkey
-nockchain-wallet list-notes-by-pubkey -p <your-pubkey>
+nockchain-wallet list-notes-by-pubkey <your-pubkey>
 ```
 
 ### How do I configure logging levels?
