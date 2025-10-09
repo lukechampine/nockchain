@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
 use sysinfo::{MemoryRefreshKind, System};
 
-use crate::proto::NAME_MAX_LENGTH;
+use crate::proto::DEVICE_ID_LENGTH;
 
 const LOG_TARGET: &str = "nbx::device";
 pub const RANDOMNESS_ENV: &str = "NBX_DEVICE_RANDOMNESS";
@@ -191,6 +191,6 @@ fn hwid(key: &str, dev: &DeviceInfo) -> Arc<str> {
         state.update(cpu);
     }
     let mut ret = format!("{:x}", state.finalize());
-    ret.truncate(core::cmp::min(NAME_MAX_LENGTH, 8));
+    ret.truncate(DEVICE_ID_LENGTH);
     ret.into()
 }

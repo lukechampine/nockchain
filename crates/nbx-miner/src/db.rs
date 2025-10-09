@@ -25,6 +25,9 @@ enum DbMsg {
     TelemetryProofrate {
         machines: BTreeMap<Uuid, BTreeMap<Arc<str>, u32>>,
     },
+    TelemetryAggregateProofrate {
+        machines: BTreeMap<Uuid, BTreeMap<Arc<str>, u32>>,
+    },
     TelemetryHwinfo {
         machines: BTreeMap<Uuid, BTreeMap<Arc<str>, DeviceInfoWithSockets>>,
     },
@@ -103,6 +106,54 @@ impl Database {
                         }
                     }
                     q.execute(&pool).await
+                }
+                DbMsg::TelemetryAggregateProofrate {
+                    machines
+                } => {
+                    let query = r#"
+                        -- $1 ::uuid[]          -- subs
+                        -- $2 ::varchar(8)[]    -- machine_ids
+                        -- $3 ::int[]           -- cur values (same length as $2)
+
+                        WITH d AS (
+                          SELECT s::uuid AS sub, m::varchar(8) AS machine_id, v::int AS cur
+                          FROM unnest($1::uuid[], $2::varchar(8)[], $3::int[]) AS t(s, m, v)
+                        )
+                        INSERT INTO "aggregate_proofrate" (
+                            sub, machine_id,
+                            cur_proof_rate, sum_proof_rate, min_proof_rate, max_proof_rate,
+                            num_rates
+                          )
+                        SELECT sub, machine_id, cur, cur, cur, cur, 1
+                        FROM d
+                        ON CONFLICT (sub, machine_id, created_at_hour)
+                        DO UPDATE SET
+                          cur_proof_rate = EXCLUDED.cur_proof_rate,
+                          sum_proof_rate = aggregate_proofrate.sum_proof_rate + EXCLUDED.sum_proof_rate,
+                          min_proof_rate = LEAST(aggregate_proofrate.min_proof_rate, EXCLUDED.min_proof_rate),
+                          max_proof_rate = GREATEST(aggregate_proofrate.max_proof_rate, EXCLUDED.max_proof_rate),
+                          num_rates = aggregate_proofrate.num_rates + 1,
+                          updated_at = NOW();
+                    "#;
+
+                    let mut subs = vec![];
+                    let mut machine_ids = vec![];
+                    let mut proofrates = vec![];
+
+                    for (sub, machines) in &machines {
+                        for (machine_id, proofrate) in machines {
+                            subs.push(*sub);
+                            machine_ids.push(&**machine_id);
+                            proofrates.push(*proofrate as i64);
+                        }
+                    }
+
+                    sqlx::query(query)
+                        .bind(&subs)
+                        .bind(&machine_ids)
+                        .bind(&proofrates)
+                        .execute(&pool)
+                        .await
                 }
                 DbMsg::TelemetryHwinfo {
                     machines
@@ -202,6 +253,9 @@ impl DatabaseHandle {
 
     pub fn submit_telemetry_proofrate(&self, proofrate: BTreeMap<Uuid, BTreeMap<Arc<str>, u32>>) {
         self.submit_msg(DbMsg::TelemetryProofrate {
+            machines: proofrate.clone(),
+        });
+        self.submit_msg(DbMsg::TelemetryAggregateProofrate {
             machines: proofrate,
         });
     }

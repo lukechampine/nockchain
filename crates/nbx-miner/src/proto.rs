@@ -27,6 +27,7 @@ use crate::shared::{self, JwtClaims};
 
 pub const PROTOCOL: u32 = 7;
 pub const NAME_MAX_LENGTH: usize = 16;
+pub const DEVICE_ID_LENGTH: usize = 8;
 pub const RECENTLY_EXPIRED_DURATION: Duration = Duration::from_secs(20);
 pub const PROTO_POW_DIFFICULTY: u32 = 18;
 pub const JWT_MAX_LENGTH: usize = 1024;
@@ -1237,6 +1238,12 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                                 "telemetry_proofrate",
                             )
                             .await?;
+                            if machines.keys().any(|v| v.len() > DEVICE_ID_LENGTH) {
+                                return Err(io::Error::new(
+                                    io::ErrorKind::InvalidData,
+                                    "Proofrate includes machine IDs beyond allowed length",
+                                ));
+                            }
                             ClientDataReadType::Telemetry(shared::Telemetry::Proofrate { machines })
                         }
                         TelemetryResponse::HWINFO => {
@@ -1248,6 +1255,12 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                                 "telemetry_hwinfo",
                             )
                             .await?;
+                            if machines.keys().any(|v| v.len() > DEVICE_ID_LENGTH) {
+                                return Err(io::Error::new(
+                                    io::ErrorKind::InvalidData,
+                                    "HwInfo includes machine IDs beyond allowed length",
+                                ));
+                            }
                             machines
                                 .values_mut()
                                 .for_each(|v| v.sockets_incoming.push(client_addr));
