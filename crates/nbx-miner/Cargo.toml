@@ -23,7 +23,7 @@ prom-exporter = ["metrics-exporter-prometheus", "metrics-util"]
 # Enables client module, which is necessary for the client binary
 client = ["kernels/miner"]
 # Enables launcher module, which is necessary for the launcher binary
-launcher = ["dirs", "reqwest"]
+launcher = ["dirs", "reqwest", "axum", "axum-extra", "http", "chrono"]
 # Enables server-based verification, and proxy difficulty adjustments
 verifier = ["kernels/verifier"]
 # Forces the server pre-verify the proofs. Mandatory for pool setups
@@ -96,6 +96,10 @@ clap-serde-derive.workspace = true
 obfstr.workspace = true
 dirs = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true, features = ["json"] }
+axum = { workspace = true, optional = true, features = ["json"] }
+axum-extra = { workspace = true, optional = true }
+http = { workspace = true, optional = true }
+chrono = { workspace = true, optional = true }
 
 zkvm-jetpack.workspace = true
 nockchain-math.workspace = true

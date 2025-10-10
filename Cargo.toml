@@ -190,6 +190,8 @@ toml = "0.9"
 goldberg = "0.1"
 obfstr = "0.4"
 clap-serde-derive = "0.2"
+axum-extra = { version = "0.10" }
+http = { version = "1" }
 
 metrics = "0.24"
 metrics-util = "0.20.0"

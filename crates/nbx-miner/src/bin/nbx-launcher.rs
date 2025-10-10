@@ -1,4 +1,5 @@
 use std::io;
+use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -46,6 +47,12 @@ enum Target {
 struct Cli {
     #[command(subcommand)]
     command: Commands,
+    /// Address to bind the binary cache API server on
+    #[arg(long)]
+    cache_bind: Option<SocketAddr>,
+    /// Binary cache to download releases from
+    #[arg(long, default_value = API)]
+    binary_cache_url: String,
 }
 
 #[derive(Debug, Subcommand)]
@@ -58,6 +65,8 @@ enum Commands {
     Restart {
         program: Program,
     },
+    // Serve binaries and do nothing else
+    Binserve,
 }
 
 #[derive(Debug, Subcommand)]
@@ -201,19 +210,86 @@ struct Claims {
     exp: u64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct BinaryResponse {
     version: String,
     url: String,
+}
+
+use axum::{extract, Json};
+use http::status::StatusCode;
+
+async fn latest_release_info(
+    axum_extra::extract::Host(host): axum_extra::extract::Host,
+    extract::Path((bin, arch)): extract::Path<(String, String)>,
+) -> axum::response::Result<Json<BinaryResponse>> {
+    let release_path = format!("{bin}/{arch}");
+    let (_, binname, version) = ensure_latest_release(API, &release_path)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(BinaryResponse {
+        version,
+        url: format!("{host}/api/v1/releases/{bin}/{arch}/{binname}"),
+    }))
+}
+
+async fn get_latest_release(
+    extract::Path((bin, arch)): extract::Path<(String, String)>,
+) -> axum::response::Result<Vec<u8>> {
+    let release_path = format!("{bin}/{arch}");
+    let (binpath, _, _) = ensure_latest_release(API, &release_path)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    tokio::fs::read(binpath)
+        .await
+        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()).into())
+}
+
+async fn get_release(
+    extract::Path((bin, arch, version)): extract::Path<(String, String, String)>,
+) -> axum::response::Result<Vec<u8>> {
+    let cache_dir = cache_path().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let release_path = format!("{bin}/{arch}/{version}");
+    tokio::fs::read(cache_dir.join(&release_path))
+        .await
+        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()).into())
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    let h = if let Some(sock) = cli.cache_bind {
+        use axum::routing::{get, post};
+        use axum::Router;
+
+        let app = Router::new().nest(
+            "/api/v1/releases",
+            Router::new()
+                .route("/{bin}/{arch}/latest", post(latest_release_info))
+                .route("/{bin}/{arch}/latest", get(get_latest_release))
+                .route("/{bin}/{arch}/{version}", get(get_release)),
+        );
+
+        let listener = tokio::net::TcpListener::bind(sock).await?;
+        println!("Bound binary cache on {sock}");
+        Some(tokio::spawn(
+            async move { axum::serve(listener, app).await },
+        ))
+    } else {
+        None
+    };
+
     match cli.command {
-        Commands::Start { settings } => start(settings).await?,
-        Commands::Restart { program } => restart(program).await?,
+        Commands::Start { settings } => start(&cli.binary_cache_url, settings).await?,
+        Commands::Restart { program } => restart(&cli.binary_cache_url, program).await?,
+        Commands::Binserve => {
+            if let Some(h) = h {
+                h.await;
+            } else {
+                bail!("Binary cache is not being served. Please set --cache-bind parameter (e.g. [::]:9555).");
+            }
+        }
     };
 
     Ok(())
@@ -351,27 +427,33 @@ async fn create_config(settings: &Settings) -> Result<LocalConfig> {
     Ok(config)
 }
 
-async fn fetch_latest_release(program: Program) -> Result<BinaryResponse> {
+fn program_path(program: Program) -> String {
+    let release = format!(
+        "{}/{ARCH}-linux",
+        match program {
+            #[cfg(target_arch = "x86_64")]
+            Program::Miner => format!(
+                "nbx-miner-{}",
+                runtime_cpu_level().strip_prefix("x86_64-").unwrap_or("v2")
+            ),
+            #[cfg(not(target_arch = "x86_64"))]
+            Program::Miner => "nbx-miner".to_string(),
+            Program::Proxy => "nbx-proxy".to_string(),
+        },
+    );
+
+    release
+}
+
+async fn fetch_latest_release(api: &str, release: &str) -> Result<BinaryResponse> {
     api_request(
-        reqwest::Client::new().post(format!(
-            "{API}/api/v1/releases/{}/{ARCH}-linux/latest",
-            match program {
-                #[cfg(target_arch = "x86_64")]
-                Program::Miner => format!(
-                    "nbx-miner-{}",
-                    runtime_cpu_level().strip_prefix("x86_64-").unwrap_or("v2")
-                ),
-                #[cfg(not(target_arch = "x86_64"))]
-                Program::Miner => "nbx-miner".to_string(),
-                Program::Proxy => "nbx-proxy".to_string(),
-            },
-        )),
+        reqwest::Client::new().post(format!("{api}/api/v1/releases/{release}/latest")),
         "Failed to fetch latest release",
     )
     .await
 }
 
-async fn restart(program: Program) -> Result<()> {
+async fn restart(api: &str, program: Program) -> Result<()> {
     let cfg_path = config_file_path(program)?;
     let shared_cfg_path = shared_config_file_path()?;
     ensure_parent_dir(&cfg_path).await?;
@@ -397,72 +479,81 @@ async fn restart(program: Program) -> Result<()> {
         write_toml(&shared_cfg_path, &shared_config).await?;
     }
 
-    execute(shared_config, local_config).await?;
+    execute(api, shared_config, local_config).await?;
 
     Ok(())
 }
 
-async fn start(settings: Settings) -> Result<()> {
-    // Step 1: Fetch a fresh access token
-    let shared_config = refresh_or_create_config(&settings).await?;
-    let config = create_config(&settings).await?;
+async fn ensure_latest_release(api: &str, release_path: &str) -> Result<(PathBuf, String, String)> {
+    let cache_path = cache_path()?;
+    let cache_dir = cache_path.join(&release_path);
+    let cache_version = cache_dir.join("version.txt");
+    let last_checked = cache_dir.join("last_checked.txt");
+    fs::create_dir_all(&cache_dir).await?;
 
-    execute(shared_config, config).await?;
-
-    Ok(())
-}
-
-async fn execute(shared_config: SharedConfig, config: LocalConfig) -> Result<()> {
-    let cache_bin = cache_bin_path(config.program)?;
-    let cache_version = cache_version_path(config.program)?;
-
-    ensure_parent_dir(&cache_bin).await?;
-    ensure_parent_dir(&cache_version).await?;
-
+    let last_checked_time = fs::read_to_string(&last_checked)
+        .await
+        .ok()
+        .and_then(|v| v.parse::<i64>().ok());
     let cached_version = fs::read_to_string(&cache_version).await.ok();
+    let cur_ts = chrono::Utc::now().timestamp();
 
     if let Some(cached_version) = cached_version.as_ref() {
-        println!("Current installed version {}", cached_version);
+        println!("Current installed version of {release_path}: {cached_version}");
     }
 
     // Step 2: Request latest binary info from backend
-    println!("Checking for latest binary version...");
-    let latest_release = match fetch_latest_release(config.program).await {
-        Ok(release) => Some(release),
-        Err(error) => {
-            if cached_version.is_some() {
-                println!(
-                    "Failed to retrieve the latest binary version, continuing with the current version; {}",
-                    error
-                );
-                None
-            } else {
-                return Err(error);
+    let ts_delta = last_checked_time.map(|v| cur_ts - v);
+    let latest_release = if cached_version.is_none()
+        || ts_delta.map(|v| v > 0 && v > 60).unwrap_or(true)
+    {
+        println!("Checking for latest binary version...");
+        match fetch_latest_release(api, &release_path).await {
+            Ok(release) => Some(release),
+            Err(error) => {
+                if cached_version.is_some() {
+                    println!(
+                        "Failed to retrieve the latest binary version, continuing with the current version; {}",
+                        error
+                    );
+                    None
+                } else {
+                    return Err(error);
+                }
             }
         }
+    } else {
+        println!(
+            "Not checking for new release: recently checked ({} seconds ago).",
+            ts_delta.unwrap()
+        );
+        None
     };
 
     // Step 3: Download the latest binary if it's different from the existing binary
     if let Some(latest_release) = latest_release {
-        let target_release = format!("{} {}", latest_release.version.trim(), runtime_cpu_level());
+        let _ = fs::write(last_checked, format!("{cur_ts}").as_bytes()).await;
+        let target_release = &latest_release.version;
 
         let need_download = cached_version.as_ref().map_or(true, |cached_version| {
-            cached_version.trim() != target_release
+            if cached_version.trim() != target_release {
+                return true;
+            }
+            let map_version = latest_release.version.replace(" ", "_");
+            let cache_bin = cache_dir.join(&map_version);
+            !cache_bin.exists()
         });
 
         if need_download {
             println!(
-                "Downloading {} '{}' from '{}'",
-                config.program.as_str(),
-                latest_release.version,
-                latest_release.url,
+                "Downloading {release_path} '{}' from '{}'",
+                latest_release.version, latest_release.url,
             );
 
             // Download to binary to a temporary file first
-            let temp_bin = cache_bin.with_file_name(format!(
-                "{}.tmp",
-                cache_bin.file_name().unwrap().to_string_lossy()
-            ));
+            let map_version = latest_release.version.replace(" ", "_");
+            let cache_bin = cache_dir.join(&map_version);
+            let temp_bin = cache_dir.join(&format!("{map_version}.tmp"));
 
             let download_result = async {
                 let bytes = reqwest::Client::new()
@@ -503,11 +594,11 @@ async fn execute(shared_config: SharedConfig, config: LocalConfig) -> Result<()>
             match download_result {
                 Ok(_) => {
                     println!(
-                        "Installed {} {} to {}",
-                        config.program.as_str(),
+                        "Installed {release_path} {} to {}",
                         latest_release.version,
                         cache_bin.display()
                     );
+                    return Ok((cache_bin, map_version, latest_release.version));
                 }
                 Err(error) => {
                     // Clean up the temporary file
@@ -525,6 +616,31 @@ async fn execute(shared_config: SharedConfig, config: LocalConfig) -> Result<()>
             }
         }
     }
+
+    if let Some(v) = cached_version {
+        let map_version = v.replace(" ", "_");
+        let cache_bin = cache_dir.join(&map_version);
+        Ok((cache_bin, map_version, v))
+    } else {
+        return Err(anyhow::anyhow!(
+            "Unable to find cached release, or download new version"
+        ));
+    }
+}
+
+async fn start(api: &str, settings: Settings) -> Result<()> {
+    // Step 1: Fetch a fresh access token
+    let shared_config = refresh_or_create_config(&settings).await?;
+    let config = create_config(&settings).await?;
+
+    execute(api, shared_config, config).await?;
+
+    Ok(())
+}
+
+async fn execute(api: &str, shared_config: SharedConfig, config: LocalConfig) -> Result<()> {
+    let release_path = program_path(config.program);
+    let (cache_bin, _, _) = ensure_latest_release(api, &release_path).await?;
 
     let mut args = vec!["--miner-connect".to_string(), config.miner_connect];
 
@@ -610,18 +726,12 @@ fn config_file_path(program: Program) -> Result<PathBuf> {
     Ok(dir.join(format!("{}.toml", program.as_str())))
 }
 
-fn cache_bin_path(program: Program) -> Result<PathBuf> {
+fn cache_path() -> Result<PathBuf> {
     let dir = dirs::cache_dir()
         .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "no cache dir"))?
-        .join("nbx");
-    Ok(dir.join(program.as_str()))
-}
-
-fn cache_version_path(program: Program) -> Result<PathBuf> {
-    let dir = dirs::cache_dir()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "no cache dir"))?
-        .join("nbx");
-    Ok(dir.join(format!("{}.version", program.as_str())))
+        .join("nbx")
+        .join("bincache");
+    Ok(dir)
 }
 
 async fn ensure_parent_dir(p: &Path) -> Result<()> {
