@@ -268,6 +268,9 @@ let
         polyfill-glibc --target-glibc=2.35 $bname
         full_interp="${stdenv.cc.bintools.dynamicLinker}"
         interp_dir=$(basename $(dirname "$full_interp"))
+        if [ "${stdenv.system}" = "x86_64-linux" ]; then
+          interp_dir="lib64"
+        fi
         interp_name=$(basename "$full_interp")
         patchelf --set-interpreter /$interp_dir/$interp_name $bname
 
