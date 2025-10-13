@@ -144,6 +144,32 @@ impl Database {
                     let query = format!("{query} VALUES {}", values.join(", "));
                     let mut q = sqlx::query(&query)
                         .bind(&*src_name);
+                    for (sub, m) in &machines {
+                        q = q.bind(sub);
+                        for (mid, dev) in m {
+                            q = q.bind(mid.to_string()).bind(dev.device.is_proxy).bind(Json(dev));
+                        }
+                    }
+                    let _ = q.execute(&pool).await;
+
+                    // Write to the new table
+                    let query = "INSERT INTO \"machines_v2\" (src, sub, machine_id, is_proxy, hardware)".to_string();
+                    let mut values = vec![];
+                    let mut binding = 2;
+                    for (_, m) in &machines {
+                        let sub_binding = binding;
+                        binding += 1;
+                        for _ in m {
+                            values.push(format!("( $1, ${sub_binding}, ${}, ${}, ${} )", binding, binding + 1, binding + 2));
+                            binding += 3;
+                        }
+                    }
+                    let query = format!(
+                        "{query} VALUES {} ON CONFLICT (src, sub, machine_id) DO UPDATE SET is_proxy = EXCLUDED.is_proxy, hardware = EXCLUDED.hardware, updated_at = NOW()",
+                        values.join(", ")
+                    );
+                    let mut q = sqlx::query(&query)
+                        .bind(&*src_name);
                     for (sub, m) in machines {
                         q = q.bind(sub);
                         for (mid, dev) in m {
