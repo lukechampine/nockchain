@@ -17,7 +17,7 @@ let
   };
 
   immediateAbortArgs = "-Zbuild-std=std,panic_abort -Zbuild-std-features=panic_immediate_abort";
-  abortArgs = "-Zbuild-std=std,panic_abort -Zbuild-std-features=panic_immediate_abort";
+  abortArgs = "-Zbuild-std=std,panic_abort";
 
   commonArgsImmediateAbort = commonArgs // {
     cargoExtraArgs = immediateAbortArgs;
@@ -148,7 +148,7 @@ let
   prodFeatures = "--features nbx-miner/production";
 
   nbx-proxy = profile: {
-    prod = nbx-proxy-base profile "${prodFeatures}" individualCrateArgsAbort;
+    prod = nbx-proxy-base profile "${prodFeatures}" individualCrateArgsImmediateAbort;
     internal = nbx-proxy-base profile "--features nbx-miner/db,nbx-miner/jwt-auth-server,nbx-miner/server-tls-key-load,nbx-miner/verifier,nbx-miner/force-preverify,nbx-miner/instrument,nbx-miner/slog" individualCrateArgsAbort;
   };
 

@@ -270,7 +270,12 @@ pub async fn mining_driver(
         |_telemetry: Telemetry, _client_id: usize, _sub: Uuid| async move { Result::Ok(()) };
 
     let server = mining_server(
-        cfg, listener, reqs_in, process_target, process_telemetry, None,
+        cfg,
+        listener,
+        [reqs_in],
+        process_target,
+        process_telemetry,
+        None,
         #[cfg(feature = "db")]
         None,
     );
@@ -364,15 +369,19 @@ pub async fn mining_server<
 >(
     cfg: MiningConfig,
     listener: TcpListener,
-    mut reqs_in: mpsc::Receiver<(Arc<MiningData>, Arc<OnceLock<Instant>>)>,
+    mut reqs_in: impl AsMut<[mpsc::Receiver<(Arc<MiningData>, Arc<OnceLock<Instant>>)>]>,
     mut process_target: F1,
     mut process_telemetry: F2,
     connected_clients: Option<&AtomicUsize>,
     #[cfg(feature = "db")] db: Option<crate::db::DatabaseHandle>,
 ) -> Result {
+    let reqs_in = reqs_in.as_mut();
     let (tx, mut rx) = mpsc::channel(1024);
-    let mining_data_tx = broadcast::channel(16).0;
-    let mut replay_mining_data = VecDeque::<(Arc<MiningData>, Arc<OnceLock<Instant>>)>::new();
+    let mining_data_tx = (0..reqs_in.len())
+        .map(|_| broadcast::channel(16).0)
+        .collect::<Vec<_>>();
+    let mut replay_mining_data =
+        vec![VecDeque::<(Arc<MiningData>, Arc<OnceLock<Instant>>)>::new(); reqs_in.len()];
 
     let mut client_set = JoinSet::new();
     let mut clients = Clients::default();
@@ -487,7 +496,9 @@ pub async fn mining_server<
                             }
                         };
 
-                        if let Err(e) = accept_tx.send((handshake, a)).await {
+                        let bucket_id = 0;
+
+                        if let Err(e) = accept_tx.send((handshake, a, bucket_id)).await {
                             error!("Unable to send accepted connection: {e:?}");
                         }
                     });
@@ -544,15 +555,22 @@ pub async fn mining_server<
     conndrop_interval.reset();
 
     loop {
+        let mut reqs_in_futs = reqs_in.iter_mut().map(|v| v.recv()).collect::<Vec<_>>();
+        let reqs_in_futs = reqs_in_futs
+            .iter_mut()
+            // SAFETY: we are dropping the futures after this iteration, so it is okay
+            .map(|v| unsafe { core::pin::Pin::new_unchecked(v) })
+            .collect::<Vec<_>>();
+
         tokio::select! {
             v = accept_rx.recv() => {
-                let Some((handshake, a)) = v else { continue };
+                let Some((handshake, a, bucket_id)) = v else { continue };
                 let sub = handshake.client_sub;
                 let hwid = handshake.client_hwid.clone();
                 let perms = handshake.perms;
-                crate::log!(debug, "Accepted {a} with client_id = {client_cnt}; client_hwid = {hwid}; client_sub = {sub}");
-                replay_mining_data.retain(|(_, v)| v.get().is_none());
-                let cmd = futures::stream::iter(replay_mining_data.clone()).chain(BroadcastStream::new(mining_data_tx.subscribe()).filter_map(|v| async move { v.ok() }));
+                crate::log!(debug, "Accepted {a} with client_id = {client_cnt}; client_hwid = {hwid}; client_sub = {sub}; bucket_id = {bucket_id}");
+                replay_mining_data[bucket_id].retain(|(_, v)| v.get().is_none());
+                let cmd = futures::stream::iter(replay_mining_data[bucket_id].clone()).chain(BroadcastStream::new(mining_data_tx[bucket_id].subscribe()).filter_map(|v| async move { v.ok() }));
                 let (otx, orx) = oneshot::channel();
                 let srv = server(handshake, cmd, client_cnt, tx.clone(), orx);
                 let srv = client_set.spawn(srv);
@@ -784,16 +802,16 @@ pub async fn mining_server<
                     }
                 }
             }
-            d = reqs_in.recv() => {
+            (d, bucket, _) = futures::future::select_all(reqs_in_futs) => {
                 let Some((new_mining_data, lock)) = d else { break Ok(()); };
-                debug!("received new candidate block header: {:?}",
+                debug!("received new candidate block header on bucket {bucket}: {:?}",
                     tip5_hash_to_base58(*unsafe { new_mining_data.block_header.root() })
                     .expect("Failed to convert header to Base58")
                 );
-                if mining_data_tx.send((new_mining_data.clone(), lock.clone())).is_err() {
+                if mining_data_tx[bucket].send((new_mining_data.clone(), lock.clone())).is_err() {
                     warn!("No clients connected");
                 }
-                replay_mining_data.push_back((new_mining_data, lock));
+                replay_mining_data[bucket].push_back((new_mining_data, lock));
             }
         }
     }

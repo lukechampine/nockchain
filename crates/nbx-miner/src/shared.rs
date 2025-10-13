@@ -32,7 +32,7 @@ use x509_parser::prelude::*;
 use crate::device::{DeviceInfo, DeviceInfoWithSockets};
 use crate::proto::name_valid;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MiningData {
     pub block_header: NounSlab,
     pub version: NounSlab,
