@@ -570,8 +570,11 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
 
                     #[cfg(feature = "verifier")]
                     {
+                        // NOTE: we absolutely cannot await while holding this lock, because we can
+                        // end up deadlocking.
                         let mut guard = diff_tracker.lock().unwrap();
                         let mut new_reqs_vec = (0..NUM_DIFF_BUCKETS).map(|_| BTreeMap::new()).collect::<Vec<_>>();
+                        let mut reqs_out_list = vec![];
                         for (((bucket_id, tracker), reqs), new_reqs) in guard.iter_mut().enumerate().zip(requests).zip(&mut new_reqs_vec) {
                             gauge!(
                                 "nbx_miner_proxy_difficulty",
@@ -609,10 +612,7 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
                                     server_id_guard.insert(Arc::as_ptr(&data), (inst.clone(), (data_id, server_id, session_id, parent_target, bucket_id)));
                                     core::mem::drop(server_id_guard);
                                     new_reqs.insert(k, (data.clone(), ack_cnt, inst_handle, session_id));
-                                    if reqs_out[bucket_id].send((data, inst)).await.is_err() {
-                                        error!("Failed to send to reqs_out");
-                                        break;
-                                    }
+                                    reqs_out_list.push((data, inst, bucket_id));
                                 }
                                 debug!("Difficulty updated on bucket {bucket_id}");
                             } else {
@@ -620,6 +620,13 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
                             }
                         }
                         requests = new_reqs_vec;
+                        core::mem::drop(guard);
+                        for (data, inst, bucket_id) in reqs_out_list {
+                            if reqs_out[bucket_id].send((data, inst)).await.is_err() {
+                                error!("Failed to send to reqs_out");
+                                break;
+                            }
+                        }
                     }
 
                     let tip_cnt = requests
