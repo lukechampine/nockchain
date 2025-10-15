@@ -21,6 +21,9 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinSet;
 use uuid::Uuid;
 
+use crate::compliance::ip_address_checks::{IpAddressCheckDecision, IpAddressCheckReason};
+#[cfg(feature = "compliance")]
+use crate::compliance::ipdata::IpAddressChecker;
 use crate::device::{Device, DeviceInfoWithSockets};
 use crate::metrics::{counter, gauge, histogram};
 use crate::shared::{self, JwtClaims};
@@ -213,6 +216,26 @@ fn cue(d: Vec<u8>) -> NounSlab {
     let noun = slab.cue_into(d.into()).unwrap();
     slab.set_root(noun);
     slab
+}
+
+async fn disconnect<T>(
+    stream: impl AsyncWrite + Unpin,
+    chacha: &mut ChaCha,
+    target_sub: Uuid,
+    target_name: Arc<str>,
+    d: io::Error,
+) -> io::Result<T> {
+    let _ = binsend_err(
+        stream,
+        chacha,
+        target_sub,
+        target_name.clone(),
+        "error".into(),
+        &d,
+    )
+    .await;
+
+    Err(d)
 }
 
 async fn binsend_err(
@@ -716,6 +739,8 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
     client_addr: SocketAddr,
     jwt_keys: Arc<[DecodingKey]>,
     conntrack: shared::ConnTrack,
+    #[cfg(feature = "db")] db: Option<crate::db::DatabaseHandle>,
+    #[cfg(feature = "compliance")] ip_checker: Option<IpAddressChecker>,
 ) -> io::Result<ServerHandshake<S>> {
     let mut crypt = ChaCha::new_chacha8(&CHACHA_KEY, &0u64.to_le_bytes());
 
@@ -813,6 +838,68 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
     let client_sub: Uuid = claims.sub;
     let client_hwid: Arc<str> = (*client_hwid).into();
 
+    #[cfg(feature = "compliance")]
+    {
+        if let Some(db) = &db {
+            let (is_blocklisted, blocklisted_message) = db.is_blocklisted(client_sub).await;
+
+            if is_blocklisted {
+                counter!("nbx_miner_proto_server_blocklist_rejection_total").increment(1);
+                warn!("Rejecting blocklisted user: sub={client_sub}, hwid={client_hwid}");
+
+                return disconnect(
+                    stream,
+                    &mut crypt,
+                    client_sub,
+                    client_hwid.clone(),
+                    io::Error::new(
+                        io::ErrorKind::ConnectionRefused,
+                        blocklisted_message
+                            .unwrap_or_else(|| "Nockbox is not available for you.".to_string()),
+                    ),
+                )
+                .await;
+            }
+
+            let client_ip = client_addr.ip();
+
+            if let Some(ip_checker) = ip_checker {
+                let block_message = match ip_checker.check_ip(client_ip, client_sub, db).await
+                {
+                    None => Some("NockBox is unavailable for you"),
+                    Some(IpAddressCheckDecision::Allow) => None,
+                    Some(IpAddressCheckDecision::Block(reason))
+                    | Some(IpAddressCheckDecision::Review(reason)) => {
+                        Some(match reason {
+                            IpAddressCheckReason::Country => "NockBox is unavailable in your location.",
+                            IpAddressCheckReason::Vpn => "Please disable IP anonymizer or complete identity verification, reach out to support@nockbox.org”",
+                        })
+                    }
+                };
+
+                if let Some(block_message) = block_message {
+                    if db.is_allow_listed(client_sub).await {
+                        info!("Sub {client_sub} is allowlisted, ignoring block check decision for {client_ip}");
+                        counter!("nbx_miner_proto_allowlist_bypass_total").increment(1);
+                    } else {
+                        counter!("nbx_miner_proto_ip_block_rejection_total", "client_sub" => client_sub.to_string()).increment(1);
+
+                        db.blocklist(client_sub, block_message.to_string());
+
+                        return disconnect(
+                            stream,
+                            &mut crypt,
+                            client_sub,
+                            client_hwid.clone(),
+                            io::Error::new(io::ErrorKind::ConnectionRefused, block_message),
+                        )
+                        .await;
+                    }
+                }
+            }
+        }
+    }
+
     let Some(conn) = conntrack.connect(
         client_sub,
         client_hwid.clone(),
@@ -820,17 +907,14 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
             .max_conns_override
             .unwrap_or(DEFAULT_MAX_CONNS_FROM_SUB),
     ) else {
-        let err = io::Error::new(io::ErrorKind::ConnectionRefused, "Too many connections");
-        let _ = binsend_err(
+        return disconnect(
             stream,
             &mut crypt,
-            Uuid::default(),
-            "".into(),
-            "error".into(),
-            &err,
+            client_sub,
+            client_hwid.clone(),
+            io::Error::new(io::ErrorKind::ConnectionRefused, "Too many connections"),
         )
         .await;
-        return Err(err);
     };
 
     let perms = Permissions {

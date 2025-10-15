@@ -38,6 +38,8 @@ miner-save-attempts = []
 db = ["sqlx", "serde_json", "force-preverify"]
 # Enable sqlite db for testing
 db-sqlite = ["sqlx?/sqlite"]
+# Enable all kind of compliance checks before allowing connections
+compliance = ["db", "reqwest"]
 
 [[bin]]
 name = "nbx-proxy"
@@ -88,7 +90,7 @@ sysinfo.workspace = true
 chacha.workspace = true
 itertools.workspace = true
 uuid = { workspace = true, features = ["serde"] }
-sqlx = { workspace = true, optional = true, features = ["postgres", "tls-rustls", "runtime-tokio", "uuid"] }
+sqlx = { workspace = true, optional = true, features = ["postgres", "tls-rustls", "runtime-tokio", "uuid", "ipnetwork"] }
 serde_json = { workspace = true, optional = true }
 toml.workspace = true
 rayon.workspace = true

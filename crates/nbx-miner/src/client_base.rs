@@ -430,7 +430,15 @@ pub struct ClientConfig {
     pub miner_num_concurrent_connections: usize,
     #[arg(
         long,
-        help = "Number of threads to mine with defaults to one less than the number of cpus available."
+        help = "Number of threads to mine with defaults to one less than the number of cpus available.",
+        value_parser = |s: &str| -> Result<u64, String> {
+            let val = s.parse::<u64>().map_err(|e| e.to_string())?;
+            if val == 0 {
+                Err("must be at least 1".to_string())
+            } else {
+                Ok(val)
+            }
+        }
     )]
     pub num_threads: Option<u64>,
     #[arg(

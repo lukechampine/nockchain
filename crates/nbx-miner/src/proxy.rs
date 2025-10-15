@@ -15,6 +15,8 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::client_base::client_loops;
+#[cfg(feature = "compliance")]
+use crate::compliance::ipdata::IpAddressChecker;
 use crate::device::{Device, DeviceInfoWithSockets};
 use crate::metrics::{counter, gauge, histogram};
 use crate::proto::{
@@ -413,6 +415,8 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
         Some(&connected_clients),
         #[cfg(feature = "db")]
         db.clone(),
+        #[cfg(feature = "compliance")]
+        Some(IpAddressChecker::from_env()),
     );
 
     let main_iter = async {

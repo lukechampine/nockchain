@@ -149,7 +149,7 @@ let
 
   nbx-proxy = profile: {
     prod = nbx-proxy-base profile "${prodFeatures}" individualCrateArgsImmediateAbort;
-    internal = nbx-proxy-base profile "--features nbx-miner/db,nbx-miner/jwt-auth-server,nbx-miner/server-tls-key-load,nbx-miner/verifier,nbx-miner/force-preverify,nbx-miner/instrument,nbx-miner/slog" individualCrateArgsAbort;
+    internal = nbx-proxy-base profile "--features nbx-miner/db,nbx-miner/compliance,nbx-miner/jwt-auth-server,nbx-miner/server-tls-key-load,nbx-miner/verifier,nbx-miner/force-preverify,nbx-miner/instrument,nbx-miner/slog" individualCrateArgsAbort;
   };
 
   nbx-miner = profile: {

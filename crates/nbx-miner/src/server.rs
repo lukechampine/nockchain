@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::future::Future;
 use std::io;
 use std::net::{Ipv6Addr, SocketAddr};
@@ -44,6 +44,10 @@ use tokio::time::sleep;
 use tokio_stream::wrappers::BroadcastStream;
 use uuid::Uuid;
 
+#[cfg(feature = "compliance")]
+use crate::compliance::{blocklist::spawn_blocklist_refresh_task, ipdata::IpAddressChecker};
+#[cfg(feature = "db")]
+use crate::difficulty_buckets::spawn_difficulty_refresh_task;
 use crate::proto::{server, server_handshake, ClientDataRead, ClientDataReadType};
 use crate::shared::{
     tls_accept, ConnTrack, MiningData, MiningResult, MiningWire, Telemetry, TimeWriter,
@@ -149,6 +153,7 @@ pub(crate) enum AbortReason {
     ProofValidation(String),
     ProofRejected,
     TelemetryError,
+    Blocklisted,
 }
 
 impl ToString for AbortReason {
@@ -161,6 +166,7 @@ impl ToString for AbortReason {
             }
             Self::ProofRejected => format!("abort::proof_rejected: Mined PoW was not accepted"),
             Self::TelemetryError => format!("abort::telemetry_error: Telemetry error"),
+            Self::Blocklisted => format!("abort::blocklisted: User has been blocklisted"),
         }
     }
 }
@@ -178,6 +184,7 @@ impl AbortReason {
             Self::ProofValidation(_) => counter!("nbx_miner_server_abort_count", "mode" => "proof_validation").increment(1),
             Self::ProofRejected => counter!("nbx_miner_server_abort_count", "mode" => "proof_rejected").increment(1),
             Self::TelemetryError => counter!("nbx_miner_server_abort_count", "mode" => "telemetry_error").increment(1),
+            Self::Blocklisted => counter!("nbx_miner_server_abort_count", "mode" => "blocklisted").increment(1),
         }
     }
 }
@@ -185,6 +192,7 @@ impl AbortReason {
 pub(crate) struct Clients<M> {
     handles: BTreeMap<usize, (AbortHandle, Option<oneshot::Sender<()>>, M)>,
     ids: HashMap<Id, usize>,
+    subs: HashMap<Uuid, BTreeSet<usize>>,
 }
 
 impl<M> Default for Clients<M> {
@@ -192,6 +200,7 @@ impl<M> Default for Clients<M> {
         Self {
             handles: Default::default(),
             ids: Default::default(),
+            subs: Default::default(),
         }
     }
 }
@@ -204,9 +213,28 @@ impl<M> Clients<M> {
         self.handles.get(&client).unwrap().0.abort();
     }
 
+    pub fn abort_by_sub(&mut self, sub: &Uuid, reason: AbortReason) -> usize {
+        let Some(client_ids) = self.subs.get(sub) else {
+            return 0;
+        };
+
+        let client_ids: Vec<usize> = client_ids.iter().copied().collect();
+        let count = client_ids.len();
+
+        for client_id in client_ids {
+            self.abort(client_id, reason.clone());
+        }
+
+        count
+    }
+
     pub fn remove(&mut self, id: Id) -> Option<usize> {
         let client = self.ids.remove(&id)?;
         self.handles.remove(&client);
+        self.subs.retain(|_, clients| {
+            clients.remove(&client);
+            !clients.is_empty()
+        });
         Some(client)
     }
 
@@ -216,10 +244,12 @@ impl<M> Clients<M> {
         handle: AbortHandle,
         graceful_stop: oneshot::Sender<()>,
         metadata: M,
+        sub: Uuid,
     ) {
         self.ids.insert(handle.id(), client);
         self.handles
             .insert(client, (handle, Some(graceful_stop), metadata));
+        self.subs.entry(sub).or_default().insert(client);
     }
 
     pub fn lookup(&self, client: usize) -> Option<&M> {
@@ -277,6 +307,8 @@ pub async fn mining_driver(
         process_telemetry,
         None,
         #[cfg(feature = "db")]
+        None,
+        #[cfg(feature = "compliance")]
         None,
     );
     let mut server = pin!(server);
@@ -374,6 +406,7 @@ pub async fn mining_server<
     mut process_telemetry: F2,
     connected_clients: Option<&AtomicUsize>,
     #[cfg(feature = "db")] db: Option<crate::db::DatabaseHandle>,
+    #[cfg(feature = "compliance")] ip_checker: Option<IpAddressChecker>,
 ) -> Result {
     let reqs_in = reqs_in.as_mut();
     let (tx, mut rx) = mpsc::channel(1024);
@@ -423,6 +456,19 @@ pub async fn mining_server<
     let conntrack = ConnTrack::default();
     let conntrack2 = conntrack.clone();
 
+    #[cfg(feature = "db")]
+    let db_for_accept = db.clone();
+    #[cfg(feature = "compliance")]
+    let ip_checker_for_accept = ip_checker.clone();
+
+    #[cfg(feature = "db")]
+    let (difficulty_cache, _difficulty_handle) = if let Some(db) = db.as_ref() {
+        let (cache, handle) = spawn_difficulty_refresh_task(db.clone()).await;
+        (Some(cache), Some(handle))
+    } else {
+        (None, None)
+    };
+
     let (accept_tx, mut accept_rx) = mpsc::channel(8);
     let accept_loop = async move {
         let mut handshake_set = JoinSet::new();
@@ -461,6 +507,15 @@ pub async fn mining_server<
                     let jwt_keys = jwt_keys.clone();
                     let tls = tls.clone();
                     let conntrack = conntrack2.clone();
+
+                    // Clone these for each spawn
+                    #[cfg(feature = "db")]
+                    let db = db_for_accept.clone();
+                    #[cfg(feature = "db")]
+                    let difficulty_cache = difficulty_cache.clone();
+                    #[cfg(feature = "compliance")]
+                    let ip_checker = ip_checker_for_accept.clone();
+
                     handshake_set.spawn(async move {
                         let s = match tokio::time::timeout(
                             Duration::from_secs(10),
@@ -481,7 +536,16 @@ pub async fn mining_server<
 
                         let handshake = match tokio::time::timeout(
                             Duration::from_secs(20),
-                            server_handshake(s, a, jwt_keys, conntrack),
+                            server_handshake(
+                                s,
+                                a,
+                                jwt_keys,
+                                conntrack,
+                                #[cfg(feature = "db")]
+                                db.clone(),
+                                #[cfg(feature = "compliance")]
+                                ip_checker.clone(),
+                            ),
                         )
                         .await
                         {
@@ -496,6 +560,14 @@ pub async fn mining_server<
                             }
                         };
 
+                        #[cfg(feature = "db")]
+                        let bucket_id = difficulty_cache
+                            .as_ref()
+                            .and_then(|cache| cache.lock().ok())
+                            .and_then(|map| map.get(&handshake.client_sub).copied())
+                            .unwrap_or(0) as usize;
+
+                        #[cfg(not(feature = "db"))]
                         let bucket_id = 0;
 
                         if let Err(e) = accept_tx.send((handshake, a, bucket_id)).await {
@@ -554,6 +626,18 @@ pub async fn mining_server<
     ));
     conndrop_interval.reset();
 
+    #[cfg(feature = "compliance")]
+    let (blocklist_cache, _blocklist_handle) = if let Some(db) = db.as_ref() {
+        let (cache, handle) = spawn_blocklist_refresh_task(db.clone()).await;
+        (Some(cache), Some(handle))
+    } else {
+        (None, None)
+    };
+
+    // Add periodic blocklist check interval
+    let mut blocklist_check_interval = tokio::time::interval(Duration::from_secs(30));
+    blocklist_check_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
     loop {
         let mut reqs_in_futs = reqs_in.iter_mut().map(|v| v.recv()).collect::<Vec<_>>();
         let reqs_in_futs = reqs_in_futs
@@ -574,7 +658,7 @@ pub async fn mining_server<
                 let (otx, orx) = oneshot::channel();
                 let srv = server(handshake, cmd, client_cnt, tx.clone(), orx);
                 let srv = client_set.spawn(srv);
-                clients.add(client_cnt, srv, otx, (sub, hwid, perms));
+                clients.add(client_cnt, srv, otx, (sub, hwid, perms), sub);
                 client_cnt += 1;
             },
             v = client_set.join_next_with_id() => {
@@ -593,18 +677,49 @@ pub async fn mining_server<
                     error!("Accept loop removed");
                     break Err(NockAppError::IoError(io::ErrorKind::BrokenPipe.into()));
                 }
-            }
+            },
             _ = metrics_interval.tick() => {
                 let clients = conntrack.emit_metrics();
                 if let Some(cc) = connected_clients {
                     cc.store(clients, Ordering::Relaxed);
                 }
-            }
+            },
             _ = conndrop_interval.tick() => {
                 if let Some(frac) = cfg.miner_conndrop_fraction {
                     clients.drop_fraction(frac);
                 }
-            }
+            },
+            _ = blocklist_check_interval.tick() => {
+            #[cfg(all(feature = "db", feature = "compliance"))]
+            {
+                if let Some(cache) = &blocklist_cache {
+                    let connected_subs: Vec<Uuid> = clients.subs.keys().copied().collect();
+
+                    let Ok(blocklisted_subs) = cache.lock() else {
+                        error!("Blocklist poisoned");
+                        continue;
+                    };
+
+                    counter!("nbx_miner_server_blocklist_check_total").increment(1);
+
+                    for sub in connected_subs {
+                        if blocklisted_subs.contains(&sub) {
+                            warn!("Disconnecting blocklisted sub: {sub}");
+                            let disconnected = clients.abort_by_sub(
+                                &sub,
+                                AbortReason::Blocklisted
+                            );
+
+                            if disconnected > 0 {
+                                warn!("Disconnected {disconnected} connections for blocklisted sub: {sub}");
+                                counter!(
+                                    "nbx_miner_server_blocklist_active_disconnection_total"
+                                ).increment(disconnected as u64);
+                            }
+                        }
+                    }
+                }}
+            },
             data = rx.recv() => {
                 let ClientDataRead { data, client_id } = data.expect("Result senders died");
 
@@ -801,7 +916,7 @@ pub async fn mining_server<
                         }
                     }
                 }
-            }
+            },
             (d, bucket, _) = futures::future::select_all(reqs_in_futs) => {
                 let Some((new_mining_data, lock)) = d else { break Ok(()); };
                 debug!("received new candidate block header on bucket {bucket}: {:?}",

@@ -1,9 +1,12 @@
 #[cfg(feature = "client")]
 pub mod client;
 pub mod client_base;
+pub mod compliance;
 #[cfg(feature = "db")]
 pub mod db;
 pub mod device;
+#[cfg(feature = "db")]
+pub mod difficulty_buckets;
 #[cfg(feature = "client")]
 pub mod poker;
 pub mod proto;
