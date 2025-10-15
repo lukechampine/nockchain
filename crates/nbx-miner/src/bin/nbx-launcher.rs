@@ -204,12 +204,6 @@ struct TokenResponse {
     token: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct Claims {
-    iat: u64,
-    exp: u64,
-}
-
 #[derive(Debug, Deserialize, Serialize)]
 struct BinaryResponse {
     version: String,
@@ -317,20 +311,12 @@ async fn api_request<T: for<'de> Deserialize<'de>>(
 }
 
 async fn refresh_token(access_token: &str) -> Result<TokenResponse> {
-    let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
-    validation.insecure_disable_signature_validation();
-    validation.validate_aud = false;
-    validation.validate_nbf = false;
-    validation.validate_exp = false;
-
     let current_timestamp = jsonwebtoken::get_current_timestamp();
-
-    let decoded =
-        jsonwebtoken::decode::<Claims>(access_token, &DecodingKey::from_secret(&[]), &validation);
+    let decoded = nbx_miner::unverified_decode_jwt(access_token);
 
     // If token is recently issued, return it immediately
     if let Ok(ref c) = decoded {
-        if current_timestamp.saturating_sub(c.claims.iat) < 5 * 60 {
+        if current_timestamp.saturating_sub(c.claims.iat.unwrap_or_default()) < 5 * 60 {
             return Ok(TokenResponse {
                 token: access_token.into(),
             });
@@ -349,7 +335,13 @@ async fn refresh_token(access_token: &str) -> Result<TokenResponse> {
     {
         Ok(response) => Ok(response),
         Err(e) => match decoded {
-            Ok(c) if c.claims.exp.saturating_sub(current_timestamp) >= 86400 => {
+            Ok(c)
+                if c.claims
+                    .exp
+                    .unwrap_or(u64::MAX)
+                    .saturating_sub(current_timestamp)
+                    >= 86400 =>
+            {
                 println!("Refresh failed but existing token still valid, using existing token");
                 Ok(TokenResponse {
                     token: access_token.into(),

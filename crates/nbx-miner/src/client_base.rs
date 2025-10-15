@@ -101,6 +101,10 @@ pub fn client_loops(
     #[cfg(feature = "jwt-auth-client")]
     let jwt = jwt.or_else(|| std::env::var("NBX_AUTH_JWT").ok().map(Arc::<str>::from));
 
+    if let Some(Ok(parsed_jwt)) = jwt.as_deref().map(crate::unverified_decode_jwt) {
+        log!(info, "Authenticating as sub = {}; hwid = {}", parsed_jwt.claims.sub, device.hwid);
+    }
+
     let _ = default_provider().install_default();
 
     let mut client_tasks = JoinSet::new();

@@ -803,6 +803,7 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
             trace!("JWT validation skipped");
             JwtClaims {
                 sub: Default::default(),
+                iat: None,
                 exp: None,
                 non_share_proofs: true,
                 telemetry: true,

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as SyncMutex};
 use std::time::{Duration, Instant};
@@ -378,6 +378,7 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
 
     #[derive(Default)]
     struct TelemetryStore {
+        hit_count: BTreeMap<Uuid, usize>,
         proofrate: BTreeMap<Uuid, BTreeMap<Arc<str>, u32>>,
         hwinfo: BTreeMap<Uuid, BTreeMap<Arc<str>, DeviceInfoWithSockets>>,
     }
@@ -483,22 +484,40 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
                 }
                 _ = telemetry_interval.tick() => {
                     counter!("nbx_miner_proxy_main_loop_telemetry_interval_total").increment(1);
-                    let tl = {
-                        core::mem::take(&mut *telemetry.lock().unwrap())
+                    let mut tl = telemetry.lock().unwrap();
+                    let keys = tl.proofrate.keys().chain(tl.hwinfo.keys()).copied().collect::<BTreeSet<_>>();
+                    // 1 minute per 1k machine per sub, but only up to 10 minutes.
+                    let target_hc = |l: usize| {
+                        core::cmp::min(core::cmp::max(1, l / 1024), 10)
                     };
+                    let mut proofrate = BTreeMap::new();
+                    let mut hwinfo = BTreeMap::new();
+                    for k in &keys {
+                        let hc = tl.hit_count.entry(*k).or_default();
+                        *hc += 1;
+                        let hc = *hc;
+                        if tl.proofrate.get(k).map(|v| hc % target_hc(v.len()) == 0).unwrap_or(false) {
+                            let (a, b) = tl.proofrate.remove_entry(k).unwrap();
+                            proofrate.insert(a, b);
+                        }
+                        if tl.hwinfo.get(k).map(|v| hc % target_hc(v.len()) == 0).unwrap_or(false) {
+                            let (a, b) = tl.hwinfo.remove_entry(k).unwrap();
+                            hwinfo.insert(a, b);
+                        }
+                    }
                     let mut out_tl = vec![];
-                    if !tl.proofrate.is_empty() {
+                    if !proofrate.is_empty() {
                         #[cfg(feature = "db")]
-                        db.as_ref().map(|v| v.submit_telemetry_proofrate(tl.proofrate.clone()));
+                        db.as_ref().map(|v| v.submit_telemetry_proofrate(proofrate.clone()));
                         // In case there are duplicate machine IDs, yes, we are merging them together.
-                        let machines = tl.proofrate.into_values().flatten().collect::<BTreeMap<_, _>>();
+                        let machines = proofrate.into_values().flatten().collect::<BTreeMap<_, _>>();
                         out_tl.push(Telemetry::Proofrate { machines });
                     }
-                    if !tl.hwinfo.is_empty() {
+                    if !hwinfo.is_empty() {
                         #[cfg(feature = "db")]
-                        db.as_ref().map(|v| v.submit_telemetry_hwinfo(tl.hwinfo.clone()));
+                        db.as_ref().map(|v| v.submit_telemetry_hwinfo(hwinfo.clone()));
                         // In case there are duplicate machine IDs, yes, we are merging them together.
-                        let machines = tl.hwinfo.into_values().flatten().collect::<BTreeMap<_, _>>();
+                        let machines = hwinfo.into_values().flatten().collect::<BTreeMap<_, _>>();
                         out_tl.push(Telemetry::HwInfo { machines });
                     }
 

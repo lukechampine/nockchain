@@ -23,6 +23,7 @@ macro_rules! log {
     };
 }
 use clap::ColorChoice;
+use jsonwebtoken::{DecodingKey, TokenData, Validation};
 pub(crate) use log;
 use tracing::{Metadata, Subscriber};
 use tracing_subscriber::layer::{Context, SubscriberExt};
@@ -59,6 +60,18 @@ pub fn init_default_tracing(colors: ColorChoice) {
     let sub = sub.with(PrefixFilter);
 
     sub.with(filter).init();
+}
+
+pub fn unverified_decode_jwt(
+    access_token: &str,
+) -> jsonwebtoken::errors::Result<TokenData<shared::JwtClaims>> {
+    let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
+    validation.insecure_disable_signature_validation();
+    validation.validate_aud = false;
+    validation.validate_nbf = false;
+    validation.validate_exp = false;
+
+    jsonwebtoken::decode(access_token, &DecodingKey::from_secret(&[]), &validation)
 }
 
 #[cfg(feature = "stealthy")]
