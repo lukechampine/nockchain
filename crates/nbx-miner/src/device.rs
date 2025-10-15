@@ -1,4 +1,6 @@
+use std::io;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use bincode::{Decode, Encode};
@@ -178,10 +180,35 @@ fn machine_id() -> Option<String> {
     Some("unknown".to_string())
 }
 
+fn randomness_path() -> io::Result<PathBuf> {
+    let dir = dirs::config_dir()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "no config dir"))?
+        .join("nbx");
+    Ok(dir.join(format!("machine_randomness.txt")))
+}
+
+fn load_or_create_randomness() -> std::io::Result<String> {
+    let p = randomness_path()?;
+
+    if let Ok(r) = std::fs::read_to_string(&p) {
+        Ok(r)
+    } else {
+        let rnd = rand::random::<u64>().to_string();
+        if let Some(p) = p.parent() {
+            std::fs::create_dir_all(p)?;
+        }
+        std::fs::write(p, rnd.as_bytes())?;
+        Ok(rnd)
+    }
+}
+
 fn hwid(key: &str, dev: &DeviceInfo) -> Arc<str> {
     let mut state = Sha3_256::new();
     state.update(&key);
     if let Ok(rnd) = std::env::var(RANDOMNESS_ENV) {
+        state.update(&rnd);
+    } else if let Ok(rnd) = load_or_create_randomness() {
+        crate::log!(trace, "Using stored randomness for HWID");
         state.update(&rnd);
     }
     state.update(&dev.hostname.as_deref().unwrap_or_default());
