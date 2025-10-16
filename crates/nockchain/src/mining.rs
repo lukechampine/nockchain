@@ -137,6 +137,8 @@ pub struct MiningConfig {
         num_args = 1..,
     )]
     pub mining_pkh_adv: Option<Vec<MiningPkhConfig>>,
+    #[command(flatten)]
+    pub server: nbx_miner::server::MiningConfig,
 }
 
 impl MiningConfig {

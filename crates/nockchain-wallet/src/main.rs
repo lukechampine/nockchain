@@ -699,41 +699,6 @@ impl Wallet {
         }
     }
 
-    fn timelock_intent_none() -> TimelockIntent {
-        TimelockIntent {
-            absolute: TimelockRangeAbsolute::none(),
-            relative: TimelockRangeRelative::none(),
-        }
-    }
-
-    fn timelock_intent_absolute(range: TimelockRangeAbsolute) -> TimelockIntent {
-        TimelockIntent {
-            absolute: range,
-            relative: TimelockRangeRelative::none(),
-        }
-    }
-
-    fn timelock_intent_relative(range: TimelockRangeRelative) -> TimelockIntent {
-        TimelockIntent {
-            absolute: TimelockRangeAbsolute::none(),
-            relative: range,
-        }
-    }
-
-    fn timelock_intent_from_ranges(
-        absolute: Option<TimelockRangeAbsolute>,
-        relative: Option<TimelockRangeRelative>,
-    ) -> Option<TimelockIntent> {
-        if absolute.is_none() && relative.is_none() {
-            None
-        } else {
-            Some(TimelockIntent {
-                absolute: absolute.unwrap_or_else(TimelockRangeAbsolute::none),
-                relative: relative.unwrap_or_else(TimelockRangeRelative::none),
-            })
-        }
-    }
-
     /// Creates a transaction by building transaction inputs from notes.
     ///
     /// Takes a list of note names, recipient addresses, and gift amounts to create
@@ -885,6 +850,23 @@ impl Wallet {
             Split,
             Multiple,
         }
+
+        let order_mode = if recipients_len == 1 {
+            OrderMode::Single
+        } else if names_len == 1 {
+            OrderMode::Split
+        } else {
+            if names_len != recipients_len {
+                return Err(
+                    CrownError::Unknown(
+                        "Multiple recipient mode requires names, recipients, and gifts to have the same length"
+                            .to_string(),
+                    )
+                    .into(),
+                );
+            }
+            OrderMode::Multiple
+        };
 
         // Convert names to list of pairs
         let names_noun = names_vec
