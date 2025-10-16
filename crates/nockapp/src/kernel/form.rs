@@ -384,14 +384,16 @@ impl<C, B: ThreadBackend> SerfThread<C, B> {
 
     pub(crate) fn poke_sync(&self, wire: WireRepr, cause: NounSlab) -> Result<NounSlab> {
         let (result, result_fut) = oneshot::channel();
-        let (_result_ack_sender, result_ack) = oneshot::channel();
+        let (result_ack_sender, result_ack) = oneshot::channel();
         self.action_sender.blocking_send(SerfAction::Poke {
             wire,
             cause,
             result,
             result_ack,
         })?;
-        result_fut.blocking_recv()?
+        let res = result_fut.blocking_recv()?;
+        let _ = result_ack_sender.send(());
+        res
     }
 
     pub(crate) fn peek_sync(&self, ovo: NounSlab) -> Result<NounSlab> {
@@ -602,7 +604,7 @@ fn serf_loop<C: SerfCheckpoint, B: ThreadBackend>(
                 wire,
                 cause,
                 result,
-                result_ack: _,
+                result_ack,
             } => {
                 if inhibit.load(Ordering::SeqCst) {
                     let _ = result
@@ -623,6 +625,9 @@ fn serf_loop<C: SerfCheckpoint, B: ThreadBackend>(
                         debug!("Failed to send poke result from serf thread");
                     });
                 };
+                let _ = result_ack.blocking_recv().inspect_err(|_e| {
+                    debug!("Failed to receive result ack in serf thread");
+                });
                 let action_elapsed = action_start.elapsed();
                 if let Some(nockapp_metrics) = &serf.metrics {
                     nockapp_metrics.serf_loop_poke.add_timing(&action_elapsed);

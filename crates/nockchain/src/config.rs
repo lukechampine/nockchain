@@ -93,6 +93,12 @@ pub struct NockchainCli {
         default_value = "1"
     )]
     pub fakenet_log_difficulty: Option<u64>,
+    #[arg(
+        long,
+        help = "Override the v1-phase activation height when running on fakenet. Requires --fakenet.",
+        requires = "fakenet"
+    )]
+    pub fakenet_v1_phase: Option<u64>,
     #[arg(long, help = "Path to fake genesis block jam file")]
     pub fakenet_genesis_jam_path: Option<PathBuf>,
     #[arg(long, default_value = "127.0.0.1:9005")]

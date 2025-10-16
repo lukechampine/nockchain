@@ -86,6 +86,29 @@ impl FromStr for MiningKeyConfig {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct MiningPkhConfig {
+    pub share: u64,
+    pub pkh: String,
+}
+
+impl FromStr for MiningPkhConfig {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Expected format: "share,pkh"
+        let parts: Vec<&str> = s.split(',').collect();
+        if parts.len() != 2 {
+            return Err("Invalid share,pkh format".to_string());
+        }
+
+        let share = parts[0].parse::<u64>().map_err(|e| e.to_string())?;
+        let pkh = parts[1].parse::<String>().map_err(|e| e.to_string())?;
+
+        Ok(MiningPkhConfig { share, pkh })
+    }
+}
+
 #[derive(Args, Clone, Debug, Default)]
 pub struct MiningConfig {
     #[arg(long, help = "Mine in-kernel", default_value = "false")]
@@ -97,13 +120,23 @@ pub struct MiningConfig {
     pub mining_pubkey: Option<String>,
     #[arg(
         long,
+        help = "Pubkey hash to mine to (mutually exclusive with --mining-pkh-adv)"
+    )]
+    pub mining_pkh: Option<String>,
+    #[arg(
+        long,
         help = "Advanced mining key configuration (mutually exclusive with --mining-pubkey). Format: share,m:key1,key2,key3",
         value_parser = value_parser!(MiningKeyConfig),
         num_args = 1..,
     )]
     pub mining_key_adv: Option<Vec<MiningKeyConfig>>,
-    #[command(flatten)]
-    pub server: nbx_miner::server::MiningConfig,
+    #[arg(
+        long,
+        help = "Advanced mining pubkey hash configuration (mutually exclusive with --mining-pkh). Format: share,pkh",
+        value_parser = value_parser!(MiningPkhConfig),
+        num_args = 1..,
+    )]
+    pub mining_pkh_adv: Option<Vec<MiningPkhConfig>>,
 }
 
 impl MiningConfig {
@@ -121,6 +154,19 @@ impl MiningConfig {
         }
     }
 
+    pub fn mining_pkh_config(&self) -> Option<Vec<MiningPkhConfig>> {
+        if let Some(pkh) = &self.mining_pkh {
+            Some(vec![MiningPkhConfig {
+                share: 1,
+                pkh: pkh.clone(),
+            }])
+        } else if let Some(mining_pkh_adv) = &self.mining_pkh_adv {
+            Some(mining_pkh_adv.clone())
+        } else {
+            None
+        }
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if self.mine && !(self.mining_pubkey.is_some() || self.mining_key_adv.is_some()) {
             return Err(
@@ -132,6 +178,28 @@ impl MiningConfig {
             return Err(
                 "Cannot specify both mining_pubkey and mining_key_adv at the same time".to_string(),
             );
+        }
+
+        if self.mining_pkh.is_some() && self.mining_pkh_adv.is_some() {
+            return Err(
+                "Cannot specify both mining_pkh and mining_pkh_adv at the same time".to_string(),
+            );
+        }
+
+        if self.mining_pubkey.is_some() {
+            if !self.mining_pkh.is_some() {
+                return Err(
+                    "Have mining_pubkey, but no mining_pkh. Must specify neither or both of mining_pubkey and mining_pkh. To get a pkh, you must generate a v1 key by running `keygen` on the latest version of the wallet. The pkh will be listed as the 'Receive Address' ".to_string(),
+                );
+            }
+        }
+
+        if self.mining_key_adv.is_some() {
+            if !self.mining_pkh_adv.is_some() {
+                return Err(
+                    "Must specify neither or both of mining_key_adv and mining_pkh_adv".to_string(),
+                );
+            }
         }
 
         Ok(())
@@ -183,15 +251,20 @@ pub fn create_mining_driver(
 
                 return Ok(());
             };
-            if configs.len() == 1
-                && configs[0].share == 1
-                && configs[0].m == 1
-                && configs[0].keys.len() == 1
-            {
-                set_mining_key(&handle, configs[0].keys[0].clone()).await?;
-            } else {
-                set_mining_key_advanced(&handle, configs).await?;
-            }
+            let Some(pkh_configs) = cfg.mining_pkh_config() else {
+                enable_mining(&handle, false).await?;
+
+                if let Some(tx) = init_complete_tx {
+                    tx.send(()).map_err(|_| {
+                        NockAppError::OtherError(String::from(
+                            "Could not send driver initialization for mining driver.",
+                        ))
+                    })?;
+                }
+
+                return Ok(());
+            };
+            set_mining_key_advanced(&handle, configs, pkh_configs).await?;
             enable_mining(&handle, cfg.mine).await?;
 
             if let Some(tx) = init_complete_tx {
@@ -211,36 +284,16 @@ pub fn create_mining_driver(
     })
 }
 
-#[instrument(skip(handle, pubkey))]
-async fn set_mining_key(
-    handle: &NockAppHandle,
-    pubkey: String,
-) -> Result<PokeResult, NockAppError> {
-    let mut set_mining_key_slab = NounSlab::new();
-    let set_mining_key = Atom::from_value(&mut set_mining_key_slab, "set-mining-key")
-        .expect("Failed to create set-mining-key atom");
-    let pubkey_cord =
-        Atom::from_value(&mut set_mining_key_slab, pubkey).expect("Failed to create pubkey atom");
-    let set_mining_key_poke = T(
-        &mut set_mining_key_slab,
-        &[D(tas!(b"command")), set_mining_key.as_noun(), pubkey_cord.as_noun()],
-    );
-    set_mining_key_slab.set_root(set_mining_key_poke);
-
-    handle
-        .poke(MiningWire::SetPubKey.to_wire(), set_mining_key_slab)
-        .await
-}
-
 async fn set_mining_key_advanced(
     handle: &NockAppHandle,
     configs: Vec<MiningKeyConfig>,
+    pkh_configs: Vec<MiningPkhConfig>,
 ) -> Result<PokeResult, NockAppError> {
     let mut set_mining_key_slab = NounSlab::new();
     let set_mining_key_adv = Atom::from_value(&mut set_mining_key_slab, "set-mining-key-advanced")
         .expect("Failed to create set-mining-key-advanced atom");
 
-    // Create the list of configs
+    // Create the list of v0 (pubkey) configs
     let mut configs_list = D(0);
     for config in configs {
         // Create the list of keys
@@ -260,9 +313,27 @@ async fn set_mining_key_advanced(
         configs_list = T(&mut set_mining_key_slab, &[config_tuple, configs_list]);
     }
 
+    // Create the list of v1 (pubkey hash) configs
+    let mut pkh_configs_list = D(0);
+    for config in pkh_configs {
+        let pkh_noun = Atom::from_value(&mut set_mining_key_slab, config.pkh)
+            .expect("Failed to create key atom")
+            .as_noun();
+
+        // Create the config tuple [share pkh]
+        let config_tuple = T(&mut set_mining_key_slab, &[D(config.share), pkh_noun]);
+
+        pkh_configs_list = T(&mut set_mining_key_slab, &[config_tuple, pkh_configs_list]);
+    }
+
     let set_mining_key_poke = T(
         &mut set_mining_key_slab,
-        &[D(tas!(b"command")), set_mining_key_adv.as_noun(), configs_list],
+        &[
+            D(tas!(b"command")),
+            set_mining_key_adv.as_noun(),
+            configs_list,
+            pkh_configs_list,
+        ],
     );
     set_mining_key_slab.set_root(set_mining_key_poke);
 
