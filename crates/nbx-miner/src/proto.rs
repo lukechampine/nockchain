@@ -31,7 +31,7 @@ use crate::shared::{self, JwtClaims};
 pub const PROTOCOL: u32 = 7;
 pub const NAME_MAX_LENGTH: usize = 16;
 pub const DEVICE_ID_LENGTH: usize = 8;
-pub const RECENTLY_EXPIRED_DURATION: Duration = Duration::from_secs(20);
+pub const RECENTLY_EXPIRED_DURATION: Duration = Duration::from_secs(25);
 pub const PROTO_POW_DIFFICULTY: u32 = 18;
 pub const JWT_MAX_LENGTH: usize = 1024;
 pub const DEFAULT_MAX_CONNS_FROM_SUB: usize = 10;
@@ -86,6 +86,12 @@ fn verify_jwt(jwt: &str, keys: &[DecodingKey]) -> Result<TokenData<JwtClaims>, E
         }
     }
     Err(ErrorKind::InvalidSignature.into())
+}
+
+pub fn get_recently_expired_duration(hop_count: usize) -> Duration {
+    // Start with 25 seconds, subtract 1 second per hop, minimum 5 seconds
+    let seconds = (RECENTLY_EXPIRED_DURATION.as_secs() as i64 - hop_count as i64).max(5);
+    Duration::from_secs(seconds as u64)
 }
 
 #[derive(Encode, Decode, Clone, Copy, Debug)]
@@ -976,8 +982,8 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
     #[derive(Default)]
     struct DataTracker {
         data_id: u32,
-        data_map: BTreeMap<u32, (Arc<shared::MiningData>, Arc<OnceLock<Instant>>, bool)>,
-        recently_expired_map: BTreeMap<u32, (Arc<shared::MiningData>, Instant)>,
+        data_map: BTreeMap<u32, (Arc<shared::MiningData>, Arc<OnceLock<Instant>>, bool, usize)>,
+        recently_expired_map: BTreeMap<u32, (Arc<shared::MiningData>, Instant, usize)>,
     }
 
     impl DataTracker {
@@ -985,23 +991,27 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
             &mut self,
             data: Arc<shared::MiningData>,
             expire: Arc<OnceLock<Instant>>,
+            hop_count: usize,
         ) -> u32 {
             let data_id = self.data_id;
             self.data_id = self.data_id.wrapping_add(1);
-            self.data_map.insert(data_id, (data, expire, false));
+            self.data_map
+                .insert(data_id, (data, expire, false, hop_count));
             data_id
         }
 
         fn expire_all(&mut self) {
             self.data_map
                 .values_mut()
-                .for_each(|(_, _, force_expire)| *force_expire = true);
+                .for_each(|(_, _, force_expire, _)| *force_expire = true);
         }
 
         fn remove_recently_expired(&mut self) {
-            // Retain only for last 10 seconds, as to give enough time for shares to be submitted.
             self.recently_expired_map
-                .retain(|_, v| v.1.elapsed() < RECENTLY_EXPIRED_DURATION);
+                .retain(|_, (_, expired_at, hop_count)| {
+                    let duration = get_recently_expired_duration(*hop_count);
+                    expired_at.elapsed() < duration
+                });
         }
 
         fn collect_expired(&mut self) -> Vec<u32> {
@@ -1009,13 +1019,15 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
             let expired = self
                 .data_map
                 .iter()
-                .filter(|(_, (_, v, e))| v.get().is_some() || *e)
+                .filter(|(_, (_, v, e, _))| v.get().is_some() || *e)
                 .map(|(v, _)| *v)
                 .collect::<Vec<_>>();
             for i in &expired {
                 let d = self.data_map.remove(&i).unwrap();
-                self.recently_expired_map
-                    .insert(*i, (d.0, d.1.get().copied().unwrap_or_else(Instant::now)));
+                self.recently_expired_map.insert(
+                    *i,
+                    (d.0, d.1.get().copied().unwrap_or_else(Instant::now), d.3),
+                );
             }
             expired
         }
@@ -1024,11 +1036,9 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
             self.remove_recently_expired();
             self.data_map
                 .get(&data_id)
-                .and_then(|(v, e, _)| {
-                    if e.get()
-                        .filter(|v| v.elapsed() >= RECENTLY_EXPIRED_DURATION)
-                        .is_none()
-                    {
+                .and_then(|(v, e, _, hop_count)| {
+                    let duration = get_recently_expired_duration(*hop_count);
+                    if e.get().filter(|v| v.elapsed() >= duration).is_none() {
                         Some(v.clone())
                     } else {
                         None
@@ -1037,7 +1047,7 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                 .or_else(|| {
                     self.recently_expired_map
                         .get(&data_id)
-                        .map(|(v, _)| v.clone())
+                        .map(|(v, _, _)| v.clone())
                 })
         }
     }
@@ -1090,7 +1100,8 @@ pub async fn server<S: AsyncRead + AsyncWrite + Unpin>(
                             "client_hwid" => client_hwid.clone(),
                         ).set(data.block_height as f64);
 
-                        let data_id = guard.add_data(data.clone(), expiration.clone());
+                        let hop_count = data.fixed_nonce_atoms.len();
+                        let data_id = guard.add_data(data.clone(), expiration.clone(), hop_count);
                         expiries.spawn(async move {
                             while expiration.get().is_none() {
                                 tokio::time::sleep(Duration::from_secs(1)).await;

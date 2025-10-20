@@ -20,8 +20,8 @@ use crate::compliance::ipdata::IpAddressChecker;
 use crate::device::{Device, DeviceInfoWithSockets};
 use crate::metrics::{counter, gauge, histogram};
 use crate::proto::{
-    ClientDataWrite, ClientDataWriteType, MiningAckOut, MiningDataOut, MiningResultIn,
-    RECENTLY_EXPIRED_DURATION,
+    get_recently_expired_duration, ClientDataWrite, ClientDataWriteType, MiningAckOut,
+    MiningDataOut, MiningResultIn, RECENTLY_EXPIRED_DURATION,
 };
 use crate::server::{mining_server, MiningConfig, TELEMETRY_PROOFRATE_INTERVAL};
 #[cfg(feature = "verifier")]
@@ -236,7 +236,8 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
     let mut requests = (0..NUM_DIFF_BUCKETS)
         .map(|_| BTreeMap::new())
         .collect::<Vec<_>>();
-    let server_id_map = SyncMutex::new(BTreeMap::<_, (_, (u32, usize, u32, UBig, usize))>::new());
+    let server_id_map =
+        SyncMutex::new(BTreeMap::<_, (_, (u32, usize, u32, UBig, usize, usize))>::new());
 
     #[cfg(feature = "verifier")]
     let mut last_updated = vec![Instant::now(); NUM_DIFF_BUCKETS];
@@ -293,8 +294,10 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
         #[cfg(feature = "db")]
         let db = db.clone();
         async move {
-            let Some(((data_id, server_id, session_id, parent_target, diff_bucket_id), mining_res)) =
-                data_info
+            let Some((
+                (data_id, server_id, session_id, parent_target, diff_bucket_id, _),
+                mining_res,
+            )) = data_info
             else {
                 debug!("Unable to grab data info (data expired?)");
                 // The data had expired before this function being called.
@@ -437,7 +440,8 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
                     counter!("nbx_miner_proxy_main_loop_mining_rx_total").increment(1);
                     let MiningDataOut { server_id, session_id, expire, new_datas } = v.expect("Client loop died");
                     'fullout: for (data_id, mut data) in new_datas {
-                        assert!(data.fixed_nonce_atoms.len() < 4, "We are at {} hops. This is too many (do we have a routing loop?)", data.fixed_nonce_atoms.len());
+                        let hop_count = data.fixed_nonce_atoms.len();
+                        assert!(hop_count < 4, "We are at {} hops. This is too many (do we have a routing loop?)", hop_count);
                         data.fixed_nonce_atoms.push(Belt(rand::random::<u64>() % PRIME));
                         let parent_target = parse_bn(*unsafe {data.target.root() });
                         trace!("parent_diff={}", target_to_difficulty(parent_target.clone()));
@@ -456,8 +460,11 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
                             data.target = target;
                             let data = Arc::new(data.clone());
                             let (inst_handle, inst) = TimeWriter::new();
-                            requests[i].insert((server_id, data_id), (data.clone(), Instant::now(), inst_handle, session_id));
-                            server_id_map.lock().unwrap().insert(Arc::as_ptr(&data), (inst.clone(), (data_id, server_id, session_id, parent_target.clone(), i)));
+                            requests[i].insert((server_id, data_id), (data.clone(), Instant::now(), inst_handle, session_id, hop_count));
+                            server_id_map.lock().unwrap().insert(
+                                Arc::as_ptr(&data),
+                                (inst.clone(), (data_id, server_id, session_id, parent_target.clone(), i, hop_count))
+                            );
                             if reqs_out[i].send((data, inst)).await.is_err() {
                                 error!("Failed to send to reqs_out");
                                 break 'fullout;
@@ -588,7 +595,10 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
                     // Maintain only live servers
                     requests.iter_mut().for_each(|v| v.retain(|(sid, _), _| server_extras[*sid].shared().live));
                     {
-                        server_id_map.lock().unwrap().retain(|_, (v, _)| v.get().filter(|v| v.elapsed() > RECENTLY_EXPIRED_DURATION).is_none());
+                        server_id_map.lock().unwrap().retain(|ptr, (v, (_, _, _, _, _, hop_count))| {
+                            let duration = get_recently_expired_duration(*hop_count);
+                            v.get().filter(|v| v.elapsed() > duration).is_none()
+                        });
                     }
 
                     #[cfg(feature = "verifier")]
@@ -616,7 +626,7 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
                                 debug!("Update difficulty of bucket {bucket_id} to min {}", target_to_difficulty(new_target.clone()));
                                 for (k, (data, ack_cnt, _inst_handle, session_id)) in reqs {
                                     let mut server_id_guard = server_id_map.lock().unwrap();
-                                    let Some((_, (data_id, server_id, session_id2, parent_target, stored_bucket_id))) = server_id_guard.get(&Arc::as_ptr(&data)).cloned() else {
+                                    let Some((_, (data_id, server_id, session_id2, parent_target, stored_bucket_id, _))) = server_id_guard.get(&Arc::as_ptr(&data)).cloned() else {
                                         error!("Cannot lookup server_id");
                                         continue;
                                     };
