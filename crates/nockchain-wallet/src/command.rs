@@ -233,8 +233,11 @@ fn validate_label(s: &str) -> Result<String, String> {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum Commands {
-    /// Generate a new key pair
+    /// Generates a new version 0 key pair
     Keygen,
+
+    /// Generate a new version 1 key pair for mining pkh so miners can set it in advance of the v1 cutoff
+    GenerateMiningPkh,
 
     /// Derive child key (pub, private or both) from the current master key
     DeriveChild {
@@ -262,9 +265,15 @@ pub enum Commands {
         #[arg(short = 'k', long = "key", value_name = "EXTENDED_KEY")]
         key: Option<String>,
 
-        /// Seed phrase to generate master private key
+        /// Seed phrase to generate master private key, requires version. If your key was generated prior to
+        /// the release of the v1 protocol upgrade on October 15, 2025, it is mostly likely version 0.
+        /// If it was generated after that date, it is likely version 1.
         #[arg(short = 's', long = "seedphrase", value_name = "SEEDPHRASE")]
         seedphrase: Option<String>,
+
+        /// Master key version to use when generating from seed phrase
+        #[arg(long = "version", value_name = "VERSION", requires = "seedphrase")]
+        version: Option<u64>,
 
         /// Pubkey (watch only)
         #[arg(short = 'c', long = "watch-only", value_name = "WATCH_ONLY")]
@@ -374,7 +383,7 @@ pub enum Commands {
     /// Show the master public key
     ShowMasterPubkey,
 
-    /// Show the master private key
+    /// Show the master extended private key
     ShowMasterPrivkey,
 
     /// Fetch confirmation depth for a transaction ID
@@ -478,6 +487,7 @@ impl Commands {
     fn as_wire_tag(&self) -> &'static str {
         match self {
             Commands::Keygen => "keygen",
+            Commands::GenerateMiningPkh => "generate-mining-pkh",
             Commands::DeriveChild { .. } => "derive-child",
             Commands::ImportKeys { .. } => "import-keys",
             Commands::ExportKeys => "export-keys",
@@ -493,9 +503,9 @@ impl Commands {
             Commands::ImportMasterPubkey { .. } => "import-master-pubkey",
             Commands::ListActiveAddresses => "list-active-addresses",
             Commands::ListMasterAddresses => "list-master-addresses",
-            Commands::ShowSeedphrase => "show-seedphrase",
-            Commands::ShowMasterPubkey => "show-master-pubkey",
-            Commands::ShowMasterPrivkey => "show-master-privkey",
+            Commands::ShowSeedphrase => "show-seed-phrase",
+            Commands::ShowMasterPubkey => "show-master-zpub",
+            Commands::ShowMasterPrivkey => "show-master-zprv",
             Commands::SignMessage { .. } => "sign-message",
             Commands::VerifyMessage { .. } => "verify-message",
             Commands::SignHash { .. } => "sign-hash",

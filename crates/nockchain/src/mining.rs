@@ -15,6 +15,7 @@ use nockapp::save::SaveableCheckpoint;
 use nockapp::utils::NOCK_STACK_SIZE_TINY;
 use nockapp::{Bytes, CrownError, Noun};
 use nockchain_libp2p_io::tip5_util::tip5_hash_to_base58;
+use nockchain_types::tx_engine::note::{Hash, SchnorrPubkey};
 use nockvm::interpreter::NockCancelToken;
 use nockvm::jets::hot::HotEntry;
 use nockvm::noun::{Atom, D, NO, T, YES};
@@ -188,10 +189,36 @@ impl MiningConfig {
             );
         }
 
+        if let Some(pubkey) = &self.mining_pubkey {
+            SchnorrPubkey::from_base58(pubkey)
+                .map_err(|err| format!("Invalid mining_pubkey: {err}"))?;
+        }
+
+        if let Some(key_configs) = &self.mining_key_adv {
+            for config in key_configs {
+                for key in &config.keys {
+                    SchnorrPubkey::from_base58(key)
+                        .map_err(|err| format!("Invalid mining_key_adv pubkey '{key}': {err}"))?;
+                }
+            }
+        }
+
+        if let Some(pkh) = &self.mining_pkh {
+            Hash::from_base58(pkh).map_err(|err| format!("Invalid mining_pkh: {err}"))?;
+        }
+
+        if let Some(pkh_configs) = &self.mining_pkh_adv {
+            for config in pkh_configs {
+                Hash::from_base58(&config.pkh).map_err(|err| {
+                    format!("Invalid mining_pkh_adv entry '{}': {err}", config.pkh)
+                })?;
+            }
+        }
+
         if self.mining_pubkey.is_some() {
             if !self.mining_pkh.is_some() {
                 return Err(
-                    "Have mining_pubkey, but no mining_pkh. Must specify neither or both of mining_pubkey and mining_pkh. To get a pkh, you must generate a v1 key by running `keygen` on the latest version of the wallet. The pkh will be listed as the 'Receive Address' ".to_string(),
+                    "Have mining_pubkey, but no mining_pkh. Must specify neither or both of mining_pubkey and mining_pkh. To get a pkh, you must generate a v1 key by running `generate-mining-pkh` on the latest version of the wallet. The pkh will be listed as the 'Address' ".to_string(),
                 );
             }
         }

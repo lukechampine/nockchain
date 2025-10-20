@@ -1,6 +1,5 @@
 ::  /ker/wallet/wallet: nockchain wallet
 /=  bip39  /common/bip39
-/=  slip10  /common/slip10
 /=  m  /common/markdown/types
 /=  md  /common/markdown/markdown
 /=  transact  /common/tx-engine
@@ -12,6 +11,7 @@
 /=  wt  /apps/wallet/lib/types
 /=  wutils  /apps/wallet/lib/utils
 /=  tx-builder  /apps/wallet/lib/tx-builder-v0
+/=  s10  /apps/wallet/lib/s10
 =>
 =|  bug=_&
 |%
@@ -20,7 +20,6 @@
 ++  utils  ~(. wutils bug)
 ++  debug  debug:utils
 ++  warn  warn:utils
-++  s10  s10:utils
 ++  moat  (keep state:wt)
 --
 ::
@@ -130,10 +129,12 @@
       ?.  include-watch-only.pole
         signing-keys
       (weld signing-keys watch-keys:get:v)
-    %+  turn
+    %+  murn
       ~(coils get:v %pub)
     |=  =coil:wt
-    key-b58:(to-b58:coil:wt coil)
+    ?:  ?=(%1 -.coil)
+      ~
+    `~(address to-b58:coil:wt coil)
   ==
 ::
 ++  poke
@@ -163,6 +164,7 @@
     ?+    -.cause  ~|("unsupported cause: {<-.cause>}" !!)
         %show                  (show:utils state path.cause)
         %keygen                (do-keygen cause)
+        %generate-mining-pkh   (do-generate-mining-pkh cause)
         %derive-child          (do-derive-child cause)
         %sign-tx               (do-sign-tx cause)
         %list-notes            (do-list-notes cause)
@@ -180,13 +182,13 @@
         %export-keys           (do-export-keys cause)
         %export-master-pubkey  (do-export-master-pubkey cause)
         %import-master-pubkey  (do-import-master-pubkey cause)
-        %gen-master-privkey    (do-gen-master-privkey cause)
+        %import-seed-phrase    (do-import-seed-phrase cause)
         %send-tx               (do-send-tx cause)
         %show-tx               (do-show-tx cause)
         %list-active-addresses  (do-list-active-addresses cause)
-        %show-seedphrase       (do-show-seedphrase cause)
-        %show-master-pubkey    (do-show-master-pubkey cause)
-        %show-master-privkey   (do-show-master-privkey cause)
+        %show-seed-phrase       (do-show-seed-phrase cause)
+        %show-master-zpub    (do-show-master-zpub cause)
+        %show-master-zprv  (do-show-master-zprv cause)
         %list-master-addresses  (do-list-master-addresses cause)
         %set-active-master-address  (do-set-active-master-address cause)
     ::
@@ -278,15 +280,41 @@
       %+  murn  ~(tap of new-keys)
       |=  [t=trek m=meta:wt]
       ^-  (unit tape)
-      ?.  ?=(%coil -.m)  ~
+      ?.  ?&  ?=(%coil -.m)
+              (gte (lent t) 4)
+          ==
+        ~
       =/  =coil:wt  p.m
-      =/  key-type=tape  ?:(?=(%pub -.key.coil) "Public Key" "Private Key")
-      =/  key=@t  (slav %t (snag 1 (pout t)))
-      =+  (to-b58:coil:wt coil)
+      =/  version=@  -.coil
+      =/  parent=@t  (slav %t (snag 1 (pout t)))
+      =/  key-or-address-b58=tape
+        ?:  ?=(%prv -.key.coil)
+          """
+          - Type: Private
+          - Private Key: {(trip ~(key to-b58:coil:wt coil))}
+          """
+        """
+        - Type: Public
+        - Address: {(trip ~(address to-b58:coil:wt coil))}
+        """
+      =/  info=tape
+        =+  index-display=(snag 3 (pout t))
+        ?:  =('m' index-display)
+          "- Derivation Info: Master Key"
+        =/  index=@  (slav %ud index-display)
+        =?  index-display  (gte index (bex 31))
+          =+  hardened-index=(mod index (bex 31))
+          (cat 3 (scot %ud hardened-index) ' (hardened)')
+        """
+        - Derivation Info: Child Key
+          - Index: {(trip index-display)}
+          - Parent Address: {(trip parent)}
+        """
       %-  some
       """
-      - {key-type}: {(trip key-b58)}
-      - Parent Key: {(trip key)}
+      {key-or-address-b58}
+      {info}
+      - Version: {<version>}
       ---
 
       """
@@ -355,9 +383,9 @@
           """
           ## Imported {extended-type} key
 
-          - import key: {(trip extended-key.cause)}
-          - label: {(trip key-label)}
-          - set as active master key
+          - Imported Extended Key: {(trip extended-key.cause)}
+          - Assigned Label: {(trip key-label)}
+          - Set as active master key
           """
           [%exit 0]
       ==
@@ -368,9 +396,9 @@
       :~  :-  %markdown
           %-  crip
           """
-          ## import failed
+          ## Import failed
 
-          cannot import derived key: no active master key set
+          Cannot import derived key: no active master key set
           """
           [%exit 1]
       ==
@@ -412,8 +440,8 @@
         """
         ## Imported {extended-type} Key
 
-        - Import Key: {(trip extended-key.cause)}
-        - Label: {(trip key-label)}
+        - Imported Extended Key: {(trip extended-key.cause)}
+        - Assigned Label: {(trip key-label)}
         - Index: {<ind:core>}
         - Verified as child of active master key
         """
@@ -452,21 +480,21 @@
       %-  (warn "wallet: fatal: master pubkey malformed")
       [[%exit 0]~ state]
     =/  dat-jam=@  (jam master-coil)
-    =/  [key-b58=@t cc-b58=@t]  (to-b58:coil:wt master-coil)
+    =/  addr-b58=@t  ~(address to-b58:coil:wt master-coil)
     =/  extended-key=@t
       =/  core  (from-public:s10 ~(keyc get:coil:wt master-coil))
       extended-public-key:core
     =/  file-path=@t  'master-pubkey.export'
+    =/  version=@  -.master-coil
     :_  state
     :~  :-  %markdown
         %-  crip
         """
         ## Exported Master Public Key
 
-        - Import Key: {(trip extended-key)}
-        - Public Key: {(trip key-b58)}
-        - Chain Code: {(trip cc-b58)}
-        - Version: {<-.master-coil>}
+        - Extended Key: {(trip extended-key)}
+        - Address: {(trip addr-b58)}
+        - Version: {<version>}
         - File: {(trip file-path)}
         """
         [%exit 0]
@@ -493,49 +521,55 @@
     =.  active-master.state  (some master-pubkey-coil)
     =/  label  `(crip "master-public-{<(end [3 4] p.key.master-pubkey-coil)>}")
     =.  keys.state  (key:put:v master-pubkey-coil ~ label)
-    =/  [key-b58=@t cc-b58=@t]  (to-b58:coil:wt master-pubkey-coil)
+    =/  addr-b58=@t  ~(address to-b58:coil:wt master-pubkey-coil)
+    =/  version=@  -.master-pubkey-coil
     :_  state
     :~  :-  %markdown
         %-  crip
         """
         ## Imported Master Public Key
 
-        - Public Key: {(trip key-b58)}
-        - Chain Code: {(trip cc-b58)}
-        - Version: {<-.master-pubkey-coil>}
+        - Address: {(trip addr-b58)}
+        - Version: {<version>}
         """
         [%exit 0]
     ==
   ::
-  ++  do-gen-master-privkey
+  ++  do-import-seed-phrase
     |=  =cause:wt
-    ?>  ?=(%gen-master-privkey -.cause)
-    ::  We do not need to reverse the endian-ness of the seedphrase
+    ?>  ?=(%import-seed-phrase -.cause)
+    ::  We do not need to reverse the endian-ness of the seed phrase
     ::  because the bip39 code expects a tape.
-    =/  seed=byts  [64 (to-seed:bip39 (trip seedphrase.cause) "")]
-    =/  cor  (from-seed:s10 seed)
-    =/  master-pubkey-coil=coil:wt  [%1 [%pub public-key] chain-code]:cor
-    =/  master-privkey-coil=coil:wt  [%1 [%prv private-key] chain-code]:cor
+    ::  TODO: move this conversion into s10
+    =/  seed=byts  [64 (to-seed:bip39 (trip seed-phrase.cause) "")]
+    =/  cor  (from-seed:s10 seed version.cause)
+    =/  [master-pubkey-coil=coil:wt master-privkey-coil=coil:wt]
+      ?-    version.cause
+          %0
+        :-  [%0 [%pub public-key] chain-code]:cor
+        [%0 [%prv private-key] chain-code]:cor
+      ::
+          %1
+        :-  [%1 [%pub public-key] chain-code]:cor
+        [%1 [%prv private-key] chain-code]:cor
+      ==
     =.  active-master.state  (some master-pubkey-coil)
     =/  public-label  `(crip "master-public-{<(end [3 4] public-key:cor)>}")
     =/  private-label  `(crip "master-private-{<(end [3 4] public-key:cor)>}")
     =.  keys.state  (key:put:v master-privkey-coil ~ private-label)
     =.  keys.state  (key:put:v master-pubkey-coil ~ public-label)
-    =.  keys.state  (seed:put:v seedphrase.cause)
-    =/  [public-b58=@t cc-b58=@t]  (to-b58:coil:wt master-pubkey-coil)
-    =/  [private-b58=@t *]  (to-b58:coil:wt master-privkey-coil)
+    =.  keys.state  (seed:put:v seed-phrase.cause)
     %-  (debug "active-master.state: {<active-master.state>}")
+    =/  version=@  version.cause
+    =/  address=@t  ~(address to-b58:coil:wt master-pubkey-coil)
     :_  state
     :~  :-  %markdown
         %-  crip
         """
         ## Master Key (Imported)
 
-        - Seed Phrase: {<seedphrase.cause>}
-        - Master Public Key: {(trip public-b58)}
-        - Master Private Key: {(trip private-b58)}
-        - Chain Code: {(trip cc-b58)}
-        - Version: {<-.master-pubkey-coil>}
+        - Address: {(trip address)}
+        - Version: {<version>}
         """
         [%exit 0]
     ==
@@ -578,15 +612,10 @@
     =/  base58-sign-keys=(list tape)
       %+  turn  ~(coils get:v %pub)
       |=  =coil:wt
-      =/  [key-b58=@t cc-b58=@t]  (to-b58:coil:wt coil)
-      =/  version  -.coil
-      =/  receive-address=@t
-        ?:  =(%0 version)
-          key-b58
-        (pkh-b58-from-pubkey-b58:utils key-b58)
+      =/  version=@  -.coil
+      =/  address=@t  ~(address to-b58:coil:wt coil)
       """
-      - Receive Address: {(trip receive-address)}
-      - Chain Code: {(trip cc-b58)}
+      - Address: {(trip address)}
       - Version: {<version>}
       ---
 
@@ -614,74 +643,92 @@
         [%exit 0]
     ==
   ::
-  ++  do-show-seedphrase
+  ++  do-show-seed-phrase
     |=  =cause:wt
-    ?>  ?=(%show-seedphrase -.cause)
-    %-  (debug "show-seedphrase")
+    ?>  ?=(%show-seed-phrase -.cause)
+    %-  (debug "show-seed-phrase")
+    ?~  active-master.state
+      :_  state
+      :~  :-  %markdown
+          %-  crip
+          """
+          Cannot show seed phrase without active master address set. Please import a master key / seed phrase or generate a new one.
+          """
+          [%exit 0]
+      ==
     =/  =meta:wt  seed:get:v
-    =/  seedphrase=@t
+    =/  version=@  -.u.active-master.state
+    =/  seed-phrase=@t
       ?:  ?=(%seed -.meta)
         +.meta
       %-  crip
-      "no seedphrase found"
+      "no seed-phrase found"
     :_  state
     :~  :-  %markdown
         %-  crip
         """
-        ## Seed Phrase
-
-        {<seedphrase>}
-        """
-        [%exit 0]
-    ==
-  ::
-  ++  do-show-master-pubkey
-    |=  =cause:wt
-    ?>  ?=(%show-master-pubkey -.cause)
-    %-  (debug "show-master-pubkey")
-    =/  =coil:wt  ~(master get:v %pub)
-    =/  extended-key=@t
-      =/  core  (from-public:s10 ~(keyc get:coil:wt coil))
-      extended-public-key:core
-    =/  [key-b58=@t cc-b58=@t]  (to-b58:coil:wt coil)
-    =/  version  -.coil
-    =/  receive-address=@t
-      ?:  =(%0 version)
-        key-b58
-      (pkh-b58-from-pubkey-b58:utils key-b58)
-    :_  state
-    :~  :-  %markdown
-        %-  crip
-        """
-        ## Master Public Key
-
-        - Import Key: {(trip extended-key)}
-        - Receive Address: {(trip receive-address)}
-        - Chain Code: {(trip cc-b58)}
+        ## Show Seed Phrase
+        Store this seedphrase in a safe place. Keep note of the version
+        - Seed Phrase: {<seed-phrase>}
         - Version: {<version>}
         """
         [%exit 0]
     ==
   ::
-  ++  do-show-master-privkey
+  ++  do-show-master-zpub
     |=  =cause:wt
-    ?>  ?=(%show-master-privkey -.cause)
-    %-  (debug "show-master-privkey")
-    =/  =coil:wt  ~(master get:v %prv)
-    =/  extended-key=@t
-      =/  core  (from-private:s10 ~(keyc get:coil:wt coil))
-      extended-private-key:core
-    =/  [key-b58=@t cc-b58=@t]  (to-b58:coil:wt coil)
+    ?>  ?=(%show-master-zpub -.cause)
+    %-  (debug "show-master-zpub")
+    ?~  active-master.state
+      :_  state
+      :~  :-  %markdown
+          %-  crip
+          """
+          Cannot show master pubkey without active master address set. Please import a master key / seed phrase or generate a new one.
+          """
+          [%exit 0]
+      ==
+    =/  =coil:wt  ~(master get:v %pub)
+    =/  extended-key=@t  (extended-key:coil:wt coil)
+    =/  version=@  -.coil
+    =/  address=@t  ~(address to-b58:coil:wt coil)
     :_  state
     :~  :-  %markdown
         %-  crip
         """
-        ## Master Private Key
+        ## Show Master Extended Public Key
 
-        - Import Key: {(trip extended-key)}
-        - Private Key: {(trip key-b58)}
-        - Chain Code: {(trip cc-b58)}
-        - Version: {<-.coil>}
+        - Extended Public Key: {(trip extended-key)} (save for import)
+        - Corresponding Address: {(trip address)}
+        - Version: {<version>}
+        """
+        [%exit 0]
+    ==
+  ::
+  ++  do-show-master-zprv
+    |=  =cause:wt
+    ?>  ?=(%show-master-zprv -.cause)
+    %-  (debug "show-master-zprv")
+    ?~  active-master.state
+      :_  state
+      :~  :-  %markdown
+          %-  crip
+          """
+          Cannot show master privkey without active master address set. Please import a master key / seed phrase or generate a new one.
+          """
+          [%exit 0]
+      ==
+    =/  [version=@ extended-key=@t]
+      =/  =coil:wt  ~(master get:v %prv)
+      [`@`-.coil (extended-key:coil:wt coil)]
+    :_  state
+    :~  :-  %markdown
+        %-  crip
+        """
+        ## Master Extended Private Key (zprv)
+
+        - Extended Private Key: {(trip extended-key)} (save for import)
+        - Version: {<version>}
         """
         [%exit 0]
     ==
@@ -800,7 +847,7 @@
       :~  :-  %markdown
           %-  crip
           """
-          Cannot create a transaction without active master address set. Please import a master key or generate a new one.
+          Cannot create a transaction without active master address set. Please import a master key / seed phrase or generate a new one.
           """
           [%exit 0]
       ==
@@ -811,7 +858,9 @@
           """
           Active address corresponds to v1 key. Cannot sign a v0 transaction with v1 keys. Use the `list-master-addresses`
           command to list your master addresses. Then use `set-active-master-address` to set your active address to one corresponding
-          to a v0 key if available.
+          to a v0 key if available. If you have a v0 key stored as a seed phrase, you can import it by running
+          `nockchain-wallet import-keys --seedphrase <seed-phrase> --version 0`. If your key was generated before the release of the
+          v1 protocol upgrade on October 15, 2025, it is most likely a v0 key.
           """
           [%exit 0]
       ==
@@ -905,8 +954,9 @@
     |=  =cause:wt
     ?>  ?=(%keygen -.cause)
     =+  [seed-phrase=@t cor]=(gen-master-key:s10 entropy.cause salt.cause)
-    =/  master-public-coil  [%1 [%pub public-key] chain-code]:cor
-    =/  master-private-coil  [%1 [%prv private-key] chain-code]:cor
+    =/  [master-public-coil=coil:wt master-private-coil=coil:wt]
+      :-  [%0 [%pub public-key] chain-code]:cor
+      [%0 [%prv private-key] chain-code]:cor
     =/  old-active  active-master.state
     =.  active-master.state  (some master-public-coil)
     %-  (debug "keygen: public key: {<(en:base58:wrap public-key:cor)>}")
@@ -918,38 +968,94 @@
     =.  keys.state  (seed:put:v seed-phrase)
     =/  extended-private=@t  extended-private-key:cor
     =/  extended-public=@t  extended-public-key:cor
-    =/  [pubkey-b58=@t cc-b58=@t]  (to-b58:coil:wt master-public-coil)
-    =/  [prvkey-b58=@t *]  (to-b58:coil:wt master-private-coil)
-    =/  pkh-b58=@t  (pkh-b58-from-pubkey-b58:utils pubkey-b58)
+    =/  addr-b58=@t  ~(address to-b58:coil:wt master-public-coil)
     ::  If there was already an active master address, set it back to the old master address
     ::  The new keys generated are stored in the keys state and the user can manually
     ::  switch to them by running `set-active-master-address`
     =?  active-master.state  ?=(^ old-active)
       old-active
+    =/  active-addr=@t  (to-b58:active:wt active-master.state)
     :_  state
     :~  :-  %markdown
         %-  crip
         """
-        ## Generated New Master Key
-        Added keys to wallet.
+        ## Generated New Master Key (version 0)
+        - Added keys to wallet.
+        - Active master key is set to {(trip active-addr)}.
+          - To switch the active address, run `nockchain-wallet set-active-master-address <master-address>`.
+          - To see the available master addresses, run `nockchain-wallet list-master-addresses`.
+          - To see the current active address and its child keys, run `nockchain-wallet list-active-addresses`.
 
-        ### Receive Address (pkh address)
-        {(trip pkh-b58)}
+        ### Address
+        {(trip addr-b58)}
 
-        ### Private Key
-        {(trip prvkey-b58)}
-
-        ### Chain Code
-        {(trip cc-b58)}
-
-        ### Import Private Key
+        ### Extended Private Key (save this for import)
         {(trip extended-private)}
 
-        ### Import Public Key
+        ### Extended Public Key (save this for import)
         {(trip extended-public)}
 
-        ### Seed Phrase
+        ### Seed Phrase (save this for import)
         {<seed-phrase>}
+
+        ### Version (keep this for import with seed phrase)
+        0
+
+        """
+        [%exit 0]
+    ==
+  ::
+  ++  do-generate-mining-pkh
+    |=  =cause:wt
+    ?>  ?=(%generate-mining-pkh -.cause)
+    =+  [seed-phrase=@t cor]=(gen-master-key:s10 entropy.cause salt.cause)
+    =/  [master-public-coil=coil:wt master-private-coil=coil:wt]
+      :-  [%1 [%pub public-key] chain-code]:cor
+      [%1 [%prv private-key] chain-code]:cor
+    =/  old-active  active-master.state
+    =.  active-master.state  (some master-public-coil)
+    %-  (debug "keygen: public key: {<(en:base58:wrap public-key:cor)>}")
+    %-  (debug "keygen: private key: {<(en:base58:wrap private-key:cor)>}")
+    =/  pub-label  `(crip "master-public-{<(end [3 4] public-key:cor)>}")
+    =/  prv-label  `(crip "master-public-{<(end [3 4] public-key:cor)>}")
+    =.  keys.state  (key:put:v master-public-coil ~ pub-label)
+    =.  keys.state  (key:put:v master-private-coil ~ prv-label)
+    =.  keys.state  (seed:put:v seed-phrase)
+    =/  extended-private=@t  extended-private-key:cor
+    =/  extended-public=@t  extended-public-key:cor
+    =/  addr-b58=@t  ~(address to-b58:coil:wt master-public-coil)
+    ::  If there was already an active master address, set it back to the old master address
+    ::  The new keys generated are stored in the keys state and the user can manually
+    ::  switch to them by running `set-active-master-address`
+    =?  active-master.state  ?=(^ old-active)
+      old-active
+    =/  active-addr=@t  (to-b58:active:wt active-master.state)
+    :_  state
+    :~  :-  %markdown
+        %-  crip
+        """
+        ## Generated New v1 Master Key for Mining Public Key Hash Address
+        - Added keys to wallet.
+        - Active master key is set to {(trip active-addr)}.
+          - To switch the active address, run `nockchain-wallet set-active-master-address <master-address>`.
+          - To see the available master addresses, run `nockchain-wallet list-master-addresses`.
+          - To see the current active address and its child keys, run `nockchain-wallet list-active-addresses`.
+
+        ### Address (pkh address)
+        {(trip addr-b58)}
+
+        ### Extended Private Key (save this for import)
+        {(trip extended-private)}
+
+        ### Extended Public Key (save this for import)
+        {(trip extended-public)}
+
+        ### Seed Phrase (save this for import)
+        {<seed-phrase>}
+
+        ### Version (keep this for import with seed phrase)
+        1
+
         """
         [%exit 0]
     ==
@@ -974,22 +1080,19 @@
       %-  zing
       %+  turn  ~(tap in derived-keys)
       |=  =coil:wt
-      =/  [key-b58=@t cc-b58=@t]  (to-b58:coil:wt coil)
-      =/  version  -.coil
-      =/  receive-address=@t
-        ?:  ?=(%pub -.key.coil)
-          ?:  =(%0 version)
-            key-b58
-          (pkh-b58-from-pubkey-b58:utils key-b58)
-        'N/A (private key)'
+      =/  version=@  -.coil
+      =/  ext-key=@t  (extended-key:coil:wt coil)
+      =/  address=@t
+        ?:  ?=(%prv -.key.coil)
+          'N/A (private key)'
+        ~(address to-b58:coil:wt coil)
       =/  key-type=tape
         ?:  ?=(%pub -.key.coil)
-          "Public Key"
-        "Private Key"
+          "Extended Public Key"
+        "Extended Private Key"
       """
-      - {key-type}: {(trip key-b58)}
-      - Receive Address: {(trip receive-address)}
-      - Chain Code: {(trip cc-b58)}
+      - {key-type}: {(trip ext-key)}
+      - Address: {(trip address)}
       - Version: {<version>}
       ---
 
@@ -1016,7 +1119,7 @@
       :~  :-  %markdown
           %-  crip
           """
-          Cannot sign a transaction without active master address set. Please import a master key or generate a new one.
+          Cannot sign a transaction without active master address set. Please import a master key / seed phrase or generate a new one.
           """
           [%exit 0]
       ==
@@ -1060,7 +1163,7 @@
       :~  :-  %markdown
           %-  crip
           """
-          Cannot sign a message without active master address set. Please import a master key or generate a new one.
+          Cannot sign a message without active master address set. Please import a master key / seed phrase or generate a new one.
           """
           [%exit 0]
       ==
@@ -1071,7 +1174,9 @@
           """
           Cannot sign a message with v1 keys until forthcoming wallet update. Use the `list-master-addresses` command to list
           your master addresses. Then use `set-active-master-address` to set your master address to an address corresponding
-          to a v0 key if available.
+          to a v0 key if available. If you have a v0 key stored as a seed phrase, you can import it by running
+          `nockchain-wallet import-keys --seedphrase <seed-phrase> --version 0`. If your key was generated before the
+          release of the v1 protocol upgrade on October 15, 2025, it is most likely a v0 key.
           """
           [%exit 0]
       ==
@@ -1198,14 +1303,11 @@
     =/  master-addrs=(list tape)
       %+  turn
         master-addresses:get:v
-      |=  addr=@t
-      ::  because the encoded public key is fixed width, v0 addresses will be fixed length.
-      ::  thus, we can use the length of the b58 encoded address to determine the version
-      =/  version  ?:(=(132 (met 3 addr)) %0 %1)
+      |=  [version=@ addr=@t]
       =?  addr  =(addr (to-b58:active:wt active-master.state))
         (cat 3 addr ' **(active)**')
       """
-      - Receive Address: {(trip addr)}
+      - Address: {(trip addr)}
       - Version: {<version>}
       ---
 
@@ -1215,7 +1317,7 @@
         %-  crip
         """
         ## Master Address Information
-        Note: Receive addresses are the same as pubkeys for v0 keys. For v1 keys, the receive address is the hash of the public key.
+        Note: Addresses are the same as pubkeys for v0 keys. For v1 keys, the address is the hash of the public key.
 
         {(zing master-addrs)}
         """

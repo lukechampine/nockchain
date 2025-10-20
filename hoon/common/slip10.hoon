@@ -37,7 +37,7 @@
 ::
 ++  domain-separator  [14 'dees niahckcoN']
 ::
-++  current-protocol  1
+++  current-protocol  0
 ++  protocol-version  ver
 ::
 ::
@@ -57,7 +57,7 @@
 ::  core initialization
 ::
 ++  from-seed
-  |=  byts
+  |=  [byts version=@]
   ^+  +>
   =+  der=(hmac-sha512l domain-separator [wid dat])
   =/  [left=@ right=@]
@@ -68,7 +68,7 @@
   ::  obtain a valid key. This prevents the distribution from being biased.
   |-
   ?:  (lth left n)
-    +>.^$(prv left, pub (point left a-gen:curve), cad right, ver current-protocol)
+    +>.^$(prv left, pub (point left a-gen:curve), cad right, ver version)
   =/  der  (hmac-sha512l domain-separator 64^der)
   %=    $
     der  der
@@ -282,13 +282,14 @@
     (de:base58:wrap (trip key))
   ?>  (verify-checksum decoded)
   =/  total-size=@  (met 3 decoded)
+  ::  remove the checksum
   =/  payload=@  (cut 3 [4 total-size] decoded)
-  =/  version=@  (cut 3 [0 4] key)
-  =/  version-text=@t  `@t`version
+  =/  typ=@  (cut 3 [0 4] key)
+  =/  typ-text=@t  `@t`typ
   =/  is-private=?
-    ?:  =(version-text 'zprv')  %.y  ::  zprv
-    ?:  =(version-text 'zpub')  %.n  ::  zpub
-    ~|("unsupported extended key version: {<version>}" !!)
+    ?:  =(typ-text 'zprv')  %.y  ::  zprv
+    ?:  =(typ-text 'zpub')  %.n  ::  zpub
+    ~|("unsupported extended key type: {<typ>}" !!)
   =/  key-size=@  ?:(is-private 33 97)
   ::  check if protocol version byte exists (backward compatibility)
   =/  has-protocol-version=?

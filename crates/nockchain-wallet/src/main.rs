@@ -75,6 +75,7 @@ async fn main() -> Result<(), NockAppError> {
         // Commands that DON'T need syncing either because they don't sync
         // or they don't interact with the chain
         Commands::Keygen
+        | Commands::GenerateMiningPkh
         | Commands::DeriveChild { .. }
         | Commands::ImportKeys { .. }
         | Commands::ExportKeys
@@ -99,7 +100,6 @@ async fn main() -> Result<(), NockAppError> {
         _ => true,
     };
 
-    // Generate the command noun and operation
     let poke = match &cli.command {
         Commands::Keygen => {
             let mut entropy = [0u8; 32];
@@ -107,6 +107,13 @@ async fn main() -> Result<(), NockAppError> {
             getrandom::fill(&mut entropy).map_err(|e| CrownError::Unknown(e.to_string()))?;
             getrandom::fill(&mut salt).map_err(|e| CrownError::Unknown(e.to_string()))?;
             Wallet::keygen(&entropy, &salt)
+        }
+        Commands::GenerateMiningPkh => {
+            let mut entropy = [0u8; 32];
+            let mut salt = [0u8; 16];
+            getrandom::fill(&mut entropy).map_err(|e| CrownError::Unknown(e.to_string()))?;
+            getrandom::fill(&mut salt).map_err(|e| CrownError::Unknown(e.to_string()))?;
+            Wallet::generate_mining_pkh(&entropy, &salt)
         }
         Commands::DeriveChild {
             index,
@@ -211,6 +218,7 @@ async fn main() -> Result<(), NockAppError> {
             file,
             key,
             seedphrase,
+            version,
             watch_only_pubkey,
         } => {
             if let Some(file_path) = file {
@@ -218,9 +226,14 @@ async fn main() -> Result<(), NockAppError> {
             } else if let Some(extended_key) = key {
                 Wallet::import_extended(extended_key)
             } else if let Some(seed) = seedphrase {
+                let version = version.ok_or_else(|| {
+                    NockAppError::from(CrownError::Unknown(
+                        "--version is required when using --seedphrase".into(),
+                    ))
+                })?;
                 // normalize seedphrase to have exactly one space between words
                 let normalized_seed = seed.split_whitespace().collect::<Vec<&str>>().join(" ");
-                Wallet::gen_master_privkey(&normalized_seed)
+                Wallet::import_seed_phrase(&normalized_seed, version)
             } else if let Some(pubkey) = watch_only_pubkey {
                 let _ = SchnorrPubkey::from_base58(pubkey)
                     .map_err(|e| CrownError::Unknown(format!("Invalid public key: {}", e)))?;
@@ -285,7 +298,7 @@ async fn main() -> Result<(), NockAppError> {
             Wallet::set_active_master_address(address_b58)
         }
         Commands::ListMasterAddresses => Wallet::list_master_addresses(),
-        Commands::ShowSeedphrase => Wallet::show_seedphrase(),
+        Commands::ShowSeedphrase => Wallet::show_seed_phrase(),
         Commands::ShowMasterPubkey => Wallet::show_master_pubkey(),
         Commands::ShowMasterPrivkey => Wallet::show_master_privkey(),
         Commands::TxAccepted { .. } => {
@@ -407,11 +420,12 @@ impl Wallet {
         Ok((slab.clone(), operation))
     }
 
-    /// Generates a new key pair.
+    /// Generates a new key pair. Will be a version 0 key until the wallet supports v1 transactions
     ///
     /// # Arguments
     ///
     /// * `entropy` - The entropy to use for key generation.
+    /// * `sal` - The salt to use for key generation.
     fn keygen(entropy: &[u8; 32], sal: &[u8; 16]) -> CommandNoun<NounSlab> {
         let mut slab = NounSlab::new();
         let ent: Byts = Byts::new(entropy.to_vec());
@@ -419,6 +433,26 @@ impl Wallet {
         let sal: Byts = Byts::new(sal.to_vec());
         let sal_noun = sal.into_noun(&mut slab);
         Self::wallet("keygen", &[ent_noun, sal_noun], Operation::Poke, &mut slab)
+    }
+
+    /// Generates a new key pair, specifically for mining pkh.
+    ///
+    /// # Arguments
+    ///
+    /// * `entropy` - The entropy to use for key generation.
+    /// * `sal` - The salt to use for key generation.
+    fn generate_mining_pkh(entropy: &[u8; 32], sal: &[u8; 16]) -> CommandNoun<NounSlab> {
+        let mut slab = NounSlab::new();
+        let ent: Byts = Byts::new(entropy.to_vec());
+        let ent_noun = ent.into_noun(&mut slab);
+        let sal: Byts = Byts::new(sal.to_vec());
+        let sal_noun = sal.into_noun(&mut slab);
+        Self::wallet(
+            "generate-mining-pkh",
+            &[ent_noun, sal_noun],
+            Operation::Poke,
+            &mut slab,
+        )
     }
 
     ///// Updates the keys in the wallet.
@@ -618,17 +652,19 @@ impl Wallet {
         )
     }
 
-    /// Generates a master private key from a seed phrase.
+    /// Imports keys from a seed phrase.
     ///
     /// # Arguments
     ///
-    /// * `seedphrase` - The seed phrase to generate the master private key from.
-    fn gen_master_privkey(seedphrase: &str) -> CommandNoun<NounSlab> {
+    /// * `seed_phrase` - The seed phrase to generate the master private key from.
+    /// * `version` - The version tag to attach to the generated master key.
+    fn import_seed_phrase(seed_phrase: &str, version: u64) -> CommandNoun<NounSlab> {
         let mut slab = NounSlab::new();
-        let seedphrase_noun = make_tas(&mut slab, seedphrase).as_noun();
+        let seed_phrase_noun = make_tas(&mut slab, seed_phrase).as_noun();
+        let version_noun = D(version);
         Self::wallet(
-            "gen-master-privkey",
-            &[seedphrase_noun],
+            "import-seed-phrase",
+            &[seed_phrase_noun, version_noun],
             Operation::Poke,
             &mut slab,
         )
@@ -1142,21 +1178,21 @@ impl Wallet {
     }
 
     /// Shows the seed phrase for the current master key.
-    fn show_seedphrase() -> CommandNoun<NounSlab> {
+    fn show_seed_phrase() -> CommandNoun<NounSlab> {
         let mut slab = NounSlab::new();
-        Self::wallet("show-seedphrase", &[], Operation::Poke, &mut slab)
+        Self::wallet("show-seed-phrase", &[], Operation::Poke, &mut slab)
     }
 
     /// Shows the master public key.
     fn show_master_pubkey() -> CommandNoun<NounSlab> {
         let mut slab = NounSlab::new();
-        Self::wallet("show-master-pubkey", &[], Operation::Poke, &mut slab)
+        Self::wallet("show-master-zpub", &[], Operation::Poke, &mut slab)
     }
 
     /// Shows the master private key.
     fn show_master_privkey() -> CommandNoun<NounSlab> {
         let mut slab = NounSlab::new();
-        Self::wallet("show-master-privkey", &[], Operation::Poke, &mut slab)
+        Self::wallet("show-master-zprv", &[], Operation::Poke, &mut slab)
     }
 }
 
@@ -1529,12 +1565,14 @@ mod tests {
             .map_err(|e| CrownError::Unknown(e.to_string()))?;
         let mut wallet = Wallet::new(nockapp);
         let seedphrase = "correct horse battery staple";
-        let (noun, op) = Wallet::gen_master_privkey(seedphrase)?;
+        let version = 1;
+        let (noun, op) = Wallet::import_seed_phrase(seedphrase, version)?;
         println!("privkey_slab: {:?}", noun);
         let wire = WalletWire::Command(Commands::ImportKeys {
             file: None,
             key: None,
             seedphrase: Some(seedphrase.to_string()),
+            version: Some(version),
             watch_only_pubkey: None,
         })
         .to_wire();
@@ -1570,6 +1608,7 @@ mod tests {
             file: Some(test_path.to_string()),
             key: None,
             seedphrase: None,
+            version: None,
             watch_only_pubkey: None,
         })
         .to_wire();
@@ -1650,7 +1689,9 @@ mod tests {
         let fee = 0;
 
         // generate keys
-        let (genkey_noun, genkey_op) = Wallet::gen_master_privkey("correct horse battery staple")?;
+        let version = 1;
+        let (genkey_noun, genkey_op) =
+            Wallet::import_seed_phrase("correct horse battery staple", version)?;
         let (spend_noun, spend_op) = Wallet::create_tx(
             names.clone(),
             recipients.clone(),
@@ -1665,6 +1706,7 @@ mod tests {
             file: None,
             key: None,
             seedphrase: Some("correct horse battery staple".to_string()),
+            version: Some(version),
             watch_only_pubkey: None,
         })
         .to_wire();
