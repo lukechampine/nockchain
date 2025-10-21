@@ -469,6 +469,15 @@ pub async fn mining_server<
         (None, None)
     };
 
+    #[cfg(feature = "compliance")]
+    let (blocklist_cache, blocklist_cache_for_accept, _blocklist_handle) =
+        if let Some(db) = db.as_ref() {
+            let (cache, handle) = spawn_blocklist_refresh_task(db.clone()).await;
+            (Some(cache.clone()), Some(cache), Some(handle))
+        } else {
+            (None, None, None)
+        };
+
     let (accept_tx, mut accept_rx) = mpsc::channel(8);
     let accept_loop = async move {
         let mut handshake_set = JoinSet::new();
@@ -515,6 +524,8 @@ pub async fn mining_server<
                     let difficulty_cache = difficulty_cache.clone();
                     #[cfg(feature = "compliance")]
                     let ip_checker = ip_checker_for_accept.clone();
+                    #[cfg(feature = "compliance")]
+                    let blocklist_cache = blocklist_cache_for_accept.clone();
 
                     handshake_set.spawn(async move {
                         let s = match tokio::time::timeout(
@@ -545,6 +556,8 @@ pub async fn mining_server<
                                 db.clone(),
                                 #[cfg(feature = "compliance")]
                                 ip_checker.clone(),
+                                #[cfg(feature = "compliance")]
+                                blocklist_cache.clone(),
                             ),
                         )
                         .await
@@ -626,14 +639,6 @@ pub async fn mining_server<
     ));
     conndrop_interval.reset();
 
-    #[cfg(feature = "compliance")]
-    let (blocklist_cache, _blocklist_handle) = if let Some(db) = db.as_ref() {
-        let (cache, handle) = spawn_blocklist_refresh_task(db.clone()).await;
-        (Some(cache), Some(handle))
-    } else {
-        (None, None)
-    };
-
     // Add periodic blocklist check interval
     let mut blocklist_check_interval = tokio::time::interval(Duration::from_secs(30));
     blocklist_check_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -695,7 +700,7 @@ pub async fn mining_server<
                 if let Some(cache) = &blocklist_cache {
                     let connected_subs: Vec<Uuid> = clients.subs.keys().copied().collect();
 
-                    let Ok(blocklisted_subs) = cache.lock() else {
+                    let Ok(blocklisted_subs) = cache.0.lock() else {
                         error!("Blocklist poisoned");
                         continue;
                     };
@@ -703,7 +708,7 @@ pub async fn mining_server<
                     counter!("nbx_miner_server_blocklist_check_total").increment(1);
 
                     for sub in connected_subs {
-                        if blocklisted_subs.contains(&sub) {
+                        if blocklisted_subs.contains_key(&sub) {
                             warn!("Disconnecting blocklisted sub: {sub}");
                             let disconnected = clients.abort_by_sub(
                                 &sub,

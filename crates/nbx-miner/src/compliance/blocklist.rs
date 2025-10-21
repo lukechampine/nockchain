@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -8,7 +8,18 @@ use tokio::time::interval;
 use tracing::warn;
 use uuid::Uuid;
 
-type BlocklistCache = Arc<Mutex<HashSet<Uuid>>>;
+#[derive(Clone)]
+pub struct BlocklistCache(pub Arc<Mutex<BTreeMap<Uuid, Option<Arc<str>>>>>);
+
+impl BlocklistCache {
+    pub fn lookup(&self, sub: Uuid) -> Option<Option<Arc<str>>> {
+        self.0.lock().unwrap().get(&sub).cloned()
+    }
+
+    pub fn is_blocklisted(&self, sub: Uuid) -> bool {
+        self.lookup(sub).is_some()
+    }
+}
 
 pub async fn spawn_blocklist_refresh_task(
     db: crate::db::DatabaseHandle,
@@ -18,7 +29,7 @@ pub async fn spawn_blocklist_refresh_task(
         .await
         .expect("Failed to fetch initial blocklisted subs");
 
-    let cache: BlocklistCache = Arc::new(Mutex::new(initial_blocklist));
+    let cache = BlocklistCache(Arc::new(Mutex::new(initial_blocklist)));
 
     // Spawn background refresh task
     let cache_clone = cache.clone();
@@ -30,7 +41,7 @@ pub async fn spawn_blocklist_refresh_task(
             refresh_interval.tick().await;
 
             if let Some(blocklisted_subs) = db.get_all_blocklisted_subs().await {
-                let Ok(mut writer) = cache_clone.lock() else {
+                let Ok(mut writer) = cache_clone.0.lock() else {
                     warn!("Blocklist cache is poisoned");
                     continue;
                 };

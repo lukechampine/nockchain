@@ -1,6 +1,9 @@
 use std::net::IpAddr;
+use std::num::NonZeroUsize;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use lru::LruCache;
 use metrics::counter;
 use nbx_jetpack::log::{debug, error, info};
 use serde::{Deserialize, Serialize};
@@ -67,6 +70,7 @@ struct ThreatInfo {
 pub struct IpAddressChecker {
     api_key: String,
     client: reqwest::Client,
+    lru: Arc<Mutex<LruCache<(Uuid, IpAddr), IpAddressCheckDecision>>>,
 }
 
 impl IpAddressChecker {
@@ -79,8 +83,13 @@ impl IpAddressChecker {
             .timeout(IPDATA_TIMEOUT)
             .build()
             .expect("Failed to create HTTP client");
+        let lru = Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(16384).unwrap())));
 
-        Self { api_key, client }
+        Self {
+            api_key,
+            client,
+            lru,
+        }
     }
 
     async fn check_with_ipdata(&self, ip: IpAddr) -> Result<IpDataResponse, reqwest::Error> {
@@ -127,6 +136,21 @@ impl IpAddressChecker {
         IpAddressCheckDecision::Allow
     }
 
+    fn lru_ip_address_details(&self, sub: Uuid, ip: IpAddr) -> Option<IpAddressCheckDecision> {
+        let mut lru = self.lru.lock().unwrap();
+        lru.get(&(sub, ip)).cloned()
+    }
+
+    fn lru_insert_ip_address_details(
+        &self,
+        sub: Uuid,
+        ip: IpAddr,
+        decision: IpAddressCheckDecision,
+    ) {
+        let mut lru = self.lru.lock().unwrap();
+        lru.push((sub, ip), decision);
+    }
+
     pub async fn check_ip(
         &self,
         ip: IpAddr,
@@ -138,9 +162,18 @@ impl IpAddressChecker {
         }
 
         // Check cache first
+        if let Some(cached_decision) = self.lru_ip_address_details(sub, ip) {
+            debug!("Using cached IP decision for {ip}: {:?}", cached_decision);
+            counter!("nbx_miner_ip_check_lru_cache_hit_total").increment(1);
+            return Some(cached_decision);
+        }
+        counter!("nbx_miner_ip_check_lru_cache_miss_total").increment(1);
+
+        // Check db then
         if let Some(cached_decision) = db.check_ip_address_details(sub, ip).await {
             debug!("Using cached IP decision for {ip}: {:?}", cached_decision);
             counter!("nbx_miner_ip_check_cache_hit_total").increment(1);
+            self.lru_insert_ip_address_details(sub, ip, cached_decision.clone());
             return Some(cached_decision);
         }
         counter!("nbx_miner_ip_check_cache_miss_total").increment(1);
@@ -160,6 +193,7 @@ impl IpAddressChecker {
                 )
                 .increment(1);
 
+                self.lru_insert_ip_address_details(sub, ip, decision.clone());
                 Some(decision)
             }
             Err(e) => {

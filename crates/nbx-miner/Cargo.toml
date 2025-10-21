@@ -104,6 +104,7 @@ axum = { workspace = true, optional = true, features = ["json"] }
 axum-extra = { workspace = true, optional = true }
 http = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
+lru.workspace = true
 
 zkvm-jetpack.workspace = true
 nockchain-math.workspace = true

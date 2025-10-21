@@ -9,7 +9,7 @@ use nockchain_libp2p_io::tip5_util::ubig_to_base58;
 use sqlx::any::install_default_drivers;
 use sqlx::postgres::PgPoolOptions as DbPoolOptions;
 use sqlx::types::{Json, Uuid};
-use sqlx::PgPool as DbPool;
+use sqlx::{PgPool as DbPool, Row};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 use crate::compliance::ip_address_checks::IpAddressCheckDecision;
@@ -43,7 +43,7 @@ enum DbMsgHiPrio {
         response: tokio::sync::oneshot::Sender<Option<HashMap<Uuid, i32>>>,
     },
     GetAllBlocklisted {
-        response: tokio::sync::oneshot::Sender<Option<HashSet<Uuid>>>,
+        response: tokio::sync::oneshot::Sender<Option<BTreeMap<Uuid, Option<Arc<str>>>>>,
     },
 }
 
@@ -303,8 +303,8 @@ impl Database {
                 }
                 DbMsgHiPrio::GetAllBlocklisted { response } => {
                     if !response.is_closed() {
-                        let result = sqlx::query_scalar::<_, Uuid>(
-                            "SELECT DISTINCT sub
+                        let result = sqlx::query(
+                            "SELECT DISTINCT sub, block_message
                                  FROM block_list
                                  WHERE revoked_at IS NULL"
                             )
@@ -313,7 +313,7 @@ impl Database {
 
                         match result.as_ref() {
                             Ok(subs) => {
-                                let blocklist: HashSet<Uuid> = subs.iter().copied().collect();
+                                let blocklist: BTreeMap<Uuid, Option<Arc<str>>> = subs.iter().map(|row| (row.get::<Uuid, _>(0), row.get::<Option<String>, _>(1).as_deref().map(Arc::from))).collect();
                                 let _ = response.send(Some(blocklist));
                             }
                             Err(e) => {
@@ -610,7 +610,7 @@ impl DatabaseHandle {
         })
     }
 
-    pub async fn get_all_blocklisted_subs(&self) -> Option<HashSet<Uuid>> {
+    pub async fn get_all_blocklisted_subs(&self) -> Option<BTreeMap<Uuid, Option<Arc<str>>>> {
         let (tx, rx) = tokio::sync::oneshot::channel();
 
         if !self.submit_msg_hi(DbMsgHiPrio::GetAllBlocklisted { response: tx }) {

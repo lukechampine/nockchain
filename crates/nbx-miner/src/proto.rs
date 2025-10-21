@@ -23,7 +23,7 @@ use uuid::Uuid;
 
 use crate::compliance::ip_address_checks::{IpAddressCheckDecision, IpAddressCheckReason};
 #[cfg(feature = "compliance")]
-use crate::compliance::ipdata::IpAddressChecker;
+use crate::compliance::{blocklist::BlocklistCache, ipdata::IpAddressChecker};
 use crate::device::{Device, DeviceInfoWithSockets};
 use crate::metrics::{counter, gauge, histogram};
 use crate::shared::{self, JwtClaims};
@@ -747,6 +747,7 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
     conntrack: shared::ConnTrack,
     #[cfg(feature = "db")] db: Option<crate::db::DatabaseHandle>,
     #[cfg(feature = "compliance")] ip_checker: Option<IpAddressChecker>,
+    #[cfg(feature = "compliance")] blocklist_cache: Option<BlocklistCache>,
 ) -> io::Result<ServerHandshake<S>> {
     let mut crypt = ChaCha::new_chacha8(&CHACHA_KEY, &0u64.to_le_bytes());
 
@@ -847,10 +848,8 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
 
     #[cfg(feature = "compliance")]
     {
-        if let Some(db) = &db {
-            let (is_blocklisted, blocklisted_message) = db.is_blocklisted(client_sub).await;
-
-            if is_blocklisted {
+        if let Some((db, blocklist)) = db.as_ref().zip(blocklist_cache.as_ref()) {
+            if let Some(blocklisted_message) = blocklist.lookup(client_sub) {
                 counter!("nbx_miner_proto_server_blocklist_rejection_total").increment(1);
                 warn!("Rejecting blocklisted user: sub={client_sub}, hwid={client_hwid}");
 
@@ -862,7 +861,9 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
                     io::Error::new(
                         io::ErrorKind::ConnectionRefused,
                         blocklisted_message
-                            .unwrap_or_else(|| "Nockbox is not available for you.".to_string()),
+                            .as_deref()
+                            .unwrap_or("Nockbox is not available for you.")
+                            .to_string(),
                     ),
                 )
                 .await;
