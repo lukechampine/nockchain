@@ -322,6 +322,7 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
                 "nbx_miner_proxy_accumulated_work",
                 "client_sub" => sub.to_string(),
                 "server_id" => server_id.to_string(),
+                "diff_bucket_id" => diff_bucket_id.to_string(),
             )
             .increment(proxy_diff);
 
@@ -624,7 +625,7 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
                                 update_cnt[bucket_id] = tracker.update_cnt;
                                 let new_target = tracker.current_target.clone();
                                 debug!("Update difficulty of bucket {bucket_id} to min {}", target_to_difficulty(new_target.clone()));
-                                for (k, (data, ack_cnt, _inst_handle, session_id)) in reqs {
+                                for (k, (data, ack_cnt, _inst_handle, session_id, hop_count)) in reqs {
                                     let mut server_id_guard = server_id_map.lock().unwrap();
                                     let Some((_, (data_id, server_id, session_id2, parent_target, stored_bucket_id, _))) = server_id_guard.get(&Arc::as_ptr(&data)).cloned() else {
                                         error!("Cannot lookup server_id");
@@ -642,9 +643,9 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
                                         fixed_nonce_atoms: data.fixed_nonce_atoms.clone(),
                                     });
                                     let (inst_handle, inst) = TimeWriter::new();
-                                    server_id_guard.insert(Arc::as_ptr(&data), (inst.clone(), (data_id, server_id, session_id, parent_target, bucket_id)));
+                                    server_id_guard.insert(Arc::as_ptr(&data), (inst.clone(), (data_id, server_id, session_id, parent_target, bucket_id, hop_count)));
                                     core::mem::drop(server_id_guard);
-                                    new_reqs.insert(k, (data.clone(), ack_cnt, inst_handle, session_id));
+                                    new_reqs.insert(k, (data.clone(), ack_cnt, inst_handle, session_id, hop_count));
                                     reqs_out_list.push((data, inst, bucket_id));
                                 }
                                 debug!("Difficulty updated on bucket {bucket_id}");
