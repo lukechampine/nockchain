@@ -192,6 +192,7 @@ obfstr = "0.4"
 clap-serde-derive = "0.2"
 axum-extra = { version = "0.10" }
 http = { version = "1" }
+lru = "0.16"
 
 metrics = "0.24"
 metrics-util = "0.20.0"

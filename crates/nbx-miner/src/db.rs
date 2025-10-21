@@ -16,7 +16,7 @@ use crate::compliance::ip_address_checks::IpAddressCheckDecision;
 use crate::device::DeviceInfoWithSockets;
 use crate::server::AbortReason;
 
-enum DbMsg {
+enum DbMsgHiPrio {
     Share {
         client_sub: Uuid,
         machine_id: Arc<str>,
@@ -35,13 +35,20 @@ enum DbMsg {
         machine_id: Arc<str>,
         reason: AbortReason,
     },
-    PartitionMaintenance,
-    IpAddressDetails {
+    Block {
         sub: Uuid,
-        ip_address: IpAddr,
-        decision: IpAddressCheckDecision,
-        response: String,
+        message: String,
     },
+    GetAllDifficultyBucketAssignments {
+        response: tokio::sync::oneshot::Sender<Option<HashMap<Uuid, i32>>>,
+    },
+    GetAllBlocklisted {
+        response: tokio::sync::oneshot::Sender<Option<HashSet<Uuid>>>,
+    },
+}
+
+enum DbMsgLoPrio {
+    PartitionMaintenance,
     CheckIpAddress {
         sub: Uuid,
         ip_address: IpAddr,
@@ -51,25 +58,22 @@ enum DbMsg {
         sub: Uuid,
         response: tokio::sync::oneshot::Sender<(bool, Option<String>)>,
     },
-    Block {
-        sub: Uuid,
-        message: String,
-    },
     CheckAllowlist {
         sub: Uuid,
         response: tokio::sync::oneshot::Sender<bool>,
     },
-    GetAllBlocklisted {
-        response: tokio::sync::oneshot::Sender<Option<HashSet<Uuid>>>,
-    },
-    GetAllDifficultyBucketAssignments {
-        response: tokio::sync::oneshot::Sender<Option<HashMap<Uuid, i32>>>,
+    IpAddressDetails {
+        sub: Uuid,
+        ip_address: IpAddr,
+        decision: IpAddressCheckDecision,
+        response: String,
     },
 }
 
 pub(crate) struct Database {
     pool: DbPool,
-    msgs: Receiver<DbMsg>,
+    msgs_hi: Receiver<DbMsgHiPrio>,
+    msgs_lo: Receiver<DbMsgLoPrio>,
     src_name: Arc<str>,
 }
 
@@ -78,28 +82,41 @@ impl Database {
         install_default_drivers();
         let pool = DbPoolOptions::new().connect(db_url).await?;
 
-        let (msgs_tx, msgs_rx) = channel(4096);
+        let (msgs_hi_tx, msgs_hi_rx) = channel(4096);
+        let (msgs_lo_tx, msgs_lo_rx) = channel(4096);
 
         Ok((
             Self {
                 pool,
-                msgs: msgs_rx,
+                msgs_hi: msgs_hi_rx,
+                msgs_lo: msgs_lo_rx,
                 src_name,
             },
-            DatabaseHandle { msgs: msgs_tx },
+            DatabaseHandle {
+                msgs_hi: msgs_hi_tx,
+                msgs_lo: msgs_lo_tx,
+            },
         ))
     }
 
     pub async fn run(self) {
         let Self {
             pool,
-            mut msgs,
+            msgs_hi,
+            msgs_lo,
             src_name,
         } = self;
 
-        while let Some(msg) = msgs.recv().await {
+        tokio::join!(
+            Self::run_hiprio(pool.clone(), msgs_hi, src_name.clone()),
+            Self::run_loprio(pool.clone(), msgs_lo, src_name.clone())
+        );
+    }
+
+    async fn run_hiprio(pool: DbPool, mut msgs_hi: Receiver<DbMsgHiPrio>, src_name: Arc<str>) {
+        while let Some(msg) = msgs_hi.recv().await {
             let r = match msg {
-                DbMsg::Share { client_sub, machine_id, share_hash, work_done, block_height } => {
+                DbMsgHiPrio::Share { client_sub, machine_id, share_hash, work_done, block_height } => {
                     sqlx::query("INSERT INTO \"shares\" (src, sub, machine_id, share_hash, accumulated_work, block_height) VALUES ( $1, $2, $3, $4, $5, $6 )")
                         .bind(&*src_name)
                         .bind(client_sub)
@@ -110,7 +127,7 @@ impl Database {
                         .execute(&pool)
                         .await.err()
                 }
-                DbMsg::TelemetryProofrate {
+                DbMsgHiPrio::TelemetryProofrate {
                     machines
                 } => {
                     let query = r#"
@@ -171,7 +188,7 @@ impl Database {
 
                     None
                 }
-                DbMsg::TelemetryHwinfo {
+                DbMsgHiPrio::TelemetryHwinfo {
                     machines
                 } => {
                     // Write to the new table
@@ -237,7 +254,7 @@ impl Database {
 
                     None
                 }
-                DbMsg::Abort {
+                DbMsgHiPrio::Abort {
                     client_sub,
                     machine_id,
                     reason,
@@ -250,7 +267,80 @@ impl Database {
                         .execute(&pool)
                         .await.err()
                 }
-                DbMsg::PartitionMaintenance => {
+                DbMsgHiPrio::Block { sub, message } => {
+                    sqlx::query(
+                        "INSERT INTO block_list (sub, block_message)
+                            VALUES ($1, $2)"
+                    )
+                        .bind(sub)
+                        .bind(message)
+                        .execute(&pool)
+                        .await.err()
+                }
+                DbMsgHiPrio::GetAllDifficultyBucketAssignments { response } => {
+                    if !response.is_closed() {
+                        let result = sqlx::query_as::<_, (Uuid, i32)>(
+                            "SELECT sub, bucket_id FROM difficulty_buckets"
+                        )
+                            .fetch_all(&pool)
+                            .await;
+
+                        match result.as_ref() {
+                            Ok(rows) => {
+                                let buckets: HashMap<Uuid, i32> = rows.iter().copied().collect();
+                                let _ = response.send(Some(buckets));
+                            }
+                            Err(e) => {
+                                error!("Failed to fetch difficulty buckets: {e}");
+                                let _ = response.send(None);
+                            }
+                        }
+
+                        result.err()
+                    } else {
+                        None
+                    }
+                }
+                DbMsgHiPrio::GetAllBlocklisted { response } => {
+                    if !response.is_closed() {
+                        let result = sqlx::query_scalar::<_, Uuid>(
+                            "SELECT DISTINCT sub
+                                 FROM block_list
+                                 WHERE revoked_at IS NULL"
+                            )
+                            .fetch_all(&pool)
+                            .await;
+
+                        match result.as_ref() {
+                            Ok(subs) => {
+                                let blocklist: HashSet<Uuid> = subs.iter().copied().collect();
+                                let _ = response.send(Some(blocklist));
+                            }
+                            Err(e) => {
+                                error!("Failed to fetch blocklist: {e}");
+                                // Send empty set on error
+                                let _ = response.send(None);
+                            }
+                        }
+
+                        result.err()
+                    } else {
+                        None
+                    }
+                }
+            };
+
+            if let Some(e) = r {
+                error!("Unable to execute query: {e}");
+                counter!("nbx_miner_db_query_errors_total").increment(1);
+            }
+        }
+    }
+
+    async fn run_loprio(pool: DbPool, mut msgs_lo: Receiver<DbMsgLoPrio>, src_name: Arc<str>) {
+        while let Some(msg) = msgs_lo.recv().await {
+            let r = match msg {
+                DbMsgLoPrio::PartitionMaintenance => {
                     let drop_result = sqlx::query("SELECT * FROM drop_old_proofrate_partitions(2)")
                         .execute(&pool)
                         .await;
@@ -266,142 +356,112 @@ impl Database {
 
                     create_result.err()
                 }
-                DbMsg::CheckBlocklist { sub, response } => {
-                    let result = sqlx::query_scalar::<_, Option<String>>(
-                        "SELECT block_message
-                            FROM block_list
-                            WHERE sub = $1
-                            AND revoked_at IS NULL
-                            ORDER BY created_at DESC
-                            LIMIT 1"
-                    )
+                DbMsgLoPrio::CheckBlocklist { sub, response } => {
+                    if !response.is_closed() {
+                        let result = sqlx::query_scalar::<_, Option<String>>(
+                            "SELECT block_message
+                                FROM block_list
+                                WHERE sub = $1
+                                AND revoked_at IS NULL
+                                ORDER BY created_at DESC
+                                LIMIT 1",
+                        )
                         .bind(sub)
                         .fetch_optional(&pool)
                         .await;
 
-                    match result.as_ref() {
-                        Ok(Some(message)) => {
-                            // Row found - sub is blocklisted
-                            let _ = response.send((true, message.clone()));
+                        match result.as_ref() {
+                            Ok(Some(message)) => {
+                                // Row found - sub is blocklisted
+                                let _ = response.send((true, message.clone()));
+                            }
+                            Ok(None) => {
+                                // No row found - sub is not blocklisted
+                                let _ = response.send((false, None));
+                            }
+                            Err(_) => {
+                                // Database error - handled below by returning the error
+                            }
                         }
-                        Ok(None) => {
-                            // No row found - sub is not blocklisted
-                            let _ = response.send((false, None));
-                        }
-                        Err(_) => {
-                            // Database error - handled below by returning the error
-                        }
-                    }
 
-                    result.err()
+                        result.err()
+                    } else {
+                        None
+                    }
                 }
-                DbMsg::CheckAllowlist { sub, response } => {
-                    let result = sqlx::query_scalar::<_, bool>(
-                        "SELECT EXISTS(
-                            SELECT 1 FROM allow_list
-                            WHERE sub = $1
-                            AND revoked_at IS NULL
-                        )"
-                    )
+                DbMsgLoPrio::CheckAllowlist { sub, response } => {
+                    if !response.is_closed() {
+                        let result = sqlx::query_scalar::<_, bool>(
+                            "SELECT EXISTS(
+                                SELECT 1 FROM allow_list
+                                WHERE sub = $1
+                                AND revoked_at IS NULL
+                            )",
+                        )
                         .bind(sub)
                         .fetch_one(&pool)
                         .await;
 
-                    if let Ok(is_allowed) = result.as_ref() {
-                        let _ = response.send(*is_allowed);
-                    }
+                        if let Ok(is_allowed) = result.as_ref() {
+                            let _ = response.send(*is_allowed);
+                        }
 
-                    result.err()
+                        result.err()
+                    } else {
+                        None
+                    }
                 }
-                DbMsg::IpAddressDetails { sub, ip_address, decision, response } => {
-                    sqlx::query(
-                        "INSERT INTO ip_lookups
+                DbMsgLoPrio::IpAddressDetails {
+                    sub,
+                    ip_address,
+                    decision,
+                    response,
+                } => sqlx::query(
+                    "INSERT INTO ip_lookups
                         (id, sub, ip_address, decision, decision_reason, raw_response)
-                        VALUES ($1, $2, $3, $4::IPLOOKUPDECISION, $5::IPLOOKUPDECISIONREASON, $6)"
-                    )
-                        .bind(Uuid::new_v4())
-                        .bind(sub)
-                        .bind(ip_address)
-                        .bind(decision.decision_as_str())
-                        .bind(decision.reason_as_str())
-                        .bind(sqlx::types::Json(&response))
-                        .execute(&pool)
-                        .await.err()
-                }
-                DbMsg::CheckIpAddress { sub, ip_address, response } => {
+                        VALUES ($1, $2, $3, $4::IPLOOKUPDECISION, $5::IPLOOKUPDECISIONREASON, $6)",
+                )
+                .bind(Uuid::new_v4())
+                .bind(sub)
+                .bind(ip_address)
+                .bind(decision.decision_as_str())
+                .bind(decision.reason_as_str())
+                .bind(sqlx::types::Json(&response))
+                .execute(&pool)
+                .await
+                .err(),
+                DbMsgLoPrio::CheckIpAddress {
+                    sub,
+                    ip_address,
+                    response,
+                } => {
+                    if !response.is_closed() {
                         let result = sqlx::query_as::<_, (String, Option<String>)>(
                             "SELECT decision::text, decision_reason::text FROM ip_lookups
                             WHERE sub = $1
                             AND ip_address = $2
                             ORDER BY looked_up_at DESC
-                            LIMIT 1"
+                            LIMIT 1",
                         )
-                            .bind(sub)
-                            .bind(ip_address)
-                            .fetch_optional(&pool)
-                            .await;
+                        .bind(sub)
+                        .bind(ip_address)
+                        .fetch_optional(&pool)
+                        .await;
 
                         if let Ok(row) = result.as_ref() {
                             let decision = row.as_ref().and_then(|(decision_str, reason_str)| {
-                                IpAddressCheckDecision::from_str(&decision_str, reason_str.as_deref())
+                                IpAddressCheckDecision::from_str(
+                                    &decision_str,
+                                    reason_str.as_deref(),
+                                )
                             });
                             let _ = response.send(decision);
                         }
 
                         result.err()
-                }
-                DbMsg::Block { sub, message } => {
-                    sqlx::query(
-                        "INSERT INTO block_list (sub, block_message)
-                            VALUES ($1, $2)"
-                    )
-                        .bind(sub)
-                        .bind(message)
-                        .execute(&pool)
-                        .await.err()
-                }
-                DbMsg::GetAllBlocklisted { response } => {
-                    let result = sqlx::query_scalar::<_, Uuid>(
-                        "SELECT DISTINCT sub
-                             FROM block_list
-                             WHERE revoked_at IS NULL"
-                        )
-                        .fetch_all(&pool)
-                        .await;
-
-                    match result.as_ref() {
-                        Ok(subs) => {
-                            let blocklist: HashSet<Uuid> = subs.iter().copied().collect();
-                            let _ = response.send(Some(blocklist));
-                        }
-                        Err(e) => {
-                            error!("Failed to fetch blocklist: {e}");
-                            // Send empty set on error
-                            let _ = response.send(None);
-                        }
+                    } else {
+                        None
                     }
-
-                    result.err()
-                },
-                DbMsg::GetAllDifficultyBucketAssignments { response } => {
-                    let result = sqlx::query_as::<_, (Uuid, i32)>(
-                        "SELECT sub, bucket_id FROM difficulty_buckets"
-                    )
-                        .fetch_all(&pool)
-                        .await;
-
-                    match result.as_ref() {
-                        Ok(rows) => {
-                            let buckets: HashMap<Uuid, i32> = rows.iter().copied().collect();
-                            let _ = response.send(Some(buckets));
-                        }
-                        Err(e) => {
-                            error!("Failed to fetch difficulty buckets: {e}");
-                            let _ = response.send(None);
-                        }
-                    }
-
-                    result.err()
                 }
             };
 
@@ -415,15 +475,30 @@ impl Database {
 
 #[derive(Clone)]
 pub(crate) struct DatabaseHandle {
-    msgs: Sender<DbMsg>,
+    msgs_hi: Sender<DbMsgHiPrio>,
+    msgs_lo: Sender<DbMsgLoPrio>,
 }
 
 impl DatabaseHandle {
-    fn submit_msg(&self, msg: DbMsg) {
-        gauge!("nbx_miner_db_msg_channel_capacity_cur").set(self.msgs.capacity() as f64);
-        if self.msgs.try_send(msg).is_err() {
+    fn submit_msg_hi(&self, msg: DbMsgHiPrio) -> bool {
+        gauge!("nbx_miner_db_msg_channel_capacity_cur").set(self.msgs_hi.capacity() as f64);
+        if self.msgs_hi.try_send(msg).is_err() {
             error!("Unable to send message to database loop");
             counter!("nbx_miner_db_submit_error_total").increment(1);
+            false
+        } else {
+            true
+        }
+    }
+
+    fn submit_msg_lo(&self, msg: DbMsgLoPrio) -> bool {
+        gauge!("nbx_miner_db_lo_msg_channel_capacity_cur").set(self.msgs_lo.capacity() as f64);
+        if self.msgs_lo.try_send(msg).is_err() {
+            error!("Unable to send message to database loop");
+            counter!("nbx_miner_db_lo_submit_error_total").increment(1);
+            false
+        } else {
+            true
         }
     }
 
@@ -436,7 +511,7 @@ impl DatabaseHandle {
         block_height: u64,
     ) {
         let share_hash = ubig_to_base58(share_hash);
-        self.submit_msg(DbMsg::Share {
+        self.submit_msg_hi(DbMsgHiPrio::Share {
             client_sub,
             machine_id,
             share_hash,
@@ -446,7 +521,7 @@ impl DatabaseHandle {
     }
 
     pub fn submit_telemetry_proofrate(&self, proofrate: BTreeMap<Uuid, BTreeMap<Arc<str>, u32>>) {
-        self.submit_msg(DbMsg::TelemetryProofrate {
+        self.submit_msg_hi(DbMsgHiPrio::TelemetryProofrate {
             machines: proofrate,
         });
     }
@@ -455,11 +530,11 @@ impl DatabaseHandle {
         &self,
         hwinfo: BTreeMap<Uuid, BTreeMap<Arc<str>, DeviceInfoWithSockets>>,
     ) {
-        self.submit_msg(DbMsg::TelemetryHwinfo { machines: hwinfo });
+        self.submit_msg_hi(DbMsgHiPrio::TelemetryHwinfo { machines: hwinfo });
     }
 
     pub fn submit_abort(&self, client_sub: Uuid, machine_id: Arc<str>, reason: AbortReason) {
-        self.submit_msg(DbMsg::Abort {
+        self.submit_msg_hi(DbMsgHiPrio::Abort {
             client_sub,
             machine_id,
             reason,
@@ -473,7 +548,7 @@ impl DatabaseHandle {
         decision: IpAddressCheckDecision,
         response: String,
     ) {
-        self.submit_msg(DbMsg::IpAddressDetails {
+        self.submit_msg_lo(DbMsgLoPrio::IpAddressDetails {
             sub,
             ip_address,
             decision,
@@ -488,15 +563,11 @@ impl DatabaseHandle {
     ) -> Option<IpAddressCheckDecision> {
         let (tx, rx) = tokio::sync::oneshot::channel();
 
-        if self
-            .msgs
-            .try_send(DbMsg::CheckIpAddress {
-                sub,
-                ip_address,
-                response: tx,
-            })
-            .is_err()
-        {
+        if !self.submit_msg_lo(DbMsgLoPrio::CheckIpAddress {
+            sub,
+            ip_address,
+            response: tx,
+        }) {
             counter!("nbx_miner_db_ip_address_check_error_total").increment(1);
             // Fail open: check the ip address again
             return None;
@@ -508,11 +579,7 @@ impl DatabaseHandle {
     pub async fn is_blocklisted(&self, sub: Uuid) -> (bool, Option<String>) {
         let (tx, rx) = tokio::sync::oneshot::channel();
 
-        if self
-            .msgs
-            .try_send(DbMsg::CheckBlocklist { sub, response: tx })
-            .is_err()
-        {
+        if !self.submit_msg_lo(DbMsgLoPrio::CheckBlocklist { sub, response: tx }) {
             counter!("nbx_miner_db_blocklist_check_error_total").increment(1);
             // Fail open: allow connection if we can't check
             return (false, None);
@@ -525,17 +592,13 @@ impl DatabaseHandle {
     }
 
     pub fn blocklist(&self, sub: Uuid, message: String) {
-        self.submit_msg(DbMsg::Block { sub, message });
+        self.submit_msg_hi(DbMsgHiPrio::Block { sub, message });
     }
 
     pub async fn is_allow_listed(&self, sub: Uuid) -> bool {
         let (tx, rx) = tokio::sync::oneshot::channel();
 
-        if self
-            .msgs
-            .try_send(DbMsg::CheckAllowlist { sub, response: tx })
-            .is_err()
-        {
+        if !self.submit_msg_lo(DbMsgLoPrio::CheckAllowlist { sub, response: tx }) {
             counter!("nbx_miner_db_allowlist_check_error_total").increment(1);
             // Fail closed: don't assume that the sub is allow listed
             return false;
@@ -550,11 +613,7 @@ impl DatabaseHandle {
     pub async fn get_all_blocklisted_subs(&self) -> Option<HashSet<Uuid>> {
         let (tx, rx) = tokio::sync::oneshot::channel();
 
-        if self
-            .msgs
-            .try_send(DbMsg::GetAllBlocklisted { response: tx })
-            .is_err()
-        {
+        if !self.submit_msg_hi(DbMsgHiPrio::GetAllBlocklisted { response: tx }) {
             counter!("nbx_miner_db_get_all_blocklisted_error_total").increment(1);
             return None;
         }
@@ -569,11 +628,7 @@ impl DatabaseHandle {
     pub async fn get_all_difficulty_bucket_assignments(&self) -> Option<HashMap<Uuid, i32>> {
         let (tx, rx) = tokio::sync::oneshot::channel();
 
-        if self
-            .msgs
-            .try_send(DbMsg::GetAllDifficultyBucketAssignments { response: tx })
-            .is_err()
-        {
+        if !self.submit_msg_hi(DbMsgHiPrio::GetAllDifficultyBucketAssignments { response: tx }) {
             counter!("nbx_miner_db_get_all_difficulty_buckets_error_total").increment(1);
             return None;
         }
