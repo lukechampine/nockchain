@@ -28,7 +28,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         cli,
         KERNEL,
         prover_hot_state.as_slice(),
-        NockchainAPIConfig::DisablePublicServer,
+        NockchainAPIConfig::EnablePublicServer,
     )
     .await?;
     nockchain.run().await?;

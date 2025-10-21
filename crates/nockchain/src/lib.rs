@@ -388,11 +388,13 @@ pub async fn init_with_kernel<J: Jammer + Send + 'static>(
     let born_init_tx = if cli.fakenet {
         let pow_len = cli.fakenet_pow_len.unwrap_or(2);
         let target = cli.fakenet_log_difficulty.unwrap_or(1);
+        let mut fakenet_constants = setup::fakenet_blockchain_constants(pow_len, target);
+        if let Some(v1_phase) = cli.fakenet_v1_phase {
+            fakenet_constants = fakenet_constants.with_v1_phase(v1_phase);
+        }
         setup::poke(
             &mut nockapp,
-            setup::SetupCommand::PokeFakenetConstants(setup::fakenet_blockchain_constants(
-                pow_len, target,
-            )),
+            setup::SetupCommand::PokeFakenetConstants(fakenet_constants),
         )
         .await?;
         if let Some(true) = is_kernel_mainnet {

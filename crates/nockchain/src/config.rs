@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use clap::{arg, command, ArgAction, Parser};
+use clap::{arg, command, value_parser, ArgAction, Parser};
+use nockchain_types::tx_engine::note::{Hash, SchnorrPubkey};
 
 use crate::mining::MiningConfig;
 
@@ -93,6 +94,12 @@ pub struct NockchainCli {
         default_value = "1"
     )]
     pub fakenet_log_difficulty: Option<u64>,
+    #[arg(
+        long,
+        help = "Override the v1-phase activation height when running on fakenet. Requires --fakenet.",
+        requires = "fakenet"
+    )]
+    pub fakenet_v1_phase: Option<u64>,
     #[arg(long, help = "Path to fake genesis block jam file")]
     pub fakenet_genesis_jam_path: Option<PathBuf>,
     #[arg(long, default_value = "127.0.0.1:9005")]
@@ -106,5 +113,105 @@ pub struct NockchainCli {
 impl NockchainCli {
     pub fn validate(&self) -> Result<(), String> {
         self.miner.validate()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use nockapp::kernel::boot::default_boot_cli;
+
+    use super::*;
+
+    const VALID_MINING_PUBKEY: &str = "2cPnE4Z9RevhTv9is9Hmc1amFubEFbUxzCV2Fxb9GxevJstV5VG92oYt6Sai3d3NjLFcsuVXSLx9hikMbD1agv9M267TVw3hV9MCpMfEnGo5LYtjJ7jPyHg8SERPjJRCWTgZ";
+    const VALID_MINING_PKH: &str = "9yPePjfWAdUnzaQKyxcRXKRa5PpUzKKEwtpECBZsUYt9Jd7egSDEWoV";
+
+    fn base_cli() -> NockchainCli {
+        NockchainCli {
+            nockapp_cli: default_boot_cli(false),
+            mine: false,
+            mining_pubkey: None,
+            mining_pkh: None,
+            mining_key_adv: None,
+            mining_pkh_adv: None,
+            fakenet: false,
+            peer: Vec::new(),
+            force_peer: Vec::new(),
+            allowed_peers_path: None,
+            no_default_peers: false,
+            bind: None,
+            no_new_peer_id: false,
+            max_established_incoming: None,
+            max_established_outgoing: None,
+            max_pending_incoming: None,
+            max_pending_outgoing: None,
+            max_established: None,
+            max_established_per_peer: None,
+            prune_inbound: None,
+            max_system_memory_fraction: None,
+            max_system_memory_bytes: None,
+            num_threads: None,
+            fakenet_pow_len: Some(2),
+            fakenet_log_difficulty: Some(1),
+            fakenet_v1_phase: None,
+            fakenet_genesis_jam_path: None,
+            bind_public_grpc_addr: "127.0.0.1:5555".parse().unwrap(),
+            bind_private_grpc_port: 5555,
+        }
+    }
+
+    #[test]
+    fn validate_accepts_valid_advanced_configs() {
+        let mut cli = base_cli();
+        cli.mining_key_adv = Some(vec![MiningKeyConfig {
+            share: 1,
+            m: 1,
+            keys: vec![VALID_MINING_PUBKEY.to_string()],
+        }]);
+        cli.mining_pkh_adv = Some(vec![MiningPkhConfig {
+            share: 1,
+            pkh: VALID_MINING_PKH.to_string(),
+        }]);
+
+        assert!(cli.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_invalid_mining_key_adv_pubkey() {
+        let mut cli = base_cli();
+        // We specifically want to catch if users mix up v0 and v1 addresses, because they are both base58-encoded.
+        // Using a base58-encoded pkh ensures the input is base58 but not a valid pubkey.
+        let invalid_pubkey = VALID_MINING_PKH;
+        cli.mining_key_adv = Some(vec![MiningKeyConfig {
+            share: 1,
+            m: 1,
+            keys: vec![invalid_pubkey.to_string()],
+        }]);
+        cli.mining_pkh_adv = Some(vec![MiningPkhConfig {
+            share: 1,
+            pkh: VALID_MINING_PKH.to_string(),
+        }]);
+
+        let err = cli.validate().expect_err("expected invalid pubkey");
+        assert!(err.contains("Invalid mining_key_adv pubkey"));
+    }
+
+    #[test]
+    fn validate_rejects_invalid_mining_pkh_adv_entry() {
+        // We specifically want to catch if users mix up v0 and v1 addresses, because they are both base58-encoded.
+        // Using a base58-encoded pubkey ensures the input is base58 but not a valid hash.
+        let invalid_mining_pkh = VALID_MINING_PUBKEY.to_string();
+        let mut cli = base_cli();
+        cli.mining_key_adv = Some(vec![MiningKeyConfig {
+            share: 1,
+            m: 1,
+            keys: vec![VALID_MINING_PUBKEY.to_string()],
+        }]);
+        cli.mining_pkh_adv = Some(vec![MiningPkhConfig {
+            share: 1,
+            pkh: invalid_mining_pkh,
+        }]);
+
+        let err = cli.validate().expect_err("expected invalid pkh adv");
+        assert!(err.contains("Invalid mining_pkh_adv entry"));
     }
 }
