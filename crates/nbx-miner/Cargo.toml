@@ -107,3 +107,4 @@ zkvm-jetpack.workspace = true
 nockchain-math.workspace = true
 nbx-jetpack.workspace = true
 tracy-client = { workspace = true, optional = true }
+thiserror.workspace = true

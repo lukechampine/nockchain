@@ -907,21 +907,26 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
         }
     }
 
-    let Some(conn) = conntrack.connect(
+    let result = conntrack.connect(
         client_sub,
         client_hwid.clone(),
         claims
             .max_conns_override
             .unwrap_or(DEFAULT_MAX_CONNS_FROM_SUB),
-    ) else {
-        return disconnect(
-            stream,
-            &mut crypt,
-            client_sub,
-            client_hwid.clone(),
-            io::Error::new(io::ErrorKind::ConnectionRefused, "Too many connections"),
-        )
-        .await;
+    );
+
+    let conn = match result {
+        Ok(conn) => conn,
+        Err(e) => {
+            return disconnect(
+                stream,
+                &mut crypt,
+                client_sub,
+                client_hwid.clone(),
+                io::Error::new(io::ErrorKind::ConnectionRefused, e.to_string()),
+            )
+            .await;
+        }
     };
 
     let perms = Permissions {

@@ -22,6 +22,7 @@ use rustls::server::WebPkiClientVerifier;
 use rustls::{ClientConfig, RootCertStore, ServerConfig};
 use rustls_pemfile::{certs, ec_private_keys};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio_rustls::{client, server, TlsAcceptor, TlsConnector};
@@ -443,21 +444,42 @@ struct ConnTrackInner {
 #[derive(Clone, Default, Debug)]
 pub struct ConnTrack(Arc<Mutex<ConnTrackInner>>);
 
+#[derive(Error, Debug)]
+pub enum ConnectError {
+    #[error("Already connected with '{current}' / '{maximum}' available connections")]
+    TooManyConnection { maximum: usize, current: usize },
+    #[error("Machine '{hardware_id}' is already connected")]
+    MachineAlreadyConnected { hardware_id: String },
+}
+
 impl ConnTrack {
-    pub fn connect(&self, sub: Uuid, hwid: Arc<str>, max_sub_conns: usize) -> Option<ConnHandle> {
+    pub fn connect(
+        &self,
+        sub: Uuid,
+        hwid: Arc<str>,
+        max_sub_conns: usize,
+    ) -> Result<ConnHandle, ConnectError> {
         let mut track = self.0.lock().unwrap();
         let mut sub_entry = track.conns.entry(sub.clone()).or_default();
 
-        // Within limit and not connected
-        if sub_entry.len() < max_sub_conns && sub_entry.insert(hwid.clone()) {
-            Some(ConnHandle {
-                track: self.clone(),
-                sub,
-                hwid,
-            })
-        } else {
-            None
+        if sub_entry.len() > max_sub_conns {
+            return Err(ConnectError::TooManyConnection {
+                maximum: max_sub_conns,
+                current: sub_entry.len(),
+            });
         }
+
+        if !sub_entry.insert(hwid.clone()) {
+            return Err(ConnectError::MachineAlreadyConnected {
+                hardware_id: hwid.to_string(),
+            });
+        }
+
+        Ok(ConnHandle {
+            track: self.clone(),
+            sub,
+            hwid,
+        })
     }
 
     pub fn emit_metrics(&self) -> usize {
