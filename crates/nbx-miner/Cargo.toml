@@ -14,6 +14,8 @@ instrument = ["nockapp/tracing-tracy"]
 slog = ["nockapp/slog-tracing"]
 # Production grade logging and stealth
 production = ["nbx-jetpack/stealthy"]
+# Metrics for binsend/binrecv
+binrx-metrics = []
 # Additional hiding of data
 stealthy = ["production"]
 # Enables --miner-tls-key,--miner-tls-chain arguments, that enable setting up non-embedded TLS keys for auth

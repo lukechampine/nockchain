@@ -289,7 +289,7 @@ async fn binsend(
     stream.write_u32_le(d.len() as _).await?;
     stream.write_all(&d).await?;
     stream.flush().await?;
-    #[cfg(not(feature = "production"))]
+    #[cfg(feature = "binrx-metrics")]
     histogram!(
         "nbx_miner_binsend_seconds",
         "target_sub" => target_sub.to_string(),
@@ -368,7 +368,7 @@ async fn binrecv_limited<T: Decode<()>, const PARSE_ERR: bool, const MAX_READ: u
     let (res, _) = bincode::decode_from_slice(&buf, bincode::config::standard())
         .map_err(|_| io::ErrorKind::InvalidData)?;
 
-    #[cfg(not(feature = "production"))]
+    #[cfg(feature = "binrx-metrics")]
     histogram!(
         "nbx_miner_binrecv_seconds",
         "target_sub" => target_sub.to_string(),
