@@ -466,10 +466,6 @@ impl DatabaseHandle {
         });
     }
 
-    pub fn partition_maintenance(&self) {
-        self.submit_msg(DbMsg::PartitionMaintenance);
-    }
-
     pub fn submit_ip_address_details(
         &self,
         sub: Uuid,

@@ -197,32 +197,6 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
         (None, None)
     };
 
-    #[cfg(feature = "db")]
-    let partition_task = async {
-        if let Some(db_handle) = db.as_ref() {
-            // Add jitter: 0-30 minutes
-            let initial_jitter = Duration::from_secs(rand::random::<u64>() % 1800);
-            tokio::time::sleep(initial_jitter).await;
-
-            // Run immediately after jitter
-            crate::log!(info, "Running initial partition maintenance");
-            db_handle.partition_maintenance();
-
-            loop {
-                // 12 hours with +/- 30 minute jitter
-                let jitter_secs = (rand::random::<u64>() % 3600) as i64 - 1800;
-                let delay = Duration::from_secs(12 * 3600)
-                    .saturating_add(Duration::from_secs(jitter_secs.abs() as u64));
-
-                tokio::time::sleep(delay).await;
-
-                crate::log!(info, "Running scheduled partition maintenance");
-                counter!("nbx_miner_proxy_partition_maintenance_runs_total").increment(1);
-                db_handle.partition_maintenance();
-            }
-        }
-    };
-
     let (mining_tx, mut mining_rx) = mpsc::channel(cfg.miner_connect.len());
     let (ack_tx, mut ack_rx) = mpsc::channel(cfg.miner_connect.len());
     let (_client_tasks, server_extras) = client_loops(
@@ -714,15 +688,11 @@ pub async fn run_proxy(cfg: ProxyConfig, server_cfg: MiningConfig) {
     };
 
     #[cfg(feature = "db")]
-    tokio::join!(
-        main,
-        async move {
-            if let Some(db_inst) = db_inst {
-                db_inst.run().await;
-            }
-        },
-        partition_task
-    );
+    tokio::join!(main, async move {
+        if let Some(db_inst) = db_inst {
+            db_inst.run().await;
+        }
+    },);
     #[cfg(not(feature = "db"))]
     main.await;
 }
