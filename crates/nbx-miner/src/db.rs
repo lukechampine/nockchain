@@ -48,7 +48,6 @@ enum DbMsgHiPrio {
 }
 
 enum DbMsgLoPrio {
-    PartitionMaintenance,
     CheckIpAddress {
         sub: Uuid,
         ip_address: IpAddr,
@@ -340,22 +339,6 @@ impl Database {
     async fn run_loprio(pool: DbPool, mut msgs_lo: Receiver<DbMsgLoPrio>, src_name: Arc<str>) {
         while let Some(msg) = msgs_lo.recv().await {
             let r = match msg {
-                DbMsgLoPrio::PartitionMaintenance => {
-                    let drop_result = sqlx::query("SELECT * FROM drop_old_proofrate_partitions(2)")
-                        .execute(&pool)
-                        .await;
-
-                    if let Err(e) = drop_result {
-                        error!("Unable to execute query: {e}");
-                        counter!("nbx_miner_db_query_errors_total").increment(1);
-                    }
-
-                    let create_result = sqlx::query("SELECT ensure_proofrate_partitions()")
-                        .execute(&pool)
-                        .await;
-
-                    create_result.err()
-                }
                 DbMsgLoPrio::CheckBlocklist { sub, response } => {
                     if !response.is_closed() {
                         let result = sqlx::query_scalar::<_, Option<String>>(
