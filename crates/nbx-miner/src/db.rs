@@ -16,14 +16,15 @@ use crate::compliance::ip_address_checks::IpAddressCheckDecision;
 use crate::device::DeviceInfoWithSockets;
 use crate::server::AbortReason;
 
+struct DbMsgShare {
+    client_sub: Uuid,
+    machine_id: Arc<str>,
+    share_hash: String,
+    work_done: u64,
+    block_height: u64,
+}
+
 enum DbMsgHiPrio {
-    Share {
-        client_sub: Uuid,
-        machine_id: Arc<str>,
-        share_hash: String,
-        work_done: u64,
-        block_height: u64,
-    },
     TelemetryProofrate {
         machines: BTreeMap<Uuid, BTreeMap<Arc<str>, u32>>,
     },
@@ -71,6 +72,7 @@ enum DbMsgLoPrio {
 
 pub(crate) struct Database {
     pool: DbPool,
+    msgs_shares: Receiver<DbMsgShare>,
     msgs_hi: Receiver<DbMsgHiPrio>,
     msgs_lo: Receiver<DbMsgLoPrio>,
     src_name: Arc<str>,
@@ -81,17 +83,20 @@ impl Database {
         install_default_drivers();
         let pool = DbPoolOptions::new().connect(db_url).await?;
 
+        let (msgs_share_tx, msgs_share_rx) = channel(4096);
         let (msgs_hi_tx, msgs_hi_rx) = channel(4096);
         let (msgs_lo_tx, msgs_lo_rx) = channel(4096);
 
         Ok((
             Self {
                 pool,
+                msgs_shares: msgs_share_rx,
                 msgs_hi: msgs_hi_rx,
                 msgs_lo: msgs_lo_rx,
                 src_name,
             },
             DatabaseHandle {
+                msg_share: msgs_share_tx,
                 msgs_hi: msgs_hi_tx,
                 msgs_lo: msgs_lo_tx,
             },
@@ -101,31 +106,41 @@ impl Database {
     pub async fn run(self) {
         let Self {
             pool,
+            msgs_shares,
             msgs_hi,
             msgs_lo,
             src_name,
         } = self;
 
         tokio::join!(
+            Self::run_shares(pool.clone(), msgs_shares, src_name.clone()),
             Self::run_hiprio(pool.clone(), msgs_hi, src_name.clone()),
             Self::run_loprio(pool.clone(), msgs_lo, src_name.clone())
         );
     }
 
+    async fn run_shares(pool: DbPool, mut msgs_shares: Receiver<DbMsgShare>, src_name: Arc<str>) {
+        while let Some(msg) = msgs_shares.recv().await {
+            let result = sqlx::query("INSERT INTO \"shares\" (src, sub, machine_id, share_hash, accumulated_work, block_height) VALUES ( $1, $2, $3, $4, $5, $6 )")
+                .bind(&*src_name)
+                .bind(msg.client_sub)
+                .bind(&*msg.machine_id)
+                .bind(msg.share_hash)
+                .bind(i64::try_from(msg.work_done).unwrap_or(i64::MAX))
+                .bind(i64::try_from(msg.block_height).unwrap_or(i64::MAX))
+                .execute(&pool)
+                .await;
+
+            if let Err(e) = result {
+                error!("Unable to execute query: {e}");
+                counter!("nbx_miner_db_query_errors_total").increment(1);
+            }
+        }
+    }
+
     async fn run_hiprio(pool: DbPool, mut msgs_hi: Receiver<DbMsgHiPrio>, src_name: Arc<str>) {
         while let Some(msg) = msgs_hi.recv().await {
             let r = match msg {
-                DbMsgHiPrio::Share { client_sub, machine_id, share_hash, work_done, block_height } => {
-                    sqlx::query("INSERT INTO \"shares\" (src, sub, machine_id, share_hash, accumulated_work, block_height) VALUES ( $1, $2, $3, $4, $5, $6 )")
-                        .bind(&*src_name)
-                        .bind(client_sub)
-                        .bind(&*machine_id)
-                        .bind(share_hash)
-                        .bind(i64::try_from(work_done).unwrap_or(i64::MAX))
-                        .bind(i64::try_from(block_height).unwrap_or(i64::MAX))
-                        .execute(&pool)
-                        .await.err()
-                }
                 DbMsgHiPrio::TelemetryProofrate {
                     machines
                 } => {
@@ -458,11 +473,23 @@ impl Database {
 
 #[derive(Clone)]
 pub(crate) struct DatabaseHandle {
+    msg_share: Sender<DbMsgShare>,
     msgs_hi: Sender<DbMsgHiPrio>,
     msgs_lo: Sender<DbMsgLoPrio>,
 }
 
 impl DatabaseHandle {
+    fn submit_msg_share(&self, msg: DbMsgShare) -> bool {
+        gauge!("nbx_miner_db_share_msg_channel_capacity_cur").set(self.msg_share.capacity() as f64);
+        if self.msg_share.try_send(msg).is_err() {
+            error!("Unable to send message to database loop");
+            counter!("nbx_miner_db_share_submit_error_total").increment(1);
+            false
+        } else {
+            true
+        }
+    }
+
     fn submit_msg_hi(&self, msg: DbMsgHiPrio) -> bool {
         gauge!("nbx_miner_db_msg_channel_capacity_cur").set(self.msgs_hi.capacity() as f64);
         if self.msgs_hi.try_send(msg).is_err() {
@@ -494,7 +521,7 @@ impl DatabaseHandle {
         block_height: u64,
     ) {
         let share_hash = ubig_to_base58(share_hash);
-        self.submit_msg_hi(DbMsgHiPrio::Share {
+        self.submit_msg_share(DbMsgShare {
             client_sub,
             machine_id,
             share_hash,
