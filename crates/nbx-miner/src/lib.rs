@@ -1,3 +1,5 @@
+#![feature(ip)]
+
 #[cfg(feature = "client")]
 pub mod client;
 pub mod client_base;

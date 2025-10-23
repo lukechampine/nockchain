@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::net::IpAddr;
 use std::sync::Arc;
 
@@ -45,6 +45,9 @@ enum DbMsgHiPrio {
     },
     GetAllBlocklisted {
         response: tokio::sync::oneshot::Sender<Option<BTreeMap<Uuid, Option<Arc<str>>>>>,
+    },
+    GetAllAllowlisted {
+        response: tokio::sync::oneshot::Sender<Option<BTreeSet<Uuid>>>,
     },
 }
 
@@ -332,6 +335,36 @@ impl Database {
                             }
                             Err(e) => {
                                 error!("Failed to fetch blocklist: {e}");
+                                // Send empty set on error
+                                let _ = response.send(None);
+                            }
+                        }
+
+                        result.err()
+                    } else {
+                        None
+                    }
+                },
+                DbMsgHiPrio::GetAllAllowlisted { response } => {
+                    if !response.is_closed() {
+                        let result = sqlx::query(
+                            "SELECT DISTINCT sub
+                                 FROM allow_list
+                                 WHERE revoked_at IS NULL"
+                        )
+                            .fetch_all(&pool)
+                            .await;
+
+                        match result.as_ref() {
+                            Ok(subs) => {
+                                let allowlist: BTreeSet<Uuid> = subs
+                                    .iter()
+                                    .map(|row| row.get::<Uuid, _>(0))
+                                    .collect();
+                                let _ = response.send(Some(allowlist));
+                            }
+                            Err(e) => {
+                                error!("Failed to fetch allowlist: {e}");
                                 // Send empty set on error
                                 let _ = response.send(None);
                             }
@@ -631,6 +664,21 @@ impl DatabaseHandle {
         rx.await.unwrap_or_else(|_| {
             error!("Database get_all_blocklisted channel closed");
             counter!("nbx_miner_db_get_all_blocklisted_channel_error_total").increment(1);
+            None
+        })
+    }
+
+    pub async fn get_all_allowlisted_subs(&self) -> Option<BTreeSet<Uuid>> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        if !self.submit_msg_hi(DbMsgHiPrio::GetAllAllowlisted { response: tx }) {
+            counter!("nbx_miner_db_get_all_allowlisted_error_total").increment(1);
+            return None;
+        }
+
+        rx.await.unwrap_or_else(|_| {
+            error!("Database get_all_allowlisted channel closed");
+            counter!("nbx_miner_db_get_all_allowlisted_channel_error_total").increment(1);
             None
         })
     }

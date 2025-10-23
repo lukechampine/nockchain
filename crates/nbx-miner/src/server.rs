@@ -45,7 +45,10 @@ use tokio_stream::wrappers::BroadcastStream;
 use uuid::Uuid;
 
 #[cfg(feature = "compliance")]
-use crate::compliance::{blocklist::spawn_blocklist_refresh_task, ipdata::IpAddressChecker};
+use crate::compliance::{
+    blocklist::spawn_blocklist_refresh_task,
+    indirect_connections::spawn_indirect_connections_ip_check_task, ipdata::IpAddressChecker,
+};
 #[cfg(feature = "db")]
 use crate::difficulty_buckets::spawn_difficulty_refresh_task;
 use crate::proto::{server, server_handshake, ClientDataRead, ClientDataReadType};
@@ -478,6 +481,22 @@ pub async fn mining_server<
             (None, None, None)
         };
 
+    #[cfg(feature = "compliance")]
+    let (indirect_ip_tracker, _indirect_ip_tracker_handle) =
+        if let (Some(db), Some(ip_checker), Some(blocklist_cache)) =
+            (db.as_ref(), ip_checker.as_ref(), blocklist_cache.as_ref())
+        {
+            let (cache, handle) = spawn_indirect_connections_ip_check_task(
+                db.clone(),
+                ip_checker.clone(),
+                blocklist_cache.clone(),
+            )
+            .await;
+            (Some(cache), Some(handle))
+        } else {
+            (None, None)
+        };
+
     let (accept_tx, mut accept_rx) = mpsc::channel(8);
     let accept_loop = async move {
         let mut handshake_set = JoinSet::new();
@@ -698,29 +717,23 @@ pub async fn mining_server<
             #[cfg(all(feature = "db", feature = "compliance"))]
             {
                 if let Some(cache) = &blocklist_cache {
-                    let connected_subs: Vec<Uuid> = clients.subs.keys().copied().collect();
-
-                    let Ok(blocklisted_subs) = cache.0.lock() else {
-                        error!("Blocklist poisoned");
-                        continue;
-                    };
-
                     counter!("nbx_miner_server_blocklist_check_total").increment(1);
 
-                    for sub in connected_subs {
-                        if blocklisted_subs.contains_key(&sub) {
-                            warn!("Disconnecting blocklisted sub: {sub}");
-                            let disconnected = clients.abort_by_sub(
-                                &sub,
-                                AbortReason::Blocklisted
-                            );
+                    let connected_subs: Vec<Uuid> = clients.subs.keys().copied().collect();
+                    let blocked_subs = cache.filter_blocked_subs(&connected_subs);
 
-                            if disconnected > 0 {
-                                warn!("Disconnected {disconnected} connections for blocklisted sub: {sub}");
-                                counter!(
-                                    "nbx_miner_server_blocklist_active_disconnection_total"
-                                ).increment(disconnected as u64);
-                            }
+                    for sub in blocked_subs {
+                        warn!("Disconnecting blocklisted sub: {sub}");
+                        let disconnected = clients.abort_by_sub(
+                            &sub,
+                            AbortReason::Blocklisted
+                        );
+
+                        if disconnected > 0 {
+                            warn!("Disconnected {disconnected} connections for blocklisted sub: {sub}");
+                            counter!(
+                                "nbx_miner_server_blocklist_active_disconnection_total"
+                            ).increment(disconnected as u64);
                         }
                     }
                 }}
@@ -888,6 +901,18 @@ pub async fn mining_server<
                         }
                     }
                     ClientDataReadType::Telemetry(t) => {
+                        #[cfg(feature = "compliance")]
+                        if let Telemetry::HwInfo { ref machines } = t {
+                            if let Some(tracker) = &indirect_ip_tracker {
+                                for (_, info) in machines {
+                                    // Extract IPs from incoming sockets
+                                    tracker.add_ips(sub, info.sockets_incoming
+                                        .iter()
+                                        .map(|socket_addr| socket_addr.ip()));
+                                }
+                            }
+                        }
+
                         if perms.telemetry_metrics {
                             match &t {
                                 Telemetry::Proofrate {

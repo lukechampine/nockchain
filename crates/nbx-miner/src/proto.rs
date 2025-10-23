@@ -21,9 +21,12 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinSet;
 use uuid::Uuid;
 
-use crate::compliance::ip_address_checks::{IpAddressCheckDecision, IpAddressCheckReason};
 #[cfg(feature = "compliance")]
-use crate::compliance::{blocklist::BlocklistCache, ipdata::IpAddressChecker};
+use crate::compliance::{
+    blocklist::BlocklistCache,
+    ip_address_checks::{IpAddressCheckDecision, IpAddressCheckReason},
+    ipdata::{ConnectionType, IpAddressChecker},
+};
 use crate::device::{Device, DeviceInfoWithSockets};
 use crate::metrics::{counter, gauge, histogram};
 use crate::shared::{self, JwtClaims};
@@ -849,7 +852,9 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
     #[cfg(feature = "compliance")]
     {
         if let Some((db, blocklist)) = db.as_ref().zip(blocklist_cache.as_ref()) {
-            if let Some(blocklisted_message) = blocklist.lookup(client_sub) {
+            let blocklist_entry = blocklist.check_blocklist(&client_sub);
+
+            if blocklist_entry.is_block_listed && !blocklist_entry.is_allow_listed {
                 counter!("nbx_miner_proto_server_blocklist_rejection_total").increment(1);
                 warn!("Rejecting blocklisted user: sub={client_sub}, hwid={client_hwid}");
 
@@ -860,7 +865,8 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
                     client_hwid.clone(),
                     io::Error::new(
                         io::ErrorKind::ConnectionRefused,
-                        blocklisted_message
+                        blocklist_entry
+                            .block_message
                             .as_deref()
                             .unwrap_or("Nockbox is not available for you.")
                             .to_string(),
@@ -872,27 +878,32 @@ pub async fn server_handshake<S: AsyncRead + AsyncWrite + Unpin>(
             let client_ip = client_addr.ip();
 
             if let Some(ip_checker) = ip_checker {
-                let block_message = match ip_checker.check_ip(client_ip, client_sub, db).await
-                {
-                    None => Some("NockBox is unavailable for you"),
-                    Some(IpAddressCheckDecision::Allow) => None,
-                    Some(IpAddressCheckDecision::Block(reason))
-                    | Some(IpAddressCheckDecision::Review(reason)) => {
-                        Some(match reason {
-                            IpAddressCheckReason::Country => "NockBox is unavailable in your location.",
-                            IpAddressCheckReason::Vpn => "Please disable IP anonymizer or complete identity verification, reach out to support@nockbox.org”",
-                        })
-                    }
+                let Some(decision) = ip_checker
+                    .check_ip(client_ip, client_sub, ConnectionType::Direct, db)
+                    .await
+                else {
+                    counter!("nbx_miner_proto_ip_block_rejection_total", "client_sub" => client_sub.to_string()).increment(1);
+                    return disconnect(
+                        stream,
+                        &mut crypt,
+                        client_sub,
+                        client_hwid.clone(),
+                        io::Error::new(
+                            io::ErrorKind::ConnectionRefused,
+                            "We could not confirm you location, please try again later or reach out to support@nockbox.org",
+                        ),
+                    ).await;
                 };
 
-                if let Some(block_message) = block_message {
-                    if db.is_allow_listed(client_sub).await {
+                if let Some(block_message) = decision.block_message() {
+                    if blocklist_entry.is_allow_listed {
                         info!("Sub {client_sub} is allowlisted, ignoring block check decision for {client_ip}");
                         counter!("nbx_miner_proto_allowlist_bypass_total").increment(1);
                     } else {
                         counter!("nbx_miner_proto_ip_block_rejection_total", "client_sub" => client_sub.to_string()).increment(1);
 
                         db.blocklist(client_sub, block_message.to_string());
+                        blocklist.block(client_sub, Some(block_message.into()));
 
                         return disconnect(
                             stream,

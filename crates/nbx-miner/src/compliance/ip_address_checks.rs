@@ -6,6 +6,19 @@ pub enum IpAddressCheckDecision {
 }
 
 impl IpAddressCheckDecision {
+    pub fn block_message(&self) -> Option<&'static str> {
+        match self {
+            IpAddressCheckDecision::Allow => None,
+            IpAddressCheckDecision::Block(reason)
+            | IpAddressCheckDecision::Review(reason) => {
+                Some(match reason {
+                    IpAddressCheckReason::Country => "NockBox is unavailable in your location.",
+                    IpAddressCheckReason::Vpn => "Please disable IP anonymizer or complete identity verification, reach out to support@nockbox.org”",
+                })
+            }
+        }
+    }
+
     pub fn decision_as_str(&self) -> &str {
         match self {
             IpAddressCheckDecision::Allow => "ALLOW",
