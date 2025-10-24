@@ -1,7 +1,8 @@
 #[cfg(not(all(
     target_arch = "x86_64",
     target_feature = "avx512f",
-    target_feature = "avx512bw"
+    target_feature = "avx512bw",
+    target_feature = "avx512vl"
 )))]
 pub fn cpu_supported() -> bool {
     false
@@ -19,10 +20,11 @@ static CPU_SUPPORTED: OnceLock<bool> = OnceLock::new();
 #[cfg(all(
     target_arch = "x86_64",
     target_feature = "avx512f",
-    target_feature = "avx512bw"
+    target_feature = "avx512bw",
+    target_feature = "avx512vl"
 ))]
 pub fn cpu_supported() -> bool {
-    *CPU_SUPPORTED.get_or_init(|| is_x86_feature_detected!("avx512vl"))
+    *CPU_SUPPORTED.get_or_init(|| is_x86_feature_detected!("avx512vbmi"))
 }
 
 /// Transposed MDS matrix for efficient AVX512 multiplication

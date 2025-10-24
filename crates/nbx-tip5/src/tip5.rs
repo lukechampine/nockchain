@@ -213,6 +213,7 @@ pub fn permute_fixed(input: &[Melt; 10]) -> [Melt; 5] {
     target_arch = "x86_64",
     target_feature = "avx512f",
     target_feature = "avx512bw",
+    target_feature = "avx512vl"
 ))]
 mod tests {
     use super::*;
