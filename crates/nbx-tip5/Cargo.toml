@@ -9,3 +9,10 @@ num-traits.workspace = true
 nockvm.workspace = true
 bytemuck.workspace = true
 noun-serde.workspace = true
+
+[dev-dependencies]
+criterion = "0.7.0"
+
+[[bench]]
+name = "tip5"
+harness = false
