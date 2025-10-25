@@ -67,8 +67,6 @@ x509-parser = { workspace = true }
 yaque = { workspace = true }
 rayon = { workspace = true }
 
-[dev-dependencies]
-
 [lib]
 name = "nockapp"
 path = "src/lib.rs"
