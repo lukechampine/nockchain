@@ -247,14 +247,16 @@ async fn main() -> Result<(), NockAppError> {
         Commands::ListNotesByAddressCsv { address } => Wallet::list_notes_by_address_csv(address),
         Commands::CreateTx {
             names,
-            recipient,
+            recipients,
+            gifts,
             fee,
             refund_pkh,
             index,
             hardened,
         } => Wallet::create_tx(
             names.clone(),
-            recipient.clone(),
+            recipients.clone(),
+            gifts.clone(),
             *fee,
             refund_pkh.clone(),
             *index,
@@ -805,6 +807,7 @@ impl Wallet {
     fn create_tx(
         names: String,
         recipients: String,
+        gifts: String,
         fee: u64,
         refund_pkh: Option<String>,
         index: Option<u64>,
@@ -813,7 +816,34 @@ impl Wallet {
         let mut slab = NounSlab::new();
 
         let names_vec = Self::parse_note_names(&names)?;
-        let (pkh, amount) = Self::parse_single_output(&recipients)?;
+
+        // Parse recipients and gifts
+        let recipients_vec: Vec<String> = recipients
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        let gifts_vec: Vec<u64> = gifts
+            .split(',')
+            .filter_map(|s| s.trim().parse().ok())
+            .collect();
+
+        // Validate that recipients and gifts have the same length
+        if recipients_vec.len() != gifts_vec.len() {
+            return Err(CrownError::Unknown(format!(
+                "Number of recipients ({}) must match number of gifts ({})",
+                recipients_vec.len(),
+                gifts_vec.len()
+            ))
+            .into());
+        }
+
+        if recipients_vec.is_empty() {
+            return Err(
+                CrownError::Unknown("At least one recipient must be provided".to_string()).into(),
+            );
+        }
 
         // Convert names to list of pairs
         let names_noun = names_vec
@@ -839,15 +869,24 @@ impl Wallet {
             None => D(0),
         };
 
-        let recipient_pkh = Hash::from_base58(&pkh)
-            .map_err(|err| {
-                NockAppError::from(CrownError::Unknown(format!(
-                    "Invalid output pubkey hash '{}': {}",
-                    pkh, err
-                )))
-            })?
-            .to_noun(&mut slab);
-        let order_noun = T(&mut slab, &[recipient_pkh, D(amount)]);
+        // Build list of orders [recipient gift]
+        let orders_noun = recipients_vec
+            .into_iter()
+            .zip(gifts_vec.into_iter())
+            .rev()
+            .fold(D(0), |acc, (recipient, gift)| {
+                let recipient_pkh = Hash::from_base58(&recipient)
+                    .map_err(|err| {
+                        NockAppError::from(CrownError::Unknown(format!(
+                            "Invalid output pubkey hash '{}': {}",
+                            recipient, err
+                        )))
+                    })
+                    .unwrap()
+                    .to_noun(&mut slab);
+                let order = T(&mut slab, &[recipient_pkh, D(gift)]);
+                Cell::new(&mut slab, order, acc).as_noun()
+            });
 
         let refund_noun = if let Some(refund) = refund_pkh {
             let refund_hash = Hash::from_base58(&refund).map_err(|err| {
@@ -864,7 +903,7 @@ impl Wallet {
 
         Self::wallet(
             "create-tx",
-            &[names_noun, order_noun, fee_noun, sign_key_noun, refund_noun],
+            &[names_noun, orders_noun, fee_noun, sign_key_noun, refund_noun],
             Operation::Poke,
             &mut slab,
         )
@@ -1647,12 +1686,14 @@ mod tests {
         let mut wallet = Wallet::new(nockapp);
 
         let names = "[first1 last1],[first2 last2]".to_string();
-        let recipients = "pk1:1".to_string();
+        let recipients = "pk1".to_string();
+        let gifts = "1".to_string();
         let fee = 1;
 
         let (noun, op) = Wallet::create_tx(
             names.clone(),
             recipients.clone(),
+            gifts.clone(),
             fee,
             None::<String>,
             None,
@@ -1660,7 +1701,8 @@ mod tests {
         )?;
         let wire = WalletWire::Command(Commands::CreateTx {
             names: names.clone(),
-            recipient: recipients.clone(),
+            recipients: recipients.clone(),
+            gifts: gifts.clone(),
             fee: fee.clone(),
             refund_pkh: None,
             index: None,
@@ -1685,7 +1727,8 @@ mod tests {
 
         // these should be valid names of notes in the wallet balance
         let names = "[Amt4GcpYievY4PXHfffiWriJ1sYfTXFkyQsGzbzwMVzewECWDV3Ad8Q BJnaDB3koU7ruYVdWCQqkFYQ9e3GXhFsDYjJ1vSmKFdxzf6Y87DzP4n]".to_string();
-        let recipients = "3HKKp7xZgCw1mhzk4iw735S2ZTavCLHc8YDGRP6G9sSTrRGsaPBu1AqJ8cBDiw2LwhRFnQG7S3N9N9okc28uBda6oSAUCBfMSg5uC9cefhrFrvXVGomoGcRvcFZTWuJzm3ch:100".to_string();
+        let recipients = "3HKKp7xZgCw1mhzk4iw735S2ZTavCLHc8YDGRP6G9sSTrRGsaPBu1AqJ8cBDiw2LwhRFnQG7S3N9N9okc28uBda6oSAUCBfMSg5uC9cefhrFrvXVGomoGcRvcFZTWuJzm3ch".to_string();
+        let gifts = "100".to_string();
         let fee = 0;
 
         // generate keys
@@ -1695,6 +1738,7 @@ mod tests {
         let (spend_noun, spend_op) = Wallet::create_tx(
             names.clone(),
             recipients.clone(),
+            gifts.clone(),
             fee,
             None::<String>,
             None,
@@ -1714,7 +1758,8 @@ mod tests {
 
         let wire2 = WalletWire::Command(Commands::CreateTx {
             names: names.clone(),
-            recipient: recipients.clone(),
+            recipients: recipients.clone(),
+            gifts: gifts.clone(),
             fee: fee.clone(),
             refund_pkh: None,
             index: None,

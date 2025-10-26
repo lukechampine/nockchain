@@ -335,15 +335,18 @@ pub enum Commands {
     /// Create a transaction (use --refund-pkh when spending legacy v0 notes)
     #[command(
         name = "create-tx",
-        override_usage = "nockchain-wallet create-tx --names <NAMES> --recipient <RECIPIENT> --fee <FEE> [--refund-pkh <REFUND_PKH>]\n\n# NOTE: --refund-pkh is required when spending from v0 notes. For v1 notes, the refund defaults to the note owner.\n\nExamples:\n  # Send to a single recipient\n  nockchain-wallet create-tx \\\n    --names \"[first1 last1],[first2 last2]\" \\\n    --recipient \"<pkh-b58>:<amount>\" \\\n    --fee 10 \\\n    --refund-pkh <pkh-b58>"
+        override_usage = "nockchain-wallet create-tx --names <NAMES> --recipients <RECIPIENTS> --gifts <GIFTS> --fee <FEE> [--refund-pkh <REFUND_PKH>]\n\n# NOTE: --refund-pkh is required when spending from v0 notes. For v1 notes, the refund defaults to the note owner.\n\nExamples:\n  # Send to a single recipient\n  nockchain-wallet create-tx \\\n    --names \"[first1 last1],[first2 last2]\" \\\n    --recipients \"<pkh-b58>\" \\\n    --gifts \"1000\" \\\n    --fee 10 \\\n    --refund-pkh <pkh-b58>\n\n  # Send to multiple recipients\n  nockchain-wallet create-tx \\\n    --names \"[first1 last1],[first2 last2]\" \\\n    --recipients \"<pkh-b58-1>,<pkh-b58-2>\" \\\n    --gifts \"1000,2000\" \\\n    --fee 10"
     )]
     CreateTx {
         /// Names of notes to spend (comma-separated)
         #[arg(long)]
         names: String,
-        /// Transaction output, formatted as "<recipient>:<amount>"
+        /// Transaction output recipients (comma-separated pubkey hashes in base58)
         #[arg(long)]
-        recipient: String,
+        recipients: String,
+        /// Transaction output amounts (comma-separated amounts matching recipients)
+        #[arg(long)]
+        gifts: String,
         /// Transaction fee
         #[arg(long)]
         fee: u64,

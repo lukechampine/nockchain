@@ -932,12 +932,15 @@
           """
           [%exit 0]
       ==
+    ::  Assert that orders list contains exactly one order for now
+    ?.  =((lent orders.cause) 1)
+      ~|("create-tx currently only supports exactly one order" !!)
     =/  sign-key  (sign-key:get:v sign-key.cause)
     =/  pubkey=schnorr-pubkey:transact
       %-  from-sk:schnorr-pubkey:transact
       (to-atom:schnorr-seckey:transact sign-key)
     =/  =spends:transact
-      (tx-builder names order.cause fee.cause sign-key pubkey refund-pkh.cause get-note:v)
+      (tx-builder names (snag 0 orders.cause) fee.cause sign-key pubkey refund-pkh.cause get-note:v)
     (save-transaction spends)
     ::
     ++  parse-names

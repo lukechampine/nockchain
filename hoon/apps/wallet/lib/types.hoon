@@ -352,6 +352,7 @@
   +$  input-name  $~('default-input' @t)
   ::
   +$  order  [recipient=hash:transact gift=coins:transact]
+  +$  orders  (list order)
   ::
   ::
   +$  grpc-bind-cause
@@ -379,7 +380,7 @@
         [%list-notes-by-address-csv address=@t]             ::  base58-encoded address, CSV format
         $:  %create-tx
             names=(list [first=@t last=@t])               ::  base58-encoded name hashes
-            =order
+            =orders
             fee=coins:transact                            ::  fee
             sign-key=(unit [child-index=@ud hardened=?])  ::  child key information to sign from
             refund-pkh=(unit hash:transact)               ::  refund pkh for spends over v0 notes
