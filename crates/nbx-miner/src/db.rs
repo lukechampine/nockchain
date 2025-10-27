@@ -52,6 +52,7 @@ enum DbMsgHiPrio {
 }
 
 enum DbMsgLoPrio {
+    PartitionMaintenance,
     CheckIpAddress {
         sub: Uuid,
         ip_address: IpAddr,
@@ -387,6 +388,24 @@ impl Database {
     async fn run_loprio(pool: DbPool, mut msgs_lo: Receiver<DbMsgLoPrio>, src_name: Arc<str>) {
         while let Some(msg) = msgs_lo.recv().await {
             let r = match msg {
+                DbMsgLoPrio::PartitionMaintenance => {
+                    let drop_result =
+                        sqlx::query("SELECT * FROM drop_old_proofrate_partitions(60)")
+                            .execute(&pool)
+                            .await;
+
+                    if let Err(e) = drop_result {
+                        error!("Unable to execute query: {e}");
+
+                        counter!("nbx_miner_db_query_errors_total").increment(1);
+                    }
+
+                    let create_result = sqlx::query("SELECT ensure_proofrate_partitions()")
+                        .execute(&pool)
+                        .await;
+
+                    create_result.err()
+                }
                 DbMsgLoPrio::CheckBlocklist { sub, response } => {
                     if !response.is_closed() {
                         let result = sqlx::query_scalar::<_, Option<String>>(
@@ -513,10 +532,11 @@ pub(crate) struct DatabaseHandle {
 
 impl DatabaseHandle {
     fn submit_msg_share(&self, msg: DbMsgShare) -> bool {
-        gauge!("nbx_miner_db_share_msg_channel_capacity_cur").set(self.msg_share.capacity() as f64);
+        gauge!("nbx_miner_db_msg_channel_capacity_cur", "type" => "share")
+            .set(self.msg_share.capacity() as f64);
         if self.msg_share.try_send(msg).is_err() {
             error!("Unable to send message to database loop");
-            counter!("nbx_miner_db_share_submit_error_total").increment(1);
+            counter!("nbx_miner_db_submit_error_total", "type" => "share").increment(1);
             false
         } else {
             true
@@ -524,10 +544,11 @@ impl DatabaseHandle {
     }
 
     fn submit_msg_hi(&self, msg: DbMsgHiPrio) -> bool {
-        gauge!("nbx_miner_db_msg_channel_capacity_cur").set(self.msgs_hi.capacity() as f64);
+        gauge!("nbx_miner_db_msg_channel_capacity_cur", "type" => "hi_prio")
+            .set(self.msgs_hi.capacity() as f64);
         if self.msgs_hi.try_send(msg).is_err() {
             error!("Unable to send message to database loop");
-            counter!("nbx_miner_db_submit_error_total").increment(1);
+            counter!("nbx_miner_db_submit_error_total", "type" => "hi_prio").increment(1);
             false
         } else {
             true
@@ -535,10 +556,11 @@ impl DatabaseHandle {
     }
 
     fn submit_msg_lo(&self, msg: DbMsgLoPrio) -> bool {
-        gauge!("nbx_miner_db_lo_msg_channel_capacity_cur").set(self.msgs_lo.capacity() as f64);
+        gauge!("nbx_miner_db_msg_channel_capacity_cur", "type" => "lo_prio")
+            .set(self.msgs_lo.capacity() as f64);
         if self.msgs_lo.try_send(msg).is_err() {
             error!("Unable to send message to database loop");
-            counter!("nbx_miner_db_lo_submit_error_total").increment(1);
+            counter!("nbx_miner_db_submit_error_total", "type" => "lo_prio").increment(1);
             false
         } else {
             true
@@ -582,6 +604,10 @@ impl DatabaseHandle {
             machine_id,
             reason,
         });
+    }
+
+    pub fn partition_maintenance(&self) {
+        self.submit_msg_lo(DbMsgLoPrio::PartitionMaintenance);
     }
 
     pub fn submit_ip_address_details(
