@@ -15,7 +15,7 @@ use nockapp::save::SaveableCheckpoint;
 use nockapp::utils::NOCK_STACK_SIZE_TINY;
 use nockapp::{Bytes, CrownError, Noun};
 use nockchain_libp2p_io::tip5_util::tip5_hash_to_base58;
-use nockchain_types::tx_engine::note::{Hash, SchnorrPubkey};
+use nockchain_types::tx_engine::common::{Hash, SchnorrPubkey};
 use nockvm::interpreter::NockCancelToken;
 use nockvm::jets::hot::HotEntry;
 use nockvm::noun::{Atom, D, NO, T, YES};
