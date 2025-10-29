@@ -1,9 +1,6 @@
 use crate::mary::{MarySlice, MarySliceMut};
 
-pub unsafe fn mary_transpose_offset_1_2x2(
-    fpolys: MarySlice,
-    res: &mut MarySliceMut,
-) {
+pub unsafe fn mary_transpose_offset_1_2x2(fpolys: MarySlice, res: &mut MarySliceMut) {
     use std::arch::aarch64::*;
 
     let step = fpolys.step as usize;
@@ -71,9 +68,7 @@ pub unsafe fn mary_transpose_offset_1_blocked_2x2<const TILE_SIZE: usize>(
             let j_end = (j_tile + TILE_SIZE).min(num_rows);
 
             transpose_tile_neon_2x2(
-                fpolys.dat, res.dat,
-                num_cols, num_rows,
-                i_tile, i_end, j_tile, j_end
+                fpolys.dat, res.dat, num_cols, num_rows, i_tile, i_end, j_tile, j_end,
             );
         }
     }
@@ -92,9 +87,7 @@ pub unsafe fn mary_transpose_offset_1_blocked_4x2<const TILE_SIZE: usize>(
             let j_end = (j_tile + TILE_SIZE).min(num_rows);
 
             transpose_tile_neon_4x2(
-                fpolys.dat, res.dat,
-                num_cols, num_rows,
-                i_tile, i_end, j_tile, j_end
+                fpolys.dat, res.dat, num_cols, num_rows, i_tile, i_end, j_tile, j_end,
             );
         }
     }
@@ -113,9 +106,7 @@ pub unsafe fn mary_transpose_offset_1_blocked_4x4<const TILE_SIZE: usize>(
             let j_end = (j_tile + TILE_SIZE).min(num_rows);
 
             transpose_tile_neon_4x4(
-                fpolys.dat, res.dat,
-                num_cols, num_rows,
-                i_tile, i_end, j_tile, j_end
+                fpolys.dat, res.dat, num_cols, num_rows, i_tile, i_end, j_tile, j_end,
             );
         }
     }
@@ -319,20 +310,28 @@ unsafe fn transpose_tile_neon_4x4(
 
             // Store - need to store in 2 chunks since we have 4 elements per column
             vst1q_u64(dst_ptr.add(global_i * num_rows + global_j), col0);
-            vst1q_u64(dst_ptr.add(global_i * num_rows + global_j + 2),
-                      vcombine_u64(vget_high_u64(c0_01), vget_high_u64(c0_23)));
+            vst1q_u64(
+                dst_ptr.add(global_i * num_rows + global_j + 2),
+                vcombine_u64(vget_high_u64(c0_01), vget_high_u64(c0_23)),
+            );
 
             vst1q_u64(dst_ptr.add((global_i + 1) * num_rows + global_j), col1);
-            vst1q_u64(dst_ptr.add((global_i + 1) * num_rows + global_j + 2),
-                      vcombine_u64(vget_high_u64(c1_01), vget_high_u64(c1_23)));
+            vst1q_u64(
+                dst_ptr.add((global_i + 1) * num_rows + global_j + 2),
+                vcombine_u64(vget_high_u64(c1_01), vget_high_u64(c1_23)),
+            );
 
             vst1q_u64(dst_ptr.add((global_i + 2) * num_rows + global_j), col2);
-            vst1q_u64(dst_ptr.add((global_i + 2) * num_rows + global_j + 2),
-                      vcombine_u64(vget_high_u64(c2_01), vget_high_u64(c2_23)));
+            vst1q_u64(
+                dst_ptr.add((global_i + 2) * num_rows + global_j + 2),
+                vcombine_u64(vget_high_u64(c2_01), vget_high_u64(c2_23)),
+            );
 
             vst1q_u64(dst_ptr.add((global_i + 3) * num_rows + global_j), col3);
-            vst1q_u64(dst_ptr.add((global_i + 3) * num_rows + global_j + 2),
-                      vcombine_u64(vget_high_u64(c3_01), vget_high_u64(c3_23)));
+            vst1q_u64(
+                dst_ptr.add((global_i + 3) * num_rows + global_j + 2),
+                vcombine_u64(vget_high_u64(c3_01), vget_high_u64(c3_23)),
+            );
 
             j += 4;
         }
@@ -389,7 +388,5 @@ mod tests {
             len: cols as u32,
             step: rows as u32,
         };
-
-        
     }
 }

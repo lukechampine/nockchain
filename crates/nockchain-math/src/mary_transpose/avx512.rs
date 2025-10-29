@@ -1,9 +1,6 @@
 use crate::mary::{MarySlice, MarySliceMut};
 
-pub unsafe fn mary_transpose_offset_1_8x8(
-    fpolys: MarySlice,
-    res: &mut MarySliceMut,
-) {
+pub unsafe fn mary_transpose_offset_1_8x8(fpolys: MarySlice, res: &mut MarySliceMut) {
     use std::arch::x86_64::*;
 
     let step = fpolys.step as usize;
@@ -99,9 +96,7 @@ pub unsafe fn mary_transpose_offset_1_blocked_8x8<const TILE_SIZE: usize>(
             let j_end = (j_tile + TILE_SIZE).min(num_rows);
 
             transpose_tile_8x8(
-                fpolys.dat, res.dat,
-                num_cols, num_rows,
-                i_tile, i_end, j_tile, j_end
+                fpolys.dat, res.dat, num_cols, num_rows, i_tile, i_end, j_tile, j_end,
             );
         }
     }
@@ -134,14 +129,29 @@ unsafe fn transpose_tile_8x8(
             let global_j = j_start + j;
 
             // Load 8x8 block
-            let row0 = _mm512_loadu_si512(src_ptr.add(global_j * num_cols + global_i) as *const __m512i);
-            let row1 = _mm512_loadu_si512(src_ptr.add((global_j + 1) * num_cols + global_i) as *const __m512i);
-            let row2 = _mm512_loadu_si512(src_ptr.add((global_j + 2) * num_cols + global_i) as *const __m512i);
-            let row3 = _mm512_loadu_si512(src_ptr.add((global_j + 3) * num_cols + global_i) as *const __m512i);
-            let row4 = _mm512_loadu_si512(src_ptr.add((global_j + 4) * num_cols + global_i) as *const __m512i);
-            let row5 = _mm512_loadu_si512(src_ptr.add((global_j + 5) * num_cols + global_i) as *const __m512i);
-            let row6 = _mm512_loadu_si512(src_ptr.add((global_j + 6) * num_cols + global_i) as *const __m512i);
-            let row7 = _mm512_loadu_si512(src_ptr.add((global_j + 7) * num_cols + global_i) as *const __m512i);
+            let row0 =
+                _mm512_loadu_si512(src_ptr.add(global_j * num_cols + global_i) as *const __m512i);
+            let row1 = _mm512_loadu_si512(
+                src_ptr.add((global_j + 1) * num_cols + global_i) as *const __m512i
+            );
+            let row2 = _mm512_loadu_si512(
+                src_ptr.add((global_j + 2) * num_cols + global_i) as *const __m512i
+            );
+            let row3 = _mm512_loadu_si512(
+                src_ptr.add((global_j + 3) * num_cols + global_i) as *const __m512i
+            );
+            let row4 = _mm512_loadu_si512(
+                src_ptr.add((global_j + 4) * num_cols + global_i) as *const __m512i
+            );
+            let row5 = _mm512_loadu_si512(
+                src_ptr.add((global_j + 5) * num_cols + global_i) as *const __m512i
+            );
+            let row6 = _mm512_loadu_si512(
+                src_ptr.add((global_j + 6) * num_cols + global_i) as *const __m512i
+            );
+            let row7 = _mm512_loadu_si512(
+                src_ptr.add((global_j + 7) * num_cols + global_i) as *const __m512i
+            );
 
             // Transpose
             let tmp0 = _mm512_unpacklo_epi64(row0, row1);
@@ -172,14 +182,38 @@ unsafe fn transpose_tile_8x8(
             let col7 = _mm512_shuffle_i64x2(t3, t7, 0xDD);
 
             // Store
-            _mm512_storeu_si512(dst_ptr.add(global_i * num_rows + global_j) as *mut __m512i, col0);
-            _mm512_storeu_si512(dst_ptr.add((global_i + 1) * num_rows + global_j) as *mut __m512i, col1);
-            _mm512_storeu_si512(dst_ptr.add((global_i + 2) * num_rows + global_j) as *mut __m512i, col2);
-            _mm512_storeu_si512(dst_ptr.add((global_i + 3) * num_rows + global_j) as *mut __m512i, col3);
-            _mm512_storeu_si512(dst_ptr.add((global_i + 4) * num_rows + global_j) as *mut __m512i, col4);
-            _mm512_storeu_si512(dst_ptr.add((global_i + 5) * num_rows + global_j) as *mut __m512i, col5);
-            _mm512_storeu_si512(dst_ptr.add((global_i + 6) * num_rows + global_j) as *mut __m512i, col6);
-            _mm512_storeu_si512(dst_ptr.add((global_i + 7) * num_rows + global_j) as *mut __m512i, col7);
+            _mm512_storeu_si512(
+                dst_ptr.add(global_i * num_rows + global_j) as *mut __m512i,
+                col0,
+            );
+            _mm512_storeu_si512(
+                dst_ptr.add((global_i + 1) * num_rows + global_j) as *mut __m512i,
+                col1,
+            );
+            _mm512_storeu_si512(
+                dst_ptr.add((global_i + 2) * num_rows + global_j) as *mut __m512i,
+                col2,
+            );
+            _mm512_storeu_si512(
+                dst_ptr.add((global_i + 3) * num_rows + global_j) as *mut __m512i,
+                col3,
+            );
+            _mm512_storeu_si512(
+                dst_ptr.add((global_i + 4) * num_rows + global_j) as *mut __m512i,
+                col4,
+            );
+            _mm512_storeu_si512(
+                dst_ptr.add((global_i + 5) * num_rows + global_j) as *mut __m512i,
+                col5,
+            );
+            _mm512_storeu_si512(
+                dst_ptr.add((global_i + 6) * num_rows + global_j) as *mut __m512i,
+                col6,
+            );
+            _mm512_storeu_si512(
+                dst_ptr.add((global_i + 7) * num_rows + global_j) as *mut __m512i,
+                col7,
+            );
 
             j += 8;
         }
@@ -209,10 +243,7 @@ unsafe fn transpose_tile_8x8(
     }
 }
 
-pub unsafe fn mary_transpose_offset_1_8x8_nt(
-    fpolys: MarySlice,
-    res: &mut MarySliceMut,
-) {
+pub unsafe fn mary_transpose_offset_1_8x8_nt(fpolys: MarySlice, res: &mut MarySliceMut) {
     use std::arch::x86_64::*;
 
     let step = fpolys.step as usize;
@@ -235,8 +266,9 @@ pub unsafe fn mary_transpose_offset_1_8x8_nt(
             if j + PREFETCH_DISTANCE * BLOCK < rows_blocked {
                 for pf in 0..BLOCK {
                     _mm_prefetch(
-                        src_ptr.add((j + PREFETCH_DISTANCE * BLOCK + pf) * num_cols + i) as *const i8,
-                        _MM_HINT_T0
+                        src_ptr.add((j + PREFETCH_DISTANCE * BLOCK + pf) * num_cols + i)
+                            as *const i8,
+                        _MM_HINT_T0,
                     );
                 }
             }
@@ -321,9 +353,7 @@ pub unsafe fn mary_transpose_offset_1_blocked_8x8_nt<const TILE_SIZE: usize>(
             let j_end = (j_tile + TILE_SIZE).min(num_rows);
 
             transpose_tile_avx512_8x8_nt(
-                fpolys.dat, res.dat,
-                num_cols, num_rows,
-                i_tile, i_end, j_tile, j_end
+                fpolys.dat, res.dat, num_cols, num_rows, i_tile, i_end, j_tile, j_end,
             );
         }
     }
@@ -361,21 +391,37 @@ unsafe fn transpose_tile_avx512_8x8_nt(
             if j + PREFETCH_DISTANCE * 8 < tile_rows {
                 for pf in 0..8 {
                     _mm_prefetch(
-                        src_ptr.add((global_j + PREFETCH_DISTANCE * 8 + pf) * num_cols + global_i) as *const i8,
-                        _MM_HINT_T0
+                        src_ptr.add((global_j + PREFETCH_DISTANCE * 8 + pf) * num_cols + global_i)
+                            as *const i8,
+                        _MM_HINT_T0,
                     );
                 }
             }
 
             // Load 8x8 block
-            let row0 = _mm512_loadu_si512(src_ptr.add(global_j * num_cols + global_i) as *const __m512i);
-            let row1 = _mm512_loadu_si512(src_ptr.add((global_j + 1) * num_cols + global_i) as *const __m512i);
-            let row2 = _mm512_loadu_si512(src_ptr.add((global_j + 2) * num_cols + global_i) as *const __m512i);
-            let row3 = _mm512_loadu_si512(src_ptr.add((global_j + 3) * num_cols + global_i) as *const __m512i);
-            let row4 = _mm512_loadu_si512(src_ptr.add((global_j + 4) * num_cols + global_i) as *const __m512i);
-            let row5 = _mm512_loadu_si512(src_ptr.add((global_j + 5) * num_cols + global_i) as *const __m512i);
-            let row6 = _mm512_loadu_si512(src_ptr.add((global_j + 6) * num_cols + global_i) as *const __m512i);
-            let row7 = _mm512_loadu_si512(src_ptr.add((global_j + 7) * num_cols + global_i) as *const __m512i);
+            let row0 =
+                _mm512_loadu_si512(src_ptr.add(global_j * num_cols + global_i) as *const __m512i);
+            let row1 = _mm512_loadu_si512(
+                src_ptr.add((global_j + 1) * num_cols + global_i) as *const __m512i
+            );
+            let row2 = _mm512_loadu_si512(
+                src_ptr.add((global_j + 2) * num_cols + global_i) as *const __m512i
+            );
+            let row3 = _mm512_loadu_si512(
+                src_ptr.add((global_j + 3) * num_cols + global_i) as *const __m512i
+            );
+            let row4 = _mm512_loadu_si512(
+                src_ptr.add((global_j + 4) * num_cols + global_i) as *const __m512i
+            );
+            let row5 = _mm512_loadu_si512(
+                src_ptr.add((global_j + 5) * num_cols + global_i) as *const __m512i
+            );
+            let row6 = _mm512_loadu_si512(
+                src_ptr.add((global_j + 6) * num_cols + global_i) as *const __m512i
+            );
+            let row7 = _mm512_loadu_si512(
+                src_ptr.add((global_j + 7) * num_cols + global_i) as *const __m512i
+            );
 
             // Transpose
             let tmp0 = _mm512_unpacklo_epi64(row0, row1);
@@ -406,14 +452,38 @@ unsafe fn transpose_tile_avx512_8x8_nt(
             let col7 = _mm512_shuffle_i64x2(t3, t7, 0xDD);
 
             // Non-temporal stores
-            _mm512_stream_si512(dst_ptr.add(global_i * num_rows + global_j) as *mut __m512i, col0);
-            _mm512_stream_si512(dst_ptr.add((global_i + 1) * num_rows + global_j) as *mut __m512i, col1);
-            _mm512_stream_si512(dst_ptr.add((global_i + 2) * num_rows + global_j) as *mut __m512i, col2);
-            _mm512_stream_si512(dst_ptr.add((global_i + 3) * num_rows + global_j) as *mut __m512i, col3);
-            _mm512_stream_si512(dst_ptr.add((global_i + 4) * num_rows + global_j) as *mut __m512i, col4);
-            _mm512_stream_si512(dst_ptr.add((global_i + 5) * num_rows + global_j) as *mut __m512i, col5);
-            _mm512_stream_si512(dst_ptr.add((global_i + 6) * num_rows + global_j) as *mut __m512i, col6);
-            _mm512_stream_si512(dst_ptr.add((global_i + 7) * num_rows + global_j) as *mut __m512i, col7);
+            _mm512_stream_si512(
+                dst_ptr.add(global_i * num_rows + global_j) as *mut __m512i,
+                col0,
+            );
+            _mm512_stream_si512(
+                dst_ptr.add((global_i + 1) * num_rows + global_j) as *mut __m512i,
+                col1,
+            );
+            _mm512_stream_si512(
+                dst_ptr.add((global_i + 2) * num_rows + global_j) as *mut __m512i,
+                col2,
+            );
+            _mm512_stream_si512(
+                dst_ptr.add((global_i + 3) * num_rows + global_j) as *mut __m512i,
+                col3,
+            );
+            _mm512_stream_si512(
+                dst_ptr.add((global_i + 4) * num_rows + global_j) as *mut __m512i,
+                col4,
+            );
+            _mm512_stream_si512(
+                dst_ptr.add((global_i + 5) * num_rows + global_j) as *mut __m512i,
+                col5,
+            );
+            _mm512_stream_si512(
+                dst_ptr.add((global_i + 6) * num_rows + global_j) as *mut __m512i,
+                col6,
+            );
+            _mm512_stream_si512(
+                dst_ptr.add((global_i + 7) * num_rows + global_j) as *mut __m512i,
+                col7,
+            );
 
             j += 8;
         }

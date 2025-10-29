@@ -1,9 +1,6 @@
 use crate::mary::{MarySlice, MarySliceMut};
 
-pub unsafe fn mary_transpose_offset_1_4x4(
-    fpolys: MarySlice,
-    res: &mut MarySliceMut,
-) {
+pub unsafe fn mary_transpose_offset_1_4x4(fpolys: MarySlice, res: &mut MarySliceMut) {
     use std::arch::x86_64::*;
 
     let step = fpolys.step as usize;
@@ -74,9 +71,7 @@ pub unsafe fn mary_transpose_offset_1_blocked_4x4_avx2<const TILE_SIZE: usize>(
             let j_end = (j_tile + TILE_SIZE).min(num_rows);
 
             transpose_tile_4x4(
-                fpolys.dat, res.dat,
-                num_cols, num_rows,
-                i_tile, i_end, j_tile, j_end
+                fpolys.dat, res.dat, num_cols, num_rows, i_tile, i_end, j_tile, j_end,
             );
         }
     }
@@ -109,10 +104,17 @@ unsafe fn transpose_tile_4x4(
             let global_j = j_start + j;
 
             // Load 4x4 block
-            let row0 = _mm256_loadu_si256(src_ptr.add(global_j * num_cols + global_i) as *const __m256i);
-            let row1 = _mm256_loadu_si256(src_ptr.add((global_j + 1) * num_cols + global_i) as *const __m256i);
-            let row2 = _mm256_loadu_si256(src_ptr.add((global_j + 2) * num_cols + global_i) as *const __m256i);
-            let row3 = _mm256_loadu_si256(src_ptr.add((global_j + 3) * num_cols + global_i) as *const __m256i);
+            let row0 =
+                _mm256_loadu_si256(src_ptr.add(global_j * num_cols + global_i) as *const __m256i);
+            let row1 = _mm256_loadu_si256(
+                src_ptr.add((global_j + 1) * num_cols + global_i) as *const __m256i
+            );
+            let row2 = _mm256_loadu_si256(
+                src_ptr.add((global_j + 2) * num_cols + global_i) as *const __m256i
+            );
+            let row3 = _mm256_loadu_si256(
+                src_ptr.add((global_j + 3) * num_cols + global_i) as *const __m256i
+            );
 
             // Transpose
             let tmp0 = _mm256_unpacklo_epi64(row0, row1);
@@ -126,10 +128,22 @@ unsafe fn transpose_tile_4x4(
             let col3 = _mm256_permute2x128_si256(tmp1, tmp3, 0x31);
 
             // Store
-            _mm256_storeu_si256(dst_ptr.add(global_i * num_rows + global_j) as *mut __m256i, col0);
-            _mm256_storeu_si256(dst_ptr.add((global_i + 1) * num_rows + global_j) as *mut __m256i, col1);
-            _mm256_storeu_si256(dst_ptr.add((global_i + 2) * num_rows + global_j) as *mut __m256i, col2);
-            _mm256_storeu_si256(dst_ptr.add((global_i + 3) * num_rows + global_j) as *mut __m256i, col3);
+            _mm256_storeu_si256(
+                dst_ptr.add(global_i * num_rows + global_j) as *mut __m256i,
+                col0,
+            );
+            _mm256_storeu_si256(
+                dst_ptr.add((global_i + 1) * num_rows + global_j) as *mut __m256i,
+                col1,
+            );
+            _mm256_storeu_si256(
+                dst_ptr.add((global_i + 2) * num_rows + global_j) as *mut __m256i,
+                col2,
+            );
+            _mm256_storeu_si256(
+                dst_ptr.add((global_i + 3) * num_rows + global_j) as *mut __m256i,
+                col3,
+            );
 
             j += 4;
         }
@@ -159,10 +173,7 @@ unsafe fn transpose_tile_4x4(
     }
 }
 
-pub unsafe fn mary_transpose_offset_1_4x4_avx2_nt(
-    fpolys: MarySlice,
-    res: &mut MarySliceMut,
-) {
+pub unsafe fn mary_transpose_offset_1_4x4_avx2_nt(fpolys: MarySlice, res: &mut MarySliceMut) {
     use std::arch::x86_64::*;
 
     let step = fpolys.step as usize;

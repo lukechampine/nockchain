@@ -6,9 +6,7 @@ fn create_test_data(rows: usize, cols: usize) -> Vec<u64> {
 }
 
 fn bench_transpose(c: &mut Criterion) {
-    let sizes = vec![
-        (195, 65536, "195x65536"),
-    ];
+    let sizes = vec![(195, 65536, "195x65536")];
 
     for (rows, cols, name) in sizes {
         let src = create_test_data(rows, cols);
@@ -263,10 +261,9 @@ fn bench_transpose(c: &mut Criterion) {
                             step: rows as u32,
                         };
 
-                        nockchain_math::mary_transpose::neon::mary_transpose_offset_1_blocked_2x2::<32>(
-                            black_box(fpolys),
-                            black_box(&mut res),
-                        );
+                        nockchain_math::mary_transpose::neon::mary_transpose_offset_1_blocked_2x2::<
+                            32,
+                        >(black_box(fpolys), black_box(&mut res));
                     },
                 );
             });
@@ -291,10 +288,9 @@ fn bench_transpose(c: &mut Criterion) {
                             step: rows as u32,
                         };
 
-                        nockchain_math::mary_transpose::neon::mary_transpose_offset_1_blocked_4x2::<32>(
-                            black_box(fpolys),
-                            black_box(&mut res),
-                        );
+                        nockchain_math::mary_transpose::neon::mary_transpose_offset_1_blocked_4x2::<
+                            32,
+                        >(black_box(fpolys), black_box(&mut res));
                     },
                 );
             });
@@ -319,10 +315,9 @@ fn bench_transpose(c: &mut Criterion) {
                             step: rows as u32,
                         };
 
-                        nockchain_math::mary_transpose::neon::mary_transpose_offset_1_blocked_4x4::<64>(
-                            black_box(fpolys),
-                            black_box(&mut res),
-                        );
+                        nockchain_math::mary_transpose::neon::mary_transpose_offset_1_blocked_4x4::<
+                            64,
+                        >(black_box(fpolys), black_box(&mut res));
                     },
                 );
             });
@@ -443,8 +438,6 @@ fn bench_transpose(c: &mut Criterion) {
                 );
             });
 
-
-
             group.bench_function(BenchmarkId::new("avx512 blocked 32", name), |b| {
                 b.iter_with_setup(
                     || {
@@ -529,8 +522,6 @@ fn bench_transpose(c: &mut Criterion) {
                 );
             });
 
-
-
             group.bench_function(BenchmarkId::new("avx512 blocked 32 - nt", name), |b| {
                 b.iter_with_setup(
                     || {
@@ -560,12 +551,9 @@ fn bench_transpose(c: &mut Criterion) {
             });
         }
 
-
         // AVX2 optimizations
         #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
-        {
-
-        }
+        {}
 
         group.finish();
     }
