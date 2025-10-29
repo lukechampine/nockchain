@@ -159,6 +159,107 @@ pub unsafe fn permute_fixed(input: &[Melt; RATE]) -> [Melt; DIGEST_LENGTH] {
     result
 }
 
+pub unsafe fn permute_fixed_x2(
+    input0: &[Melt; RATE],
+    input1: &[Melt; RATE],
+) -> ([Melt; DIGEST_LENGTH], [Melt; DIGEST_LENGTH]) {
+    let lookup_tables = load_lookup_tables();
+
+    // First round with fixed inputs
+    let (mut a0, mut b0, mut a1, mut b1) = sbox_layer_fixed_x2_reg(&lookup_tables, input0, input1);
+    (a0, b0) = mds_rcs_reg(a0, b0, 0);
+    (a1, b1) = mds_rcs_reg(a1, b1, 0);
+
+    // Middle rounds
+    for round in 1..(NUM_ROUNDS - 1) {
+        (a0, b0, a1, b1) = sbox_layer_x2_reg(&lookup_tables, a0, b0, a1, b1);
+        (a0, b0) = mds_rcs_reg(a0, b0, round);
+        (a1, b1) = mds_rcs_reg(a1, b1, round);
+    }
+
+    // Last round: only compute DIGEST_LENGTH elements
+    (a0, b0, a1, b1) = sbox_layer_x2_reg(&lookup_tables, a0, b0, a1, b1);
+    a0 = mds_rcs_reg_last(a0, b0, NUM_ROUNDS - 1);
+    a1 = mds_rcs_reg_last(a1, b1, NUM_ROUNDS - 1);
+
+    // Extract both digests
+    let mut temp0 = [0u64; 8];
+    let mut temp1 = [0u64; 8];
+    _mm512_storeu_epi64(temp0.as_mut_ptr() as *mut i64, a0);
+    _mm512_storeu_epi64(temp1.as_mut_ptr() as *mut i64, a1);
+
+    let mut result0 = [Melt(0); DIGEST_LENGTH];
+    let mut result1 = [Melt(0); DIGEST_LENGTH];
+    for i in 0..DIGEST_LENGTH {
+        result0[i] = Melt(temp0[i]);
+        result1[i] = Melt(temp1[i]);
+    }
+
+    (result0, result1)
+}
+
+pub unsafe fn permute_intermediate_x2(
+    sponge0: &mut [Melt; STATE_SIZE],
+    sponge1: &mut [Melt; STATE_SIZE],
+) {
+    let lookup_tables = load_lookup_tables();
+
+    let mut a0 = _mm512_loadu_epi64(sponge0.as_ptr() as *const i64);
+    let mut b0 = _mm512_loadu_epi64(sponge0.as_ptr().add(8) as *const i64);
+    let mut a1 = _mm512_loadu_epi64(sponge1.as_ptr() as *const i64);
+    let mut b1 = _mm512_loadu_epi64(sponge1.as_ptr().add(8) as *const i64);
+
+    for round in 0..(NUM_ROUNDS - 1) {
+        (a0, b0, a1, b1) = sbox_layer_x2_reg(&lookup_tables, a0, b0, a1, b1);
+        (a0, b0) = mds_rcs_reg(a0, b0, round);
+        (a1, b1) = mds_rcs_reg(a1, b1, round);
+    }
+
+    // Last round: only compute elements 10-15
+    (a0, b0, a1, b1) = sbox_layer_x2_reg(&lookup_tables, a0, b0, a1, b1);
+    b0 = mds_rcs_reg_intermediate(a0, b0, NUM_ROUNDS - 1);
+    b1 = mds_rcs_reg_intermediate(a1, b1, NUM_ROUNDS - 1);
+
+    _mm512_storeu_epi64(sponge0.as_mut_ptr().add(8) as *mut i64, b0);
+    _mm512_storeu_epi64(sponge1.as_mut_ptr().add(8) as *mut i64, b1);
+}
+
+pub unsafe fn permute_last_x2(
+    sponge0: [Melt; STATE_SIZE],
+    sponge1: [Melt; STATE_SIZE],
+) -> ([Melt; DIGEST_LENGTH], [Melt; DIGEST_LENGTH]) {
+    let lookup_tables = load_lookup_tables();
+
+    let mut a0 = _mm512_loadu_epi64(sponge0.as_ptr() as *const i64);
+    let mut b0 = _mm512_loadu_epi64(sponge0.as_ptr().add(8) as *const i64);
+    let mut a1 = _mm512_loadu_epi64(sponge1.as_ptr() as *const i64);
+    let mut b1 = _mm512_loadu_epi64(sponge1.as_ptr().add(8) as *const i64);
+
+    for round in 0..(NUM_ROUNDS - 1) {
+        (a0, b0, a1, b1) = sbox_layer_x2_reg(&lookup_tables, a0, b0, a1, b1);
+        (a0, b0) = mds_rcs_reg(a0, b0, round);
+        (a1, b1) = mds_rcs_reg(a1, b1, round);
+    }
+
+    // Last round: only compute DIGEST_LENGTH elements
+    (a0, b0, a1, b1) = sbox_layer_x2_reg(&lookup_tables, a0, b0, a1, b1);
+    a0 = mds_rcs_reg_last(a0, b0, NUM_ROUNDS - 1);
+    a1 = mds_rcs_reg_last(a1, b1, NUM_ROUNDS - 1);
+
+    let mut temp0 = [0u64; 8];
+    let mut temp1 = [0u64; 8];
+    _mm512_storeu_epi64(temp0.as_mut_ptr() as *mut i64, a0);
+    _mm512_storeu_epi64(temp1.as_mut_ptr() as *mut i64, a1);
+
+    let mut result0 = [Melt(0); DIGEST_LENGTH];
+    let mut result1 = [Melt(0); DIGEST_LENGTH];
+    for i in 0..DIGEST_LENGTH {
+        result0[i] = Melt(temp0[i]);
+        result1[i] = Melt(temp1[i]);
+    }
+    (result0, result1)
+}
+
 /// Pre-loaded lookup tables to avoid reloading every round
 struct LookupTables {
     s0: __m512i,
@@ -215,6 +316,139 @@ unsafe fn sbox_layer_reg(tables: &LookupTables, a: __m512i, b: __m512i) -> (__m5
     let amix = _mm512_mask_blend_epi64(0x0f, a7, asbox);
 
     (amix, b7)
+}
+
+#[inline(always)]
+unsafe fn sbox_layer_x2_reg(
+    tables: &LookupTables,
+    a0: __m512i,
+    b0: __m512i,
+    a1: __m512i,
+    b1: __m512i,
+) -> (__m512i, __m512i, __m512i, __m512i) {
+    // Permutation index to reverse upper half
+    let idx = _mm512_set_epi64(3, 2, 1, 0, 7, 6, 5, 4);
+
+    // Interleave first 4 elements from state0 and state1 for lookup
+    let a1rev = _mm512_permutexvar_epi64(idx, a1);
+    let atosub = _mm512_mask_blend_epi64(0xf0, a0, a1rev);
+    let atoexp = _mm512_mask_blend_epi64(0x0f, a0, a1rev);
+
+    // Apply lookup table to interleaved elements
+    let mut asbox = _mm512_setzero_si512();
+
+    let i0 = atosub;
+    let i1 = _mm512_sub_epi8(i0, tables.c64s);
+    let i2 = _mm512_sub_epi8(i1, tables.c64s);
+    let i3 = _mm512_sub_epi8(i2, tables.c64s);
+
+    let lt0 = _mm512_cmplt_epu8_mask(i0, tables.c64s);
+    let lt1 = _mm512_cmplt_epu8_mask(i1, tables.c64s);
+    let lt2 = _mm512_cmplt_epu8_mask(i2, tables.c64s);
+    let lt3 = _mm512_cmplt_epu8_mask(i3, tables.c64s);
+
+    asbox = _mm512_mask_permutexvar_epi8(asbox, lt0, i0, tables.s0);
+    asbox = _mm512_mask_permutexvar_epi8(asbox, lt1, i1, tables.s1);
+    asbox = _mm512_mask_permutexvar_epi8(asbox, lt2, i2, tables.s2);
+    asbox = _mm512_mask_permutexvar_epi8(asbox, lt3, i3, tables.s3);
+
+    let asboxrev = _mm512_permutexvar_epi64(idx, asbox);
+
+    // Apply x^7 to remaining elements (interleaved + both b registers)
+    let a2 = square8(atoexp);
+    let b02 = square8(b0);
+    let b12 = square8(b1);
+
+    let a4 = square8(a2);
+    let b04 = square8(b02);
+    let b14 = square8(b12);
+
+    let a7 = mul8(mul8(atoexp, a2), a4);
+    let b07 = mul8(mul8(b0, b02), b04);
+    let b17 = mul8(mul8(b1, b12), b14);
+
+    // Separate results back to individual states
+    let a7rev = _mm512_permutexvar_epi64(idx, a7);
+    let out0 = _mm512_mask_blend_epi64(0x0f, a7, asbox);
+    let out1 = _mm512_mask_blend_epi64(0x0f, a7rev, asboxrev);
+
+    (out0, b07, out1, b17)
+}
+
+#[inline(always)]
+unsafe fn sbox_layer_fixed_x2_reg(
+    tables: &LookupTables,
+    input0: &[Melt; RATE],
+    input1: &[Melt; RATE],
+) -> (__m512i, __m512i, __m512i, __m512i) {
+    // Pre-computed pow(7) for padding
+    let b_base = _mm512_set_epi64(
+        MELT_ONE_POW_7.0 as i64, MELT_ONE_POW_7.0 as i64, MELT_ONE_POW_7.0 as i64,
+        MELT_ONE_POW_7.0 as i64, MELT_ONE_POW_7.0 as i64, MELT_ONE_POW_7.0 as i64, 0, 0,
+    );
+
+    // Load inputs
+    let a0 = _mm512_loadu_epi64(input0.as_ptr() as *const i64);
+    let a1 = _mm512_loadu_epi64(input1.as_ptr() as *const i64);
+
+    // Interleave first 4 elements for lookup
+    let idx = _mm512_set_epi64(3, 2, 1, 0, 7, 6, 5, 4);
+    let a1rev = _mm512_permutexvar_epi64(idx, a1);
+    let atosub = _mm512_mask_blend_epi64(0xf0, a0, a1rev);
+    let atoexp = _mm512_mask_blend_epi64(0x0f, a0, a1rev);
+
+    // Apply lookup table
+    let mut asbox = _mm512_setzero_si512();
+
+    let i0 = atosub;
+    let i1 = _mm512_sub_epi8(i0, tables.c64s);
+    let i2 = _mm512_sub_epi8(i1, tables.c64s);
+    let i3 = _mm512_sub_epi8(i2, tables.c64s);
+
+    let lt0 = _mm512_cmplt_epu8_mask(i0, tables.c64s);
+    let lt1 = _mm512_cmplt_epu8_mask(i1, tables.c64s);
+    let lt2 = _mm512_cmplt_epu8_mask(i2, tables.c64s);
+    let lt3 = _mm512_cmplt_epu8_mask(i3, tables.c64s);
+
+    asbox = _mm512_mask_permutexvar_epi8(asbox, lt0, i0, tables.s0);
+    asbox = _mm512_mask_permutexvar_epi8(asbox, lt1, i1, tables.s1);
+    asbox = _mm512_mask_permutexvar_epi8(asbox, lt2, i2, tables.s2);
+    asbox = _mm512_mask_permutexvar_epi8(asbox, lt3, i3, tables.s3);
+
+    let asboxrev = _mm512_permutexvar_epi64(idx, asbox);
+
+    // Apply x^7 to elements 4-7
+    let a2 = square8(atoexp);
+    let a4 = square8(a2);
+    let a7 = mul8(mul8(atoexp, a2), a4);
+    let a7rev = _mm512_permutexvar_epi64(idx, a7);
+
+    // Combine results
+    let out0 = _mm512_mask_blend_epi64(0x0f, a7, asbox);
+    let out1 = _mm512_mask_blend_epi64(0x0f, a7rev, asboxrev);
+
+    // Compute elements 8-9 for both states
+    let mut b0_vals = [0u64; 8];
+    let mut b1_vals = [0u64; 8];
+    _mm512_storeu_epi64(b0_vals.as_mut_ptr() as *mut i64, b_base);
+    _mm512_storeu_epi64(b1_vals.as_mut_ptr() as *mut i64, b_base);
+
+    for j in 0..2 {
+        let s0 = input0[8 + j].0;
+        let s02 = montiply_ser(s0, s0);
+        let s04 = montiply_ser(s02, s02);
+        b0_vals[j] = montiply_ser(montiply_ser(s0, s02), s04);
+
+        let s1 = input1[8 + j].0;
+        let s12 = montiply_ser(s1, s1);
+        let s14 = montiply_ser(s12, s12);
+        b1_vals[j] = montiply_ser(montiply_ser(s1, s12), s14);
+    }
+
+    let b0_final = _mm512_loadu_epi64(b0_vals.as_ptr() as *const i64);
+    let b1_final = _mm512_loadu_epi64(b1_vals.as_ptr() as *const i64);
+
+    (out0, b0_final, out1, b1_final)
 }
 
 /// S-box layer for fixed input (knows padding values)

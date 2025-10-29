@@ -15,6 +15,24 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             |mut input_copy| nbx_tip5::tip5::permute(std::hint::black_box(&mut input_copy)),
         )
     });
+    c.bench_function("permute_x2", |b| {
+        b.iter_with_setup(
+            || {
+                counter += 2;
+                (
+                    INSTANCES[counter % INSTANCES.len()][..10]
+                        .try_into()
+                        .unwrap(),
+                    INSTANCES[(counter + 1) % INSTANCES.len()][..10]
+                        .try_into()
+                        .unwrap(),
+                )
+            },
+            |(a, b)| {
+                nbx_tip5::tip5::permute_fixed_x2(std::hint::black_box(a), std::hint::black_box(b))
+            },
+        )
+    });
     c.bench_function("permute scalar", |b| {
         b.iter_with_setup(
             || {

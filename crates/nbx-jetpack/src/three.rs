@@ -202,6 +202,42 @@ pub fn hash_varlen_sam(stack: &mut NockStack, sam: Noun) -> Result {
     Ok(T(stack, &output))
 }
 
+pub fn hash_varlen_padded_x2<T: Into<Melt> + Copy>(
+    input0: &[T],
+    input1: &[T],
+) -> (NounDigest, NounDigest) {
+    assert_eq!(input0.len(), input1.len(), "Inputs must have same length");
+
+    let mut sponge0 = new_sponge(true);
+    let mut sponge1 = new_sponge(true);
+
+    let l = input0.len();
+    let q = l / RATE;
+
+    let mut input0 = input0.chunks_exact(RATE).map(|i| {
+        <[T; RATE]>::try_from(i)
+            .unwrap()
+            .map(<T as Into<Melt>>::into)
+    });
+    let mut input1 = input1.chunks_exact(RATE).map(|i| {
+        <[T; RATE]>::try_from(i)
+            .unwrap()
+            .map(<T as Into<Melt>>::into)
+    });
+
+    for _ in 0..q - 1 {
+        sponge0[..RATE].copy_from_slice(&input0.next().unwrap());
+        sponge1[..RATE].copy_from_slice(&input1.next().unwrap());
+
+        tip5::permute_intermediate_x2(&mut sponge0, &mut sponge1);
+    }
+
+    sponge0[..RATE].copy_from_slice(&input0.next().unwrap());
+    sponge1[..RATE].copy_from_slice(&input1.next().unwrap());
+
+    tip5::permute_last_x2(sponge0, sponge1)
+}
+
 pub fn hash_varlen_padded<T: Into<Melt> + Copy>(input: &[T]) -> NounDigest {
     // |=  input=(list belt)
     // ^-  (list belt)
