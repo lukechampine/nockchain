@@ -1,6 +1,6 @@
 use nockchain_math::belt::Belt;
+use nockchain_math::mary::mary_transpose_1;
 use zkvm_jetpack::form::mary::{Mary, MarySlice};
-use zkvm_jetpack::form::math::mary::mary_transpose;
 
 use crate::eight::compute_lde;
 use crate::engine::Engine;
@@ -57,7 +57,7 @@ impl Engine for CodewordEngine<'_> {
                 step: codewords.len,
                 len: codewords.step,
             };
-            mary_transpose(codewords.as_slice(), 1, &mut codeword_array.as_mut_slice());
+            mary_transpose_1(codewords.as_slice(), &mut codeword_array.as_mut_slice());
             // =/  merk-heap=(pair @ merk-heap:merkle)
             //   (bp-build-merk-heap:merkle codeword-array)
             let (height, mh) = build_merk_heap_impl::<Belt>(codeword_array.as_slice()).unwrap();

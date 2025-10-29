@@ -7,6 +7,7 @@ pub mod felt;
 pub mod fpoly;
 pub mod handle;
 pub mod mary;
+pub mod mary_transpose;
 pub mod melt;
 pub mod noun_ext;
 pub mod poly;

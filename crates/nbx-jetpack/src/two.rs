@@ -8,6 +8,7 @@ use nockchain_math::fpoly::*;
 use nockchain_math::handle::{
     finalize_mary, finalize_poly, new_handle_mut_felt, new_handle_mut_mary, new_handle_mut_slice,
 };
+use nockchain_math::mary::mary_transpose_1;
 use nockchain_math::noun_ext::NounMathExt;
 use nockchain_math::poly::*;
 use nockchain_math::poly_ext::{p_ntt, *};
@@ -104,7 +105,7 @@ pub fn interpolate_table(table: MarySlice, domain_len: u32) -> Mary {
         len: table.step,
         step: table.len,
     };
-    mary_transpose(table, 1, &mut trace.as_mut_slice());
+    mary_transpose_1(table, &mut trace.as_mut_slice());
 
     let mut out_trace = Mary {
         dat: Vec::with_capacity(table.dat.len()),

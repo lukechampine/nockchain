@@ -29,3 +29,8 @@ const_for.workspace = true
 
 [dev-dependencies]
 quickcheck.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "mary_transpose"
+harness = false

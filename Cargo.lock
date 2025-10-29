@@ -4858,6 +4858,7 @@ dependencies = [
  "bytemuck",
  "bytes",
  "const_for",
+ "criterion 0.5.1",
  "either",
  "hex-literal",
  "ibig",
