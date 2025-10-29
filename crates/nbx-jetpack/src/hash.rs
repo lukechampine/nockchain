@@ -181,41 +181,39 @@ impl ReduceChunkSlice<'_> {
             return;
         }
 
-        self.ops_variable
-            .par_chunks(2)
-            .for_each(|pair| {
-                let out = &out_ptr;
+        self.ops_variable.par_chunks(2).for_each(|pair| {
+            let out = &out_ptr;
 
-                if pair.len() == 1 {
-                    pair[0].reduce(inp_start, inp, out.0, out_len, out_off);
-                    return;
-                }
+            if pair.len() == 1 {
+                pair[0].reduce(inp_start, inp, out.0, out_len, out_off);
+                return;
+            }
 
-                let [op0, op1] = [pair[0], pair[1]];
+            let [op0, op1] = [pair[0], pair[1]];
 
-                // In the unlikely scenario that the operations have different lengths, process them
-                //  separately.
-                if op0.len != op1.len {
-                    op0.reduce(inp_start, inp, out.0, out_len, out_off);
-                    op1.reduce(inp_start, inp, out.0, out_len, out_off);
-                    return;
-                }
+            // In the unlikely scenario that the operations have different lengths, process them
+            //  separately.
+            if op0.len != op1.len {
+                op0.reduce(inp_start, inp, out.0, out_len, out_off);
+                op1.reduce(inp_start, inp, out.0, out_len, out_off);
+                return;
+            }
 
-                let inp0 = &inp[(op0.inner.source as usize - inp_start)
-                    ..((op0.inner.source + op0.len) as usize - inp_start)];
-                let inp1 = &inp[(op1.inner.source as usize - inp_start)
-                    ..((op1.inner.source + op1.len) as usize - inp_start)];
+            let inp0 = &inp[(op0.inner.source as usize - inp_start)
+                ..((op0.inner.source + op0.len) as usize - inp_start)];
+            let inp1 = &inp[(op1.inner.source as usize - inp_start)
+                ..((op1.inner.source + op1.len) as usize - inp_start)];
 
-                let (dig0, dig1) = hash_varlen_padded_x2(inp0, inp1);
+            let (dig0, dig1) = hash_varlen_padded_x2(inp0, inp1);
 
-                unsafe {
-                    let dest0 = op0.inner.destination as usize - out_off;
-                    let dest1 = op1.inner.destination as usize - out_off;
-                    core::slice::from_raw_parts_mut(out.0.add(dest0), DIGEST_LENGTH)
-                        .copy_from_slice(&dig0);
-                    core::slice::from_raw_parts_mut(out.0.add(dest1), DIGEST_LENGTH)
-                        .copy_from_slice(&dig1);
-                }
+            unsafe {
+                let dest0 = op0.inner.destination as usize - out_off;
+                let dest1 = op1.inner.destination as usize - out_off;
+                core::slice::from_raw_parts_mut(out.0.add(dest0), DIGEST_LENGTH)
+                    .copy_from_slice(&dig0);
+                core::slice::from_raw_parts_mut(out.0.add(dest1), DIGEST_LENGTH)
+                    .copy_from_slice(&dig1);
+            }
         });
     }
 

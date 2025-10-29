@@ -167,14 +167,12 @@ pub unsafe fn permute_fixed_x2(
 
     // First round with fixed inputs
     let (mut a0, mut b0, mut a1, mut b1) = sbox_layer_fixed_x2_reg(&lookup_tables, input0, input1);
-    (a0, b0) = mds_rcs_reg(a0, b0, 0);
-    (a1, b1) = mds_rcs_reg(a1, b1, 0);
+    (a0, b0, a1, b1) = mds_rcs_x2_reg(a0, b0, a1, b1, 0);
 
     // Middle rounds
     for round in 1..(NUM_ROUNDS - 1) {
         (a0, b0, a1, b1) = sbox_layer_x2_reg(&lookup_tables, a0, b0, a1, b1);
-        (a0, b0) = mds_rcs_reg(a0, b0, round);
-        (a1, b1) = mds_rcs_reg(a1, b1, round);
+        (a0, b0, a1, b1) = mds_rcs_x2_reg(a0, b0, a1, b1, round);
     }
 
     // Last round: only compute DIGEST_LENGTH elements
@@ -211,17 +209,15 @@ pub unsafe fn permute_intermediate_x2(
 
     for round in 0..(NUM_ROUNDS - 1) {
         (a0, b0, a1, b1) = sbox_layer_x2_reg(&lookup_tables, a0, b0, a1, b1);
-        (a0, b0) = mds_rcs_reg(a0, b0, round);
-        (a1, b1) = mds_rcs_reg(a1, b1, round);
+        (a0, b0, a1, b1) = mds_rcs_x2_reg(a0, b0, a1, b1, round);
     }
 
     // Last round: only compute elements 10-15
     (a0, b0, a1, b1) = sbox_layer_x2_reg(&lookup_tables, a0, b0, a1, b1);
-    b0 = mds_rcs_reg_intermediate(a0, b0, NUM_ROUNDS - 1);
-    b1 = mds_rcs_reg_intermediate(a1, b1, NUM_ROUNDS - 1);
+    let b = mds_rcs_x2_reg_intermediate(a0, b0, a1, b1, NUM_ROUNDS - 1);
 
-    _mm512_storeu_epi64(sponge0.as_mut_ptr().add(8) as *mut i64, b0);
-    _mm512_storeu_epi64(sponge1.as_mut_ptr().add(8) as *mut i64, b1);
+    _mm512_storeu_epi64(sponge0.as_mut_ptr().add(8) as *mut i64, b.0);
+    _mm512_storeu_epi64(sponge1.as_mut_ptr().add(8) as *mut i64, b.1);
 }
 
 pub unsafe fn permute_last_x2(
@@ -237,14 +233,12 @@ pub unsafe fn permute_last_x2(
 
     for round in 0..(NUM_ROUNDS - 1) {
         (a0, b0, a1, b1) = sbox_layer_x2_reg(&lookup_tables, a0, b0, a1, b1);
-        (a0, b0) = mds_rcs_reg(a0, b0, round);
-        (a1, b1) = mds_rcs_reg(a1, b1, round);
+        (a0, b0, a1, b1) = mds_rcs_x2_reg(a0, b0, a1, b1, round);
     }
 
     // Last round: only compute DIGEST_LENGTH elements
     (a0, b0, a1, b1) = sbox_layer_x2_reg(&lookup_tables, a0, b0, a1, b1);
-    a0 = mds_rcs_reg_last(a0, b0, NUM_ROUNDS - 1);
-    a1 = mds_rcs_reg_last(a1, b1, NUM_ROUNDS - 1);
+    let (a0, a1) = mds_rcs_x2_reg_last(a0, b0, a1, b1, NUM_ROUNDS - 1);
 
     let mut temp0 = [0u64; 8];
     let mut temp1 = [0u64; 8];
@@ -451,6 +445,174 @@ unsafe fn sbox_layer_fixed_x2_reg(
     (out0, b0_final, out1, b1_final)
 }
 
+#[inline(always)]
+unsafe fn mds_rcs_x2_reg_intermediate(
+    a0: __m512i,
+    b0: __m512i,
+    a1: __m512i,
+    b1: __m512i,
+    round_index: usize,
+) -> (__m512i, __m512i) {
+    let rcs_offset = round_index * 16;
+
+    // Only initialize accumulator for register b (elements 10-15) for both states
+    let rc1_lo = _mm512_loadu_epi64(RCS_MONT_L.as_ptr().add(rcs_offset + 8) as *const i64);
+    let rc1_hi = _mm512_loadu_epi64(RCS_MONT_U.as_ptr().add(rcs_offset + 8) as *const i64);
+
+    let mut r0_1lo = rc1_lo;
+    let mut r0_1hi = rc1_hi;
+    let mut r1_1lo = rc1_lo;
+    let mut r1_1hi = rc1_hi;
+
+    // Extract state values
+    #[repr(C, align(64))]
+    struct StateVals {
+        a0: [u32; 16],
+        b0: [u32; 16],
+        a1: [u32; 16],
+        b1: [u32; 16],
+    }
+
+    let mut vals = StateVals {
+        a0: [0u32; 16],
+        b0: [0u32; 16],
+        a1: [0u32; 16],
+        b1: [0u32; 16],
+    };
+
+    _mm512_storeu_epi32(vals.a0.as_mut_ptr() as *mut i32, a0);
+    _mm512_storeu_epi32(vals.b0.as_mut_ptr() as *mut i32, b0);
+    _mm512_storeu_epi32(vals.a1.as_mut_ptr() as *mut i32, a1);
+    _mm512_storeu_epi32(vals.b1.as_mut_ptr() as *mut i32, b1);
+
+    // Only compute columns for outputs 8-15 (register b)
+    for i in 0..8 {
+        let c1 = _mm512_loadu_epi64(MDS_TRANS.as_ptr().add(2 * i + 1) as *const i64);
+        let c0 = _mm512_loadu_epi64(MDS_TRANS.as_ptr().add(2 * i) as *const i64);
+
+        // State 0 broadcasts
+        let d0_0lo = _mm512_set1_epi64(vals.a0[2 * i] as i64);
+        let d0_0hi = _mm512_set1_epi64(vals.a0[2 * i + 1] as i64);
+        let e0_0lo = _mm512_set1_epi64(vals.b0[2 * i] as i64);
+        let e0_0hi = _mm512_set1_epi64(vals.b0[2 * i + 1] as i64);
+
+        // State 1 broadcasts
+        let d1_0lo = _mm512_set1_epi64(vals.a1[2 * i] as i64);
+        let d1_0hi = _mm512_set1_epi64(vals.a1[2 * i + 1] as i64);
+        let e1_0lo = _mm512_set1_epi64(vals.b1[2 * i] as i64);
+        let e1_0hi = _mm512_set1_epi64(vals.b1[2 * i + 1] as i64);
+
+        // State 0 products (only for b output)
+        let prod0_2 = _mm512_mul_epu32(c1, d0_0lo);
+        let prod0_3 = _mm512_mul_epu32(c1, d0_0hi);
+        let prod0_6 = _mm512_mul_epu32(c0, e0_0lo);
+        let prod0_7 = _mm512_mul_epu32(c0, e0_0hi);
+
+        // State 1 products (only for b output)
+        let prod1_2 = _mm512_mul_epu32(c1, d1_0lo);
+        let prod1_3 = _mm512_mul_epu32(c1, d1_0hi);
+        let prod1_6 = _mm512_mul_epu32(c0, e1_0lo);
+        let prod1_7 = _mm512_mul_epu32(c0, e1_0hi);
+
+        // Accumulate
+        r0_1lo = _mm512_add_epi64(r0_1lo, prod0_2);
+        r0_1hi = _mm512_add_epi64(r0_1hi, prod0_3);
+        r0_1lo = _mm512_add_epi64(r0_1lo, prod0_6);
+        r0_1hi = _mm512_add_epi64(r0_1hi, prod0_7);
+
+        r1_1lo = _mm512_add_epi64(r1_1lo, prod1_2);
+        r1_1hi = _mm512_add_epi64(r1_1hi, prod1_3);
+        r1_1lo = _mm512_add_epi64(r1_1lo, prod1_6);
+        r1_1hi = _mm512_add_epi64(r1_1hi, prod1_7);
+    }
+
+    (reduce2x32(r0_1lo, r0_1hi), reduce2x32(r1_1lo, r1_1hi))
+}
+
+#[inline(always)]
+unsafe fn mds_rcs_x2_reg_last(
+    a0: __m512i,
+    b0: __m512i,
+    a1: __m512i,
+    b1: __m512i,
+    round_index: usize,
+) -> (__m512i, __m512i) {
+    let rcs_offset = round_index * 16;
+
+    // Only initialize accumulator for register a (elements 0-7)
+    let rc_lo = _mm512_loadu_epi64(RCS_MONT_L.as_ptr().add(rcs_offset) as *const i64);
+    let rc_hi = _mm512_loadu_epi64(RCS_MONT_U.as_ptr().add(rcs_offset) as *const i64);
+
+    let mut r0_0lo = rc_lo;
+    let mut r0_0hi = rc_hi;
+    let mut r1_0lo = rc_lo;
+    let mut r1_0hi = rc_hi;
+
+    // Extract state values
+    #[repr(C, align(64))]
+    struct StateVals {
+        a0: [u32; 16],
+        b0: [u32; 16],
+        a1: [u32; 16],
+        b1: [u32; 16],
+    }
+
+    let mut vals = StateVals {
+        a0: [0u32; 16],
+        b0: [0u32; 16],
+        a1: [0u32; 16],
+        b1: [0u32; 16],
+    };
+
+    _mm512_storeu_epi32(vals.a0.as_mut_ptr() as *mut i32, a0);
+    _mm512_storeu_epi32(vals.b0.as_mut_ptr() as *mut i32, b0);
+    _mm512_storeu_epi32(vals.a1.as_mut_ptr() as *mut i32, a1);
+    _mm512_storeu_epi32(vals.b1.as_mut_ptr() as *mut i32, b1);
+
+    // Only compute columns for outputs 0-7 (register a)
+    for i in 0..8 {
+        let c0 = _mm512_loadu_epi64(MDS_TRANS.as_ptr().add(2 * i) as *const i64);
+        let c1 = _mm512_loadu_epi64(MDS_TRANS.as_ptr().add(2 * i + 1) as *const i64);
+
+        // State 0 broadcasts
+        let d0_0lo = _mm512_set1_epi64(vals.a0[2 * i] as i64);
+        let d0_0hi = _mm512_set1_epi64(vals.a0[2 * i + 1] as i64);
+        let e0_0lo = _mm512_set1_epi64(vals.b0[2 * i] as i64);
+        let e0_0hi = _mm512_set1_epi64(vals.b0[2 * i + 1] as i64);
+
+        // State 1 broadcasts
+        let d1_0lo = _mm512_set1_epi64(vals.a1[2 * i] as i64);
+        let d1_0hi = _mm512_set1_epi64(vals.a1[2 * i + 1] as i64);
+        let e1_0lo = _mm512_set1_epi64(vals.b1[2 * i] as i64);
+        let e1_0hi = _mm512_set1_epi64(vals.b1[2 * i + 1] as i64);
+
+        // State 0 products (only for a output)
+        let prod0_0 = _mm512_mul_epu32(c0, d0_0lo);
+        let prod0_1 = _mm512_mul_epu32(c0, d0_0hi);
+        let prod0_4 = _mm512_mul_epu32(c1, e0_0lo);
+        let prod0_5 = _mm512_mul_epu32(c1, e0_0hi);
+
+        // State 1 products (only for a output)
+        let prod1_0 = _mm512_mul_epu32(c0, d1_0lo);
+        let prod1_1 = _mm512_mul_epu32(c0, d1_0hi);
+        let prod1_4 = _mm512_mul_epu32(c1, e1_0lo);
+        let prod1_5 = _mm512_mul_epu32(c1, e1_0hi);
+
+        // Accumulate
+        r0_0lo = _mm512_add_epi64(r0_0lo, prod0_0);
+        r0_0hi = _mm512_add_epi64(r0_0hi, prod0_1);
+        r0_0lo = _mm512_add_epi64(r0_0lo, prod0_4);
+        r0_0hi = _mm512_add_epi64(r0_0hi, prod0_5);
+
+        r1_0lo = _mm512_add_epi64(r1_0lo, prod1_0);
+        r1_0hi = _mm512_add_epi64(r1_0hi, prod1_1);
+        r1_0lo = _mm512_add_epi64(r1_0lo, prod1_4);
+        r1_0hi = _mm512_add_epi64(r1_0hi, prod1_5);
+    }
+
+    (reduce2x32(r0_0lo, r0_0hi), reduce2x32(r1_0lo, r1_0hi))
+}
+
 /// S-box layer for fixed input (knows padding values)
 #[inline(always)]
 unsafe fn sbox_layer_fixed_reg(tables: &LookupTables, input: &[Melt; RATE]) -> (__m512i, __m512i) {
@@ -623,6 +785,121 @@ unsafe fn mds_rcs_reg_intermediate(a: __m512i, b: __m512i, round_index: usize) -
     }
 
     reduce2x32(r1lo, r1hi)
+}
+
+#[inline(always)]
+unsafe fn mds_rcs_x2_reg(
+    a0: __m512i,
+    b0: __m512i,
+    a1: __m512i,
+    b1: __m512i,
+    round_index: usize,
+) -> (__m512i, __m512i, __m512i, __m512i) {
+    let rcs_offset = round_index * 16;
+
+    // Initialize accumulators for both states with round constants
+    let rc_lo = _mm512_loadu_epi64(RCS_MONT_L.as_ptr().add(rcs_offset) as *const i64);
+    let rc_hi = _mm512_loadu_epi64(RCS_MONT_U.as_ptr().add(rcs_offset) as *const i64);
+    let rc1_lo = _mm512_loadu_epi64(RCS_MONT_L.as_ptr().add(rcs_offset + 8) as *const i64);
+    let rc1_hi = _mm512_loadu_epi64(RCS_MONT_U.as_ptr().add(rcs_offset + 8) as *const i64);
+
+    let mut r0_0lo = rc_lo;
+    let mut r0_0hi = rc_hi;
+    let mut r0_1lo = rc1_lo;
+    let mut r0_1hi = rc1_hi;
+
+    let mut r1_0lo = rc_lo;
+    let mut r1_0hi = rc_hi;
+    let mut r1_1lo = rc1_lo;
+    let mut r1_1hi = rc1_hi;
+
+    // Extract state values for both states
+    #[repr(C, align(64))]
+    struct StateVals {
+        a0: [u32; 16],
+        b0: [u32; 16],
+        a1: [u32; 16],
+        b1: [u32; 16],
+    }
+
+    let mut vals = StateVals {
+        a0: [0u32; 16],
+        b0: [0u32; 16],
+        a1: [0u32; 16],
+        b1: [0u32; 16],
+    };
+
+    _mm512_storeu_epi32(vals.a0.as_mut_ptr() as *mut i32, a0);
+    _mm512_storeu_epi32(vals.b0.as_mut_ptr() as *mut i32, b0);
+    _mm512_storeu_epi32(vals.a1.as_mut_ptr() as *mut i32, a1);
+    _mm512_storeu_epi32(vals.b1.as_mut_ptr() as *mut i32, b1);
+
+    // Matrix multiplication for both states
+    for i in 0..8 {
+        // Load MDS coefficients once for both states
+        let c0 = _mm512_loadu_epi64(MDS_TRANS.as_ptr().add(2 * i) as *const i64);
+        let c1 = _mm512_loadu_epi64(MDS_TRANS.as_ptr().add(2 * i + 1) as *const i64);
+
+        // State 0 broadcasts
+        let d0_0lo = _mm512_set1_epi64(vals.a0[2 * i] as i64);
+        let d0_0hi = _mm512_set1_epi64(vals.a0[2 * i + 1] as i64);
+        let e0_0lo = _mm512_set1_epi64(vals.b0[2 * i] as i64);
+        let e0_0hi = _mm512_set1_epi64(vals.b0[2 * i + 1] as i64);
+
+        // State 1 broadcasts
+        let d1_0lo = _mm512_set1_epi64(vals.a1[2 * i] as i64);
+        let d1_0hi = _mm512_set1_epi64(vals.a1[2 * i + 1] as i64);
+        let e1_0lo = _mm512_set1_epi64(vals.b1[2 * i] as i64);
+        let e1_0hi = _mm512_set1_epi64(vals.b1[2 * i + 1] as i64);
+
+        // State 0 products
+        let prod0_0 = _mm512_mul_epu32(c0, d0_0lo);
+        let prod0_1 = _mm512_mul_epu32(c0, d0_0hi);
+        let prod0_2 = _mm512_mul_epu32(c1, d0_0lo);
+        let prod0_3 = _mm512_mul_epu32(c1, d0_0hi);
+        let prod0_4 = _mm512_mul_epu32(c1, e0_0lo);
+        let prod0_5 = _mm512_mul_epu32(c1, e0_0hi);
+        let prod0_6 = _mm512_mul_epu32(c0, e0_0lo);
+        let prod0_7 = _mm512_mul_epu32(c0, e0_0hi);
+
+        // State 1 products
+        let prod1_0 = _mm512_mul_epu32(c0, d1_0lo);
+        let prod1_1 = _mm512_mul_epu32(c0, d1_0hi);
+        let prod1_2 = _mm512_mul_epu32(c1, d1_0lo);
+        let prod1_3 = _mm512_mul_epu32(c1, d1_0hi);
+        let prod1_4 = _mm512_mul_epu32(c1, e1_0lo);
+        let prod1_5 = _mm512_mul_epu32(c1, e1_0hi);
+        let prod1_6 = _mm512_mul_epu32(c0, e1_0lo);
+        let prod1_7 = _mm512_mul_epu32(c0, e1_0hi);
+
+        // Accumulate state 0
+        r0_0lo = _mm512_add_epi64(r0_0lo, prod0_0);
+        r0_0hi = _mm512_add_epi64(r0_0hi, prod0_1);
+        r0_1lo = _mm512_add_epi64(r0_1lo, prod0_2);
+        r0_1hi = _mm512_add_epi64(r0_1hi, prod0_3);
+        r0_0lo = _mm512_add_epi64(r0_0lo, prod0_4);
+        r0_0hi = _mm512_add_epi64(r0_0hi, prod0_5);
+        r0_1lo = _mm512_add_epi64(r0_1lo, prod0_6);
+        r0_1hi = _mm512_add_epi64(r0_1hi, prod0_7);
+
+        // Accumulate state 1
+        r1_0lo = _mm512_add_epi64(r1_0lo, prod1_0);
+        r1_0hi = _mm512_add_epi64(r1_0hi, prod1_1);
+        r1_1lo = _mm512_add_epi64(r1_1lo, prod1_2);
+        r1_1hi = _mm512_add_epi64(r1_1hi, prod1_3);
+        r1_0lo = _mm512_add_epi64(r1_0lo, prod1_4);
+        r1_0hi = _mm512_add_epi64(r1_0hi, prod1_5);
+        r1_1lo = _mm512_add_epi64(r1_1lo, prod1_6);
+        r1_1hi = _mm512_add_epi64(r1_1hi, prod1_7);
+    }
+
+    // Reduce and return all results
+    (
+        reduce2x32(r0_0lo, r0_0hi),
+        reduce2x32(r0_1lo, r0_1hi),
+        reduce2x32(r1_0lo, r1_0hi),
+        reduce2x32(r1_1lo, r1_1hi),
+    )
 }
 
 /// MDS + round constants for last permutation (only compute elements 0-4 for digest)
