@@ -874,15 +874,51 @@ pub fn compute_lde<T: ElementEx>(
     // :-  (add idx chunk)
     // res(dat.array (sew 6 [idx chunk dat.array.curr] dat.array.res))
     let fri_domain_root: T = Belt(fri_domain_len as _).ordered_root().unwrap().into();
-    let mut out = out.dat;
+
+    // Map unique polynomials to their output positions
+    let mut unique_polys = BTreeMap::new();
+
+    let mut out_offset = 0;
     for ma in table_polys {
-        let (cout, nout) = out.split_at_mut(fri_domain_len as usize * ma.len as usize);
-        let ma_out = MarySliceMut {
-            step: fri_domain_len as _,
-            len: ma.len,
-            dat: cout,
+        for i in 0..ma.len {
+            let bp = &ma.dat[(i * ma.step) as usize..((i + 1) * ma.step) as usize];
+
+            if !bp.iter().all(|&x| x == 0) {
+                unique_polys
+                    .entry(bp)
+                    .or_insert_with(|| (bp, Vec::new()))
+                    .1
+                    .push(out_offset);
+            }
+
+            out_offset += fri_domain_len as usize;
+        }
+    }
+
+    // Compute LDE for each unique polynomial
+    let mut temp_result = vec![0u64; fri_domain_len as usize];
+
+    for (_, (poly_data, output_positions)) in unique_polys {
+        // Create a temporary MarySlice for this unique polynomial
+        let ma_single = MarySlice {
+            step: poly_data.len() as u32,
+            len: 1,
+            dat: poly_data,
         };
-        out = nout;
-        turn_coseword_impl(*ma, G.into(), fri_domain_len, fri_domain_root, ma_out);
+
+        // Compute LDE into temporary buffer
+        let ma_out = MarySliceMut {
+            step: fri_domain_len,
+            len: 1,
+            dat: &mut temp_result,
+        };
+
+        turn_coseword_impl(ma_single, G.into(), fri_domain_len, fri_domain_root, ma_out);
+
+        // Copy result to all positions that need it
+        for &pos in &output_positions {
+            let dst = &mut out.dat[pos..pos + fri_domain_len as usize];
+            dst.copy_from_slice(&temp_result);
+        }
     }
 }
