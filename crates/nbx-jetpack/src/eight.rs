@@ -542,6 +542,11 @@ fn process_composition_constraints<'a>(
         //   (zip-up degs comps)
         // |=  [[deg=@ comp=bpoly] [idx=_idx acc=_acc]]
         for (deg, comp) in degs.iter().zip(comps) {
+            if comp.iter().all(|&x| x == Melt(0)) {
+                idx += 1;
+                continue;
+            }
+
             // :-  +(idx)
             // ::
             // ::  Each constraint corresponds to two weights: alpha and beta. The verifier
