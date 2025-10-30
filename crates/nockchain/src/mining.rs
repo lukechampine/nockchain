@@ -116,21 +116,9 @@ pub struct MiningConfig {
     pub mine: bool,
     #[arg(
         long,
-        help = "Pubkey to mine to (mutually exclusive with --mining-key-adv)"
-    )]
-    pub mining_pubkey: Option<String>,
-    #[arg(
-        long,
         help = "Pubkey hash to mine to (mutually exclusive with --mining-pkh-adv)"
     )]
     pub mining_pkh: Option<String>,
-    #[arg(
-        long,
-        help = "Advanced mining key configuration (mutually exclusive with --mining-pubkey). Format: share,m:key1,key2,key3",
-        value_parser = value_parser!(MiningKeyConfig),
-        num_args = 1..,
-    )]
-    pub mining_key_adv: Option<Vec<MiningKeyConfig>>,
     #[arg(
         long,
         help = "Advanced mining pubkey hash configuration (mutually exclusive with --mining-pkh). Format: share,pkh",
@@ -143,20 +131,6 @@ pub struct MiningConfig {
 }
 
 impl MiningConfig {
-    pub fn mining_key_config(&self) -> Option<Vec<MiningKeyConfig>> {
-        if let Some(pubkey) = &self.mining_pubkey {
-            Some(vec![MiningKeyConfig {
-                share: 1,
-                m: 1,
-                keys: vec![pubkey.clone()],
-            }])
-        } else if let Some(mining_key_adv) = &self.mining_key_adv {
-            Some(mining_key_adv.clone())
-        } else {
-            None
-        }
-    }
-
     pub fn mining_pkh_config(&self) -> Option<Vec<MiningPkhConfig>> {
         if let Some(pkh) = &self.mining_pkh {
             Some(vec![MiningPkhConfig {
@@ -171,15 +145,9 @@ impl MiningConfig {
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        if self.mine && !(self.mining_pubkey.is_some() || self.mining_key_adv.is_some()) {
+        if self.mine && !(self.mining_pkh.is_some() || self.mining_pkh_adv.is_some()) {
             return Err(
-                "Cannot specify mine without either mining_pubkey or mining_key_adv".to_string(),
-            );
-        }
-
-        if self.mining_pubkey.is_some() && self.mining_key_adv.is_some() {
-            return Err(
-                "Cannot specify both mining_pubkey and mining_key_adv at the same time".to_string(),
+                "Cannot specify mine without either mining_pkh or mining_pkh_adv".to_string(),
             );
         }
 
@@ -187,20 +155,6 @@ impl MiningConfig {
             return Err(
                 "Cannot specify both mining_pkh and mining_pkh_adv at the same time".to_string(),
             );
-        }
-
-        if let Some(pubkey) = &self.mining_pubkey {
-            SchnorrPubkey::from_base58(pubkey)
-                .map_err(|err| format!("Invalid mining_pubkey: {err}"))?;
-        }
-
-        if let Some(key_configs) = &self.mining_key_adv {
-            for config in key_configs {
-                for key in &config.keys {
-                    SchnorrPubkey::from_base58(key)
-                        .map_err(|err| format!("Invalid mining_key_adv pubkey '{key}': {err}"))?;
-                }
-            }
         }
 
         if let Some(pkh) = &self.mining_pkh {
@@ -212,22 +166,6 @@ impl MiningConfig {
                 Hash::from_base58(&config.pkh).map_err(|err| {
                     format!("Invalid mining_pkh_adv entry '{}': {err}", config.pkh)
                 })?;
-            }
-        }
-
-        if self.mining_pubkey.is_some() {
-            if !self.mining_pkh.is_some() {
-                return Err(
-                    "Have mining_pubkey, but no mining_pkh. Must specify neither or both of mining_pubkey and mining_pkh. To get a pkh, you must generate a v1 key by running `generate-mining-pkh` on the latest version of the wallet. The pkh will be listed as the 'Address' ".to_string(),
-                );
-            }
-        }
-
-        if self.mining_key_adv.is_some() {
-            if !self.mining_pkh_adv.is_some() {
-                return Err(
-                    "Must specify neither or both of mining_key_adv and mining_pkh_adv".to_string(),
-                );
             }
         }
 
@@ -267,20 +205,21 @@ pub fn create_mining_driver(
 ) -> IODriverFn {
     Box::new(move |handle| {
         Box::pin(async move {
-            let Some(configs) = cfg.mining_key_config() else {
-                enable_mining(&handle, false).await?;
+            // set up empty config for v0 keys (TODO remove when taking out pubkey infra)
+            let configs = Vec::<MiningKeyConfig>::new();
 
-                if let Some(tx) = init_complete_tx {
-                    tx.send(()).map_err(|_| {
-                        NockAppError::OtherError(String::from(
-                            "Could not send driver initialization for mining driver.",
-                        ))
-                    })?;
-                }
-
-                return Ok(());
+            let mining_pkh_config = if let Some(pkh) = &cfg.mining_pkh {
+                Some(vec![MiningPkhConfig {
+                    share: 1,
+                    pkh: pkh.clone(),
+                }])
+            } else if let Some(mining_pkh_adv) = &cfg.mining_pkh_adv {
+                Some(mining_pkh_adv.clone())
+            } else {
+                None
             };
-            let Some(pkh_configs) = cfg.mining_pkh_config() else {
+
+            let Some(pkh_configs) = mining_pkh_config else {
                 enable_mining(&handle, false).await?;
 
                 if let Some(tx) = init_complete_tx {
@@ -322,7 +261,7 @@ async fn set_mining_key_advanced(
     let set_mining_key_adv = Atom::from_value(&mut set_mining_key_slab, "set-mining-key-advanced")
         .expect("Failed to create set-mining-key-advanced atom");
 
-    // Create the list of v0 (pubkey) configs
+    // Create the list of v0 (pubkey) configs (TODO remove when taking out pubkey infra)
     let mut configs_list = D(0);
     for config in configs {
         // Create the list of keys
