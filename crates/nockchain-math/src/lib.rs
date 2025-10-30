@@ -10,6 +10,7 @@ pub mod mary;
 pub mod mary_transpose;
 pub mod melt;
 pub mod noun_ext;
+pub mod p_ntt;
 pub mod poly;
 pub mod poly_ext;
 pub mod shape;
