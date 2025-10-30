@@ -142,7 +142,7 @@ mod tests {
                 mine: false,
                 mining_pkh: None,
                 mining_pkh_adv: None,
-                server: Default::default()
+                server: Default::default(),
             },
             fakenet: false,
             peer: Vec::new(),

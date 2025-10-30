@@ -813,7 +813,11 @@ impl Wallet {
         let mut slab = NounSlab::new();
 
         let names_vec = Self::parse_note_names(&names)?;
-        let recipients = recipients.iter().map(|v| &**v).map(Self::parse_single_output).collect::<Result<Vec<_>, _>>()?;
+        let recipients = recipients
+            .iter()
+            .map(|v| &**v)
+            .map(Self::parse_single_output)
+            .collect::<Result<Vec<_>, _>>()?;
 
         // Convert names to list of pairs
         let names_noun = names_vec
@@ -844,11 +848,11 @@ impl Wallet {
             let recipient_pkh = Hash::from_base58(&pkh)
                 .map_err(|err| {
                     NockAppError::from(CrownError::Unknown(format!(
-                                "Invalid output pubkey hash '{}': {}",
-                                pkh, err
+                        "Invalid output pubkey hash '{}': {}",
+                        pkh, err
                     )))
                 })?
-            .to_noun(&mut slab);
+                .to_noun(&mut slab);
             let order_noun = T(&mut slab, &[recipient_pkh, D(amount)]);
             order_nouns.push(order_noun);
         }
