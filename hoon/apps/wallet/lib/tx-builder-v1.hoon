@@ -117,6 +117,9 @@
     ::  if there is no lock noun, default to coinbase lock
     ?~  parent-lock=(pull-lock:locks:utils [u.nd name.note (some pkh)])
       [%.y coinbase-lock]
+    ::  coinbase locks have multiple predicates, which are unsupported below, but alas, we can use it regardless
+    ?:  =(u.parent-lock coinbase-lock)
+      [%.y coinbase-lock]
     ::  more than one spend condition
     ?@  -.u.parent-lock
       [%.n 'lock has multiple spend conditions, we are not supporting this at the moment']
