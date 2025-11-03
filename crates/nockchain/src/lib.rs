@@ -444,7 +444,6 @@ pub async fn init_with_kernel<J: Jammer + Send + 'static>(
     setup::poke(&mut nockapp, setup::SetupCommand::PokeSetBtcData).await?;
 
     let mining_config = cli.miner.clone();
-
     let prune_inbound = cli.prune_inbound;
 
     let server = nbx_miner::server::bind(&mining_config.server).await?;
