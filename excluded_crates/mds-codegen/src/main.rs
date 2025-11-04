@@ -191,10 +191,13 @@ impl Compiler {
         }
     }
 
-    pub fn spit_code(&mut self) -> String {
+    pub fn spit_code(&mut self, file_name: &str) -> String {
         let mut lines = vec![
-            "// generated with mds-codegen".to_string(),
-            "pub const fn generated(input: &[u32; 16]) -> [u64; 16] {".to_string(),
+            "#[allow(unused_parens)]".to_string(),
+            format!(
+                "pub const fn {file_name}(input: &[u32; 16]) -> [u64; {}] {{",
+                self.out.len()
+            ),
         ];
 
         for (i, layer) in self.layers.iter().rev().enumerate() {
@@ -250,7 +253,7 @@ fn fold_identical_exprs(outputs: &[Rc<RefCell<Circuit<u64>>>]) {
     }
 }
 
-pub fn spit_code(outputs: &[Circuit<u64>]) {
+pub fn spit_code(file_name: &str, outputs: &[Circuit<u64>]) {
     let outputs: Vec<Rc<RefCell<Circuit<u64>>>> = outputs
         .iter()
         .map(|v| Rc::new(RefCell::new(v.clone())))
@@ -260,10 +263,20 @@ pub fn spit_code(outputs: &[Circuit<u64>]) {
 
     let mut compiler = Compiler::new(outputs);
     compiler.build_layers();
-    println!("{}", compiler.spit_code());
+    println!("{}", compiler.spit_code(file_name));
 }
 
 fn main() {
     let circuit = build_recursive_cyclic_mul_circuit();
-    spit_code(&circuit[..]);
+    spit_code("generated", &circuit[..]);
+
+    // When squeezing a sponge, the first 10 elements are overwritten with new data.
+    //  Therefore, in the last iteration of the 7 TIP5 iterations, only operations that
+    //  will affect the last 6 elements of the sponge need to be performed.
+    spit_code("generated_intermediate", &circuit[10..]);
+
+    // After the last iteration of squeezing a sponge, only the first 5 elements of the sponge
+    //  remain due to truncating into DIGEST_LENGTH. Therefore, in the last iteration of the 7 TIP5
+    //  iterations, only operations that affect the first 5 elements need to be performed.
+    spit_code("generated_last", &circuit[..5]);
 }
