@@ -35,7 +35,7 @@ fn bench_p_ntt(c: &mut Criterion) {
     group.bench_function(BenchmarkId::new("p_ntt_twiddled_inplace", "65536"), |b| {
         b.iter_with_setup(
             || create_sparse_input(65536, 1023),
-            | mut input| {
+            |mut input| {
                 nockchain_math::poly_ext::p_ntt_twiddled_inplace(
                     black_box(&mut input),
                     black_box(&twiddles),
@@ -66,7 +66,7 @@ fn bench_p_ntt(c: &mut Criterion) {
                     black_box(&twiddles),
                     black_box(log_2_of_n),
                     black_box(1023),
-                    black_box(&BIT_REVERSE)
+                    black_box(&BIT_REVERSE),
                 );
             },
         );
