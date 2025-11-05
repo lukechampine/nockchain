@@ -22,6 +22,9 @@ use crate::base::*;
 #[repr(transparent)]
 pub struct Melt(pub u64);
 
+unsafe impl Send for Melt {}
+unsafe impl Sync for Melt {}
+
 impl Melt {
     pub fn inv(self) -> Self {
         self.pow(PRIME - 2)

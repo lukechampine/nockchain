@@ -209,6 +209,43 @@ pub fn permute_fixed(input: &[Melt; 10]) -> [Melt; 5] {
     scalar::permute_fixed(input)
 }
 
+#[inline(always)]
+pub fn permute_fixed_x2(input: &[Melt; 10], other_input: &[Melt; 10]) -> ([Melt; 5], [Melt; 5]) {
+    #[cfg(target_arch = "x86_64")]
+    if avx512::cpu_supported() {
+        return unsafe { avx512::permute_fixed_x2(input, other_input) };
+    }
+
+    (
+        scalar::permute_fixed(input),
+        scalar::permute_fixed(other_input),
+    )
+}
+
+#[inline(always)]
+pub fn permute_intermediate_x2(input: &mut [Melt; 16], other_input: &mut [Melt; 16]) {
+    #[cfg(target_arch = "x86_64")]
+    if avx512::cpu_supported() {
+        return unsafe { avx512::permute_intermediate_x2(input, other_input) };
+    }
+
+    scalar::permute_intermediate(input);
+    scalar::permute_intermediate(other_input);
+}
+
+#[inline(always)]
+pub fn permute_last_x2(input: [Melt; 16], other_input: [Melt; 16]) -> ([Melt; 5], [Melt; 5]) {
+    #[cfg(target_arch = "x86_64")]
+    if avx512::cpu_supported() {
+        return unsafe { avx512::permute_last_x2(input, other_input) };
+    }
+
+    (
+        scalar::permute_last(input),
+        scalar::permute_last(other_input),
+    )
+}
+
 #[cfg(all(
     target_arch = "x86_64",
     target_feature = "avx512f",

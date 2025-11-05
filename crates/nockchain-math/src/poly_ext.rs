@@ -11,6 +11,7 @@ use noun_serde::{NounDecode, NounEncode};
 use crate::belt::{binv, bpow, Belt, FieldError};
 use crate::felt::{finv_, fpow_, Felt};
 use crate::melt::Melt;
+use crate::p_ntt;
 use crate::poly::{Element, Poly, PolySlice};
 
 pub trait ElementEx:
@@ -224,10 +225,11 @@ pub fn p_ntt_inplace<T: ElementEx>(p: &mut [T], root: &T) {
     p_ntt_twiddled_inplace(p, &twiddles)
 }
 
-static BIT_REVERSE: [u32; 65536] = generate_bit_reverse_table::<65536>();
-static BIT_REVERSE_4096: [u32; 4096] = generate_bit_reverse_table::<4096>();
+pub static BIT_REVERSE: [u32; 65536] = generate_bit_reverse_table::<65536>();
+pub static BIT_REVERSE_4096: [u32; 4096] = generate_bit_reverse_table::<4096>();
 
 #[inline(never)]
+#[tracing::instrument(skip_all)]
 pub fn p_ntt_twiddled_inplace<T: ElementEx>(x: &mut [T], twiddles: &[impl AsRef<[T]>]) {
     debug_assert!(x.len() <= 65536);
 
@@ -238,7 +240,7 @@ pub fn p_ntt_twiddled_inplace<T: ElementEx>(x: &mut [T], twiddles: &[impl AsRef<
 
     let log_2_of_n = x.len().ilog2();
 
-    for k in 0..x.len() {
+    for k in 0..=last_non_zero_index {
         // While the input size of this function is capped, it is also called with smaller inputs.
         //  The same lookup table can be re-used by truncating the bit reversal to the correct
         //  number of bits
@@ -249,83 +251,18 @@ pub fn p_ntt_twiddled_inplace<T: ElementEx>(x: &mut [T], twiddles: &[impl AsRef<
     }
 
     if x.len() == 65536 && last_non_zero_index < 1024 {
-        p_ntt_twiddled_inplace_sparse(x, twiddles, log_2_of_n, last_non_zero_index, &BIT_REVERSE);
+        p_ntt::scalar::sparse(x, twiddles, log_2_of_n, last_non_zero_index, &BIT_REVERSE);
         return;
     }
 
     if x.len() == 4096 && last_non_zero_index < 512 {
-        p_ntt_twiddled_inplace_sparse(
+        p_ntt::scalar::sparse(
             x, twiddles, log_2_of_n, last_non_zero_index, &BIT_REVERSE_4096,
         );
         return;
     }
 
-    p_ntt_twiddled_inplace_dense(x, twiddles, log_2_of_n);
-}
-
-#[inline(always)]
-fn p_ntt_twiddled_inplace_dense<T: ElementEx>(
-    x: &mut [T],
-    twiddles: &[impl AsRef<[T]>],
-    log_2_of_n: u32,
-) {
-    for stage_idx in 0..log_2_of_n {
-        let twiddles = twiddles[stage_idx as usize].as_ref();
-        assert!(twiddles.len().is_power_of_two());
-        for uv in x.chunks_exact_mut(2 * twiddles.len()) {
-            let (u, v) = uv.split_at_mut(twiddles.len());
-            for (w, (u_mut, v_mut)) in twiddles.iter().copied().zip(u.iter_mut().zip(v.iter_mut()))
-            {
-                let u = *u_mut;
-                let v = *v_mut * w;
-                *u_mut = u + v;
-                *v_mut = u - v;
-            }
-        }
-    }
-}
-
-#[inline(always)]
-fn p_ntt_twiddled_inplace_sparse<T: ElementEx>(
-    x: &mut [T],
-    twiddles: &[impl AsRef<[T]>],
-    log_2_of_n: u32,
-    last_non_zero_index: usize,
-    bit_reverse: &[u32],
-) {
-    // Twiddle operations spread out non-zero values throughout the vector. However, during the first
-    //  iteration, this can be very sparse and a lot of operations can be skipped.
-    let twiddles_stage0 = twiddles[0].as_ref();
-    debug_assert_eq!(twiddles_stage0.len(), 1); // Should be [1]
-
-    for i in 0..=last_non_zero_index {
-        let i = bit_reverse[i] as usize;
-        let j = i + 1;
-
-        // Note that w = 1 for stage 0
-        let u_val = x[i];
-        let v_val = x[j];
-        x[i] = u_val + v_val;
-        x[j] = u_val - v_val;
-    }
-
-    // Process the remaining stages normally
-    for stage_idx in 1..log_2_of_n {
-        let twiddles_stage = twiddles[stage_idx as usize].as_ref();
-        for uv in x.chunks_exact_mut(2 * twiddles_stage.len()) {
-            let (u, v) = uv.split_at_mut(twiddles_stage.len());
-            for (w, (u_mut, v_mut)) in twiddles_stage
-                .iter()
-                .copied()
-                .zip(u.iter_mut().zip(v.iter_mut()))
-            {
-                let u_val = *u_mut;
-                let v_val = *v_mut * w;
-                *u_mut = u_val + v_val;
-                *v_mut = u_val - v_val;
-            }
-        }
-    }
+    p_ntt::scalar::dense(x, twiddles, log_2_of_n);
 }
 
 #[inline(never)]

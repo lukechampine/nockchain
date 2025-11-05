@@ -58,12 +58,29 @@ impl<E: ElementEx> SubstituteIter<'_, E> {
     fn reduce(self, inp: &[impl AsRef<[E]> + Send + Sync], out: &mut [E]) {
         let out_len = out.len();
         let inp_chunks = MAX_CHUNK_SIZE / out_len;
+
+        if self.muls.is_empty() {
+            return;
+        }
+
+        // Because all operations are sorted (to deduplicate them), if there is an entry with only
+        //  a scalar, it will be at the start of the operations. By explicitly handling this case,
+        //  `out.len()` multiplications and additions are skipped.
+        let mut scalar = E::zero();
+        if self.muls[0].coms.is_empty() && self.muls[0].vars.is_empty() {
+            scalar = self.muls[0].scal;
+        }
+
         let r = self
             .muls
             .into_par_iter()
             .with_min_len(128)
-            .map(|m| {
-                let operations = m
+            .filter_map(|m| {
+                if m.coms.is_empty() && m.vars.is_empty() {
+                    return None;
+                }
+
+                let result = m
                     .coms
                     .into_iter()
                     .map(|SubstituteOp { chunk, exp }| {
@@ -80,10 +97,6 @@ impl<E: ElementEx> SubstituteIter<'_, E> {
                         let var = &var[..out_len];
                         (var, exp as u64)
                     }))
-                    .collect::<Vec<_>>();
-
-                operations
-                    .into_iter()
                     .fold(PolyVec(vec![m.scal; out_len]), |mut acc, (o, exp)| {
                         debug_assert_eq!(o.len(), acc.0.len());
                         debug_assert!(o.len() % 16 == 0);
@@ -95,10 +108,12 @@ impl<E: ElementEx> SubstituteIter<'_, E> {
                             p_hadamard_inplace(a, b);
                         }
                         acc
-                    })
+                    });
+
+                Some(result)
             })
             .reduce(
-                || PolyVec(vec![E::zero(); out_len]),
+                || PolyVec(vec![scalar; out_len]),
                 |mut acc, o| {
                     padd_in_place(&mut acc.0, &o.0);
                     acc

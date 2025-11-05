@@ -14,7 +14,7 @@ use zkvm_jetpack::form::math::tip5::DIGEST_LENGTH;
 
 #[cfg(feature = "gpu")]
 use super::gpu;
-use super::three::{hash_10, hash_varlen_padded};
+use super::three::{hash_10, hash_varlen_padded, hash_varlen_padded_x2};
 use crate::engine::Engine;
 use crate::log::*;
 
@@ -138,20 +138,83 @@ impl ReduceChunkSlice<'_> {
         let out_ptr = MeltSlice(self.out.as_mut_ptr());
         let out_len = self.out.len() as u32;
         let out_off = self.out_start;
-        self.ops_fixed
-            .into_par_iter()
-            .with_min_len(1024)
-            .for_each(|op| {
+        let pair_count = self.ops_fixed.len() / 2;
+        self.ops_fixed[..pair_count * 2]
+            .par_chunks_exact(2)
+            .with_min_len(512)
+            .for_each(|pair| {
                 let out = &out_ptr;
-                op.reduce_fixed(inp_start, inp, out.0, out_len, out_off);
+                let [a, b] = [pair[0], pair[1]];
+
+                let (dig0, dig1) = nbx_tip5::tip5::permute_fixed_x2(
+                    inp[(a.source as usize - inp_start)
+                        ..((a.source as usize) + DIGEST_LENGTH * 2 - inp_start)]
+                        .try_into()
+                        .unwrap(),
+                    inp[(b.source as usize - inp_start)
+                        ..((b.source as usize) + DIGEST_LENGTH * 2 - inp_start)]
+                        .try_into()
+                        .unwrap(),
+                );
+
+                unsafe {
+                    let dest0 = a.destination as usize - out_off;
+                    let dest1 = b.destination as usize - out_off;
+                    core::slice::from_raw_parts_mut(out.0.add(dest0), DIGEST_LENGTH)
+                        .copy_from_slice(&dig0);
+                    core::slice::from_raw_parts_mut(out.0.add(dest1), DIGEST_LENGTH)
+                        .copy_from_slice(&dig1);
+                }
             });
-        self.ops_variable
-            .into_par_iter()
-            .with_min_len(1024)
-            .for_each(|op| {
+
+        // Handle odd remainder
+        self.ops_fixed[pair_count * 2..]
+            .into_iter()
+            .for_each(|op| op.reduce_fixed(inp_start, inp, out_ptr.0, out_len, out_off));
+
+        if self.ops_variable.len() <= 1024 {
+            self.ops_variable.into_iter().for_each(|op| {
                 let out = &out_ptr;
                 op.reduce(inp_start, inp, out.0, out_len, out_off);
             });
+
+            return;
+        }
+
+        self.ops_variable.par_chunks(2).for_each(|pair| {
+            let out = &out_ptr;
+
+            if pair.len() == 1 {
+                pair[0].reduce(inp_start, inp, out.0, out_len, out_off);
+                return;
+            }
+
+            let [op0, op1] = [pair[0], pair[1]];
+
+            // In the unlikely scenario that the operations have different lengths, process them
+            //  separately.
+            if op0.len != op1.len {
+                op0.reduce(inp_start, inp, out.0, out_len, out_off);
+                op1.reduce(inp_start, inp, out.0, out_len, out_off);
+                return;
+            }
+
+            let inp0 = &inp[(op0.inner.source as usize - inp_start)
+                ..((op0.inner.source + op0.len) as usize - inp_start)];
+            let inp1 = &inp[(op1.inner.source as usize - inp_start)
+                ..((op1.inner.source + op1.len) as usize - inp_start)];
+
+            let (dig0, dig1) = hash_varlen_padded_x2(inp0, inp1);
+
+            unsafe {
+                let dest0 = op0.inner.destination as usize - out_off;
+                let dest1 = op1.inner.destination as usize - out_off;
+                core::slice::from_raw_parts_mut(out.0.add(dest0), DIGEST_LENGTH)
+                    .copy_from_slice(&dig0);
+                core::slice::from_raw_parts_mut(out.0.add(dest1), DIGEST_LENGTH)
+                    .copy_from_slice(&dig1);
+            }
+        });
     }
 
     pub fn min_source(&self) -> Option<usize> {

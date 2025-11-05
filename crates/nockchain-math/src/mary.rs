@@ -4,6 +4,7 @@ use noun_serde::{NounDecode, NounDecodeError, NounEncode};
 use crate::belt::Belt;
 use crate::felt::Felt;
 use crate::handle::{finalize_mary, new_handle_mut_mary};
+use crate::mary_transpose;
 
 #[derive(Clone, PartialEq)]
 pub struct Mary {
@@ -168,6 +169,7 @@ pub fn mary_weld(a: MarySlice, b: MarySlice, res: MarySliceMut) {
 }
 
 #[inline(always)]
+#[tracing::instrument(skip_all)]
 pub fn mary_transpose(fpolys: MarySlice, offset: usize, res: &mut MarySliceMut) {
     let step = fpolys.step as usize;
     let len = fpolys.len as usize;
@@ -183,6 +185,12 @@ pub fn mary_transpose(fpolys: MarySlice, offset: usize, res: &mut MarySliceMut) 
             }
         }
     }
+}
+
+#[inline(always)]
+#[tracing::instrument(skip_all)]
+pub fn mary_transpose_1(fpolys: MarySlice, res: &mut MarySliceMut) {
+    mary_transpose::scalar::mary_transpose_offset_1_blocked::<16>(fpolys, res);
 }
 
 #[inline(always)]

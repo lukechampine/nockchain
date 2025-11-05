@@ -29,3 +29,13 @@ const_for.workspace = true
 
 [dev-dependencies]
 quickcheck.workspace = true
+criterion.workspace = true
+rand.workspace = true
+
+[[bench]]
+name = "mary_transpose"
+harness = false
+
+[[bench]]
+name = "p_ntt"
+harness = false
