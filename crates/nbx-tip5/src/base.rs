@@ -1,3 +1,5 @@
+use std::simd::prelude::*;
+
 pub const PRIME: u64 = 18446744069414584321;
 pub const PRIME_PRIME: u64 = PRIME - 2;
 pub const PRIME_128: u128 = 18446744069414584321;
@@ -91,6 +93,84 @@ pub const fn mont_reduction(x: u128) -> u64 {
 #[inline(always)]
 pub const fn montiply(a: u64, b: u64) -> u64 {
     mont_reduction((a as u128) * (b as u128))
+}
+
+#[inline(always)]
+pub fn montiply_simd_x8(a: u64x8, b: u64x8) -> u64x8 {
+    let a_lo = a & u64x8::splat(0xFFFFFFFF);
+    let a_hi = a >> u64x8::splat(32);
+    let b_lo = b & u64x8::splat(0xFFFFFFFF);
+    let b_hi = b >> u64x8::splat(32);
+
+    let p0 = a_lo * b_lo;
+    let p1 = a_lo * b_hi;
+    let p2 = a_hi * b_lo;
+    let p3 = a_hi * b_hi;
+
+    let p1_lo = p1 & u64x8::splat(0xFFFFFFFF);
+    let p1_hi = p1 >> u64x8::splat(32);
+    let p2_lo = p2 & u64x8::splat(0xFFFFFFFF);
+    let p2_hi = p2 >> u64x8::splat(32);
+
+    let mid = p1_lo + p2_lo + (p0 >> u64x8::splat(32));
+    let x1 = (mid << u64x8::splat(32)) | (p0 & u64x8::splat(0xFFFFFFFF));
+    let x2 = p3 + p1_hi + p2_hi + (mid >> u64x8::splat(32));
+
+    mont_reduction_simd_x8(x1, x2)
+}
+
+#[inline(always)]
+pub fn mont_reduction_simd_x8(x1: u64x8, x2: u64x8) -> u64x8 {
+    let x1_shl32 = x1 << u64x8::splat(32);
+    let a = x1 + x1_shl32;
+    let e = a.simd_lt(x1) | a.simd_lt(x1_shl32);
+
+    let a_shr32 = a >> u64x8::splat(32);
+    let b = a - a_shr32 - e.select(u64x8::splat(1), u64x8::splat(0));
+
+    let r = x2 - b;
+    let c = x2.simd_lt(b);
+
+    r - (u64x8::splat(1 + !PRIME) * c.select(u64x8::splat(1), u64x8::splat(0)))
+}
+
+#[inline(always)]
+pub fn montiply_simd_x2(a: u64x2, b: u64x2) -> u64x2 {
+    let a_lo = a & u64x2::splat(0xFFFFFFFF);
+    let a_hi = a >> u64x2::splat(32);
+    let b_lo = b & u64x2::splat(0xFFFFFFFF);
+    let b_hi = b >> u64x2::splat(32);
+
+    let p0 = a_lo * b_lo;
+    let p1 = a_lo * b_hi;
+    let p2 = a_hi * b_lo;
+    let p3 = a_hi * b_hi;
+
+    let p1_lo = p1 & u64x2::splat(0xFFFFFFFF);
+    let p1_hi = p1 >> u64x2::splat(32);
+    let p2_lo = p2 & u64x2::splat(0xFFFFFFFF);
+    let p2_hi = p2 >> u64x2::splat(32);
+
+    let mid = p1_lo + p2_lo + (p0 >> u64x2::splat(32));
+    let x1 = (mid << u64x2::splat(32)) | (p0 & u64x2::splat(0xFFFFFFFF));
+    let x2 = p3 + p1_hi + p2_hi + (mid >> u64x2::splat(32));
+
+    mont_reduction_simd_x2(x1, x2)
+}
+
+#[inline(always)]
+pub fn mont_reduction_simd_x2(x1: u64x2, x2: u64x2) -> u64x2 {
+    let x1_shl32 = x1 << u64x2::splat(32);
+    let a = x1 + x1_shl32;
+    let e = a.simd_lt(x1) | a.simd_lt(x1_shl32);
+
+    let a_shr32 = a >> u64x2::splat(32);
+    let b = a - a_shr32 - e.select(u64x2::splat(1), u64x2::splat(0));
+
+    let r = x2 - b;
+    let c = x2.simd_lt(b);
+
+    r - (u64x2::splat(1 + !PRIME) * c.select(u64x2::splat(1), u64x2::splat(0)))
 }
 
 // ::  +montify: transform to Montgomery space, i.e. compute x•r = xr mod p

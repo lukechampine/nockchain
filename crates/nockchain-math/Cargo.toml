@@ -39,3 +39,7 @@ harness = false
 [[bench]]
 name = "p_ntt"
 harness = false
+
+[[bench]]
+name = "hadamard"
+harness = false

@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use nbx_tip5::melt::Melt;
+use nockchain_math::hadamard::p_hadamard_inplace;
 use nockchain_math::poly::*;
 use nockchain_math::poly_ext::*;
 use rayon::prelude::*;

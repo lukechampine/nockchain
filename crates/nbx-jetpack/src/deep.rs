@@ -3,9 +3,10 @@ use std::sync::Arc;
 use nbx_tip5::base::binv;
 use nockchain_math::belt::Belt;
 use nockchain_math::felt::Felt;
+use nockchain_math::hadamard::p_hadamard_inplace;
 use nockchain_math::poly::*;
 use nockchain_math::poly_ext::{
-    p_fft_twiddles, p_hadamard_inplace, p_ntt_twiddled, p_ntt_twiddles, pscal_inplace, ElementEx,
+    p_fft_twiddles, p_ntt_twiddled, p_ntt_twiddles, pscal_inplace, ElementEx,
 };
 use rayon::prelude::*;
 
