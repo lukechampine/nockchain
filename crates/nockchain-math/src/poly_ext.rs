@@ -453,6 +453,7 @@ pub fn p_shift<T: ElementEx>(poly_a: &[T], pelem_b: &T, poly_res: &mut [T]) {
 
 #[inline(always)]
 pub fn p_shift_nzero<T: ElementEx>(poly_a: &[T], pelem_b: &T, poly_res: &mut [T]) {
+    assert!(poly_res.len() >= poly_a.len());
     let mut pelem_power: T = T::one();
 
     for i in 0..poly_a.len() {
