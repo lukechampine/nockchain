@@ -48,7 +48,12 @@ pub fn mary_transpose_offset_1_blocked<const TILE: usize>(
 
             for i in ii..i_end {
                 for j in jj..j_end {
-                    res.dat[i * num_rows + j] = fpolys.dat[j * num_cols + i];
+                    // It would be great if we the bounds checks here could be optimized out, and we would not need unsafe.
+                    // This improves performance by about 6%.
+                    unsafe {
+                        *res.dat.get_unchecked_mut(i * num_rows + j) =
+                            *fpolys.dat.get_unchecked(j * num_cols + i);
+                    }
                 }
             }
         }
