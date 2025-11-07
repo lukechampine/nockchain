@@ -56,46 +56,6 @@ pub fn permute_fixed(input: &[Melt; 10]) -> [Melt; 5] {
 }
 
 #[inline(always)]
-const fn rcs_layer(sponge: &mut [Melt; 16], round_num: usize) {
-    let b = linear_layer(sponge);
-
-    const_for!(j in 0..STATE_SIZE => {
-        let r_cons = ROUND_CONSTANTS2[round_num * STATE_SIZE + j];
-        sponge[j] = Melt(badd(r_cons.0, b[j].0));
-    });
-}
-
-#[inline(always)]
-const fn rcs_layer_intermediate_permute(sponge: &mut [Melt; 16], round_num: usize) {
-    let b = linear_layer_intermediate(sponge);
-
-    // Because the first 10 elements will be overwritten in the next step, there is no need to add them
-    const_for!(j in 10..STATE_SIZE => {
-        let r_cons = ROUND_CONSTANTS2[round_num * STATE_SIZE + j];
-        sponge[j] = Melt(badd(r_cons.0, b[j].0));
-    });
-}
-
-#[inline(always)]
-const fn rcs_layer_last_permute(sponge: [Melt; 16]) -> [Melt; 5] {
-    let mut sponge = sponge;
-    let b = linear_layer_last(&mut sponge);
-
-    let mut output = [Melt(0); 5];
-
-    const_for!(i in 0..5 => {
-        output[i] = Melt(
-            badd(
-                ROUND_CONSTANTS2[(NUM_ROUNDS - 1) * STATE_SIZE + i].0,
-                b[i].0,
-            )
-        );
-    });
-
-    output
-}
-
-#[inline(always)]
 const fn sbox_layer(state: &[Melt; STATE_SIZE]) -> [Melt; STATE_SIZE] {
     let mut res: [Melt; STATE_SIZE] = [Melt(0); STATE_SIZE];
 
@@ -160,9 +120,7 @@ const fn sbox_layer_fixed(input: &[Melt; 10]) -> [Melt; STATE_SIZE] {
 }
 
 #[inline(always)]
-const fn linear_layer(state: &[Melt; 16]) -> [Melt; 16] {
-    let mut result = [Melt(0u64); 16];
-
+const fn rcs_layer(state: &mut [Melt; 16], round_num: usize) {
     let mut lo: [u32; STATE_SIZE] = [0; STATE_SIZE];
     let mut hi: [u32; STATE_SIZE] = [0; STATE_SIZE];
 
@@ -186,16 +144,14 @@ const fn linear_layer(state: &[Melt; 16]) -> [Melt; 16] {
         let ret = s_lo.wrapping_add(d);
         // NOTE: this vectorizes much better than overflow flag
         let o2 = s_lo > ret || d > ret;
-        result[r].0 = ret + 0xffff_ffffu64 * ((o1 as u64) + (o2 as u64));
-    });
+        let linear_result = ret + 0xffff_ffffu64 * ((o1 as u64) + (o2 as u64));
 
-    result
+        state[r].0 = badd(ROUND_CONSTANTS2[round_num * STATE_SIZE + r].0, linear_result);
+    });
 }
 
 #[inline(always)]
-const fn linear_layer_intermediate(state: &[Melt; 16]) -> [Melt; 16] {
-    let mut result = [Melt(0u64); 16];
-
+const fn rcs_layer_intermediate_permute(state: &mut [Melt; 16], round_num: usize) {
     let mut lo: [u32; STATE_SIZE] = [0; STATE_SIZE];
     let mut hi: [u32; STATE_SIZE] = [0; STATE_SIZE];
 
@@ -208,6 +164,7 @@ const fn linear_layer_intermediate(state: &[Melt; 16]) -> [Melt; 16] {
     let lo = mds_generated::generated_intermediate(&lo);
     let hi = mds_generated::generated_intermediate(&hi);
 
+    // Because the first 10 elements will be overwritten in the next step, there is no need to compute them
     const_for!(r in 10..STATE_SIZE => {
         let a = lo[r - 10] >> 4;
         let b = hi[r - 10] << 28;
@@ -219,14 +176,14 @@ const fn linear_layer_intermediate(state: &[Melt; 16]) -> [Melt; 16] {
         let ret = s_lo.wrapping_add(d);
         // NOTE: this vectorizes much better than overflow flag
         let o2 = s_lo > ret || d > ret;
-        result[r].0 = ret + 0xffff_ffffu64 * ((o1 as u64) + (o2 as u64));
-    });
+        let linear_result =  ret + 0xffff_ffffu64 * ((o1 as u64) + (o2 as u64));
 
-    result
+        state[r].0 = badd(ROUND_CONSTANTS2[round_num * STATE_SIZE + r].0, linear_result);
+    });
 }
 
 #[inline(always)]
-const fn linear_layer_last(state: &[Melt; 16]) -> [Melt; 5] {
+const fn rcs_layer_last_permute(state: [Melt; 16]) -> [Melt; 5] {
     let mut lo: [u32; STATE_SIZE] = [0; STATE_SIZE];
     let mut hi: [u32; STATE_SIZE] = [0; STATE_SIZE];
 
@@ -251,7 +208,11 @@ const fn linear_layer_last(state: &[Melt; 16]) -> [Melt; 5] {
         let ret = s_lo.wrapping_add(d);
         // NOTE: this vectorizes much better than overflow flag
         let o2 = s_lo > ret || d > ret;
-        result[r].0 = ret + 0xffff_ffffu64 * ((o1 as u64) + (o2 as u64));
+        let linear_result = ret + 0xffff_ffffu64 * ((o1 as u64) + (o2 as u64));
+        result[r].0 = badd(
+            ROUND_CONSTANTS2[(NUM_ROUNDS - 1) * STATE_SIZE + r].0,
+            linear_result
+        );
     });
 
     result

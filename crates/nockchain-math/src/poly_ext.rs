@@ -216,13 +216,17 @@ pub fn p_ntt<T: ElementEx>(p: Vec<T>, root: &T) -> Vec<T> {
 }
 
 #[inline(always)]
-pub fn p_ntt_inplace<T: ElementEx>(p: &mut [T], root: &T) {
+pub fn p_ntt_with_last_non_zero_index<T: ElementEx>(
+    p: Vec<T>,
+    root: &T,
+    last_non_zero_index: usize,
+) -> Vec<T> {
     if p.len() == 1 {
-        return;
+        return p;
     }
 
     let twiddles = p_ntt_twiddles(p.len(), root);
-    p_ntt_twiddled_inplace(p, &twiddles)
+    p_ntt_twiddled_with_last_non_zero_index(p, &twiddles, last_non_zero_index)
 }
 
 pub static BIT_REVERSE: [u32; 65536] = generate_bit_reverse_table::<65536>();
@@ -230,10 +234,17 @@ pub static BIT_REVERSE_4096: [u32; 4096] = generate_bit_reverse_table::<4096>();
 
 #[inline(never)]
 #[tracing::instrument(skip_all)]
-pub fn p_ntt_twiddled_inplace<T: ElementEx>(x: &mut [T], twiddles: &[impl AsRef<[T]>]) {
+pub fn p_ntt_twiddled_inplace<T: ElementEx>(
+    x: &mut [T],
+    twiddles: &[impl AsRef<[T]>],
+    last_non_zero_index: Option<usize>,
+) {
     debug_assert!(x.len() <= 65536);
 
-    let Some(last_non_zero_index) = x.iter().rposition(|e| !e.is_zero()) else {
+    let Some(last_non_zero_index) = x[..last_non_zero_index.unwrap_or_else(|| x.len())]
+        .iter()
+        .rposition(|e| !e.is_zero())
+    else {
         // When all elements are zero, the twiddles won't change anything.
         return;
     };
@@ -267,7 +278,17 @@ pub fn p_ntt_twiddled_inplace<T: ElementEx>(x: &mut [T], twiddles: &[impl AsRef<
 
 #[inline(never)]
 pub fn p_ntt_twiddled<T: ElementEx>(mut x: Vec<T>, twiddles: &[impl AsRef<[T]>]) -> Vec<T> {
-    p_ntt_twiddled_inplace(&mut x, twiddles);
+    p_ntt_twiddled_inplace(&mut x, twiddles, None);
+    x
+}
+
+#[inline(never)]
+pub fn p_ntt_twiddled_with_last_non_zero_index<T: ElementEx>(
+    mut x: Vec<T>,
+    twiddles: &[impl AsRef<[T]>],
+    last_non_zero_index: usize,
+) -> Vec<T> {
+    p_ntt_twiddled_inplace(&mut x, twiddles, Some(last_non_zero_index));
     x
 }
 
@@ -485,18 +506,7 @@ pub fn p_coseword<T: ElementEx>(bp: &[T], offset: &T, order: u32, root: &T) -> V
 
     p_shift_nzero(bp, offset, &mut res);
 
-    p_ntt(res, root)
-}
-
-#[inline(always)]
-#[tracing::instrument(skip_all)]
-pub fn p_coseword_inplace<T: ElementEx>(bp: &[T], offset: &T, order: u32, root: &T, res: &mut [T]) {
-    // shift
-    let len_res: u32 = order;
-    assert_eq!(len_res as usize, res.len());
-    p_shift(bp, offset, res);
-
-    p_ntt_inplace(res, root);
+    p_ntt_with_last_non_zero_index(res, root, bp.len())
 }
 
 #[inline(always)]

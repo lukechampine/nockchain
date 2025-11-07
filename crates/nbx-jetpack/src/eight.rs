@@ -730,10 +730,12 @@ pub fn precompute_ntts(stack: &mut NockStack, inp: Noun) -> Result {
         let p = snag_as_poly_mary(polys, i as usize);
         let mut p = PolyVec(p.0.to_vec());
 
+        let last_non_zero_index = p.0.len();
+
         // =/  fft=bpoly
         //   (bp-fft (~(zero-extend bop p) (sub new-len len.p)))
         p.0.resize(new_len, Belt(0));
-        let fft = p_ntt_twiddled(p.0, &twiddles);
+        let fft = p_ntt_twiddled_with_last_non_zero_index(p.0, &twiddles, last_non_zero_index);
 
         // ?~  acc  (some fft)
         // (some (~(weld bop u.acc) fft))

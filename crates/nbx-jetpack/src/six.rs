@@ -355,7 +355,7 @@ pub fn prove_commit_impl(
             //   ::=/  eval-point=felt  (fdiv alpha (fpow omega i))
             //   (fpeval (fp-ifft coset) eval-point)
             let mut icoset = coset.0.to_vec();
-            p_ntt_twiddled_inplace(&mut icoset, &twiddles);
+            p_ntt_twiddled_inplace(&mut icoset, &twiddles, None);
             pscal_inplace(inv_len, &mut icoset);
             let evaled = peval(PolySlice(&icoset), eval_point);
             codeword.0[i] = evaled;
