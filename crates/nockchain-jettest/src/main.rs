@@ -66,7 +66,6 @@ pub enum Mode {
     GpuTest(GpuTest),
 }
 
-
 #[cfg(feature = "gpu")]
 #[derive(Subcommand, Debug, Clone)]
 pub enum GpuTest {
