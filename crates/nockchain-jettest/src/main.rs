@@ -61,6 +61,137 @@ unsafe impl Sync for SendSlab {}
 #[derive(Subcommand, Debug, Clone)]
 pub enum Mode {
     Test(Test),
+    #[cfg(feature = "gpu")]
+    #[command(subcommand)]
+    GpuTest(GpuTest),
+}
+
+
+#[cfg(feature = "gpu")]
+#[derive(Subcommand, Debug, Clone)]
+pub enum GpuTest {
+    Hash,
+    Sub {
+        #[arg(help = "path to mp_substitute_ultra subject.jam")]
+        mpsub_sam: String,
+    },
+    Codewords {
+        #[arg(help = "path to mp_substitute_ultra subject.jam")]
+        codeword_sam: String,
+    },
+}
+
+#[cfg(feature = "gpu")]
+impl GpuTest {
+    async fn run(self, _: Cli) -> Result<()> {
+        use std::collections::BTreeMap;
+        use std::time::Instant;
+
+        use anyhow::anyhow;
+        use nbx_jetpack::codewords::CodewordEngine;
+        use nbx_jetpack::substitute::SubstituteEngine;
+        use nbx_jetpack::{compute_table_polys, mp_substitute_ultra_impl};
+        use nockvm::jets::util::slot;
+        use zkvm_jetpack::form::belt::*;
+        use zkvm_jetpack::form::felt::*;
+        use zkvm_jetpack::form::mary::*;
+        use zkvm_jetpack::form::melt::*;
+        use zkvm_jetpack::form::noun_ext::NounMathExt;
+        use zkvm_jetpack::form::poly::*;
+        use zkvm_jetpack::form::structs::{HoonList, HoonMapIter};
+
+        gpu::GpuRegistry::builder()
+            .add_gpu(None, 0, gpu::DEFAULT_GPU_QUEUE_SIZE)
+            .unwrap()
+            .build()
+            .unwrap();
+
+        match self {
+            Self::Hash => Ok(nbx_jetpack::gpu::gpu_test().unwrap()),
+            Self::Sub { mpsub_sam } => {
+                let subject = load_jam(mpsub_sam)?;
+                let subject = *unsafe { subject.root() };
+
+                let inp = slot(subject, 6).unwrap();
+
+                let [p, trace_evals, height, chals, dyns] = inp.uncell()?;
+
+                let Ok(trace_evals) = BPolySlice::try_from(trace_evals) else {
+                    return Err(anyhow!("Can't parse trace_evals"));
+                };
+                let trace_evals: BPolyVec = PolyVec(trace_evals.0.into());
+                let trace_evals: MPolyVec = trace_evals.into();
+
+                let height = height.as_atom()?.as_u64()?;
+                let Ok(chals) = BPolySlice::try_from(chals) else {
+                    return Err(anyhow!("Can't parse chals"));
+                };
+
+                let Ok(dyns) = BPolySlice::try_from(dyns) else {
+                    return Err(anyhow!("Can't parse dyns"));
+                };
+
+                let mut engine = SubstituteEngine::new(height);
+                mp_substitute_ultra_impl::<Melt>(
+                    &mut engine,
+                    0,
+                    p,
+                    (&trace_evals).into(),
+                    chals,
+                    dyns,
+                )
+                .unwrap();
+                nbx_jetpack::gpu::gpu_sub_test(engine).unwrap();
+
+                Ok(())
+            }
+            Self::Codewords { codeword_sam } => {
+                let subject = load_jam(codeword_sam)?;
+                let subject = *unsafe { subject.root() };
+
+                let sam = slot(subject, 6).unwrap();
+
+                let [table_marys, fri_domain_len, total_cols] = sam.uncell()?;
+                let mut table_marys_vec = vec![];
+                for m in HoonList::try_from(table_marys).ok().into_iter().flatten() {
+                    let ma = MarySlice::try_from(m).unwrap();
+                    table_marys_vec.push(ma);
+                }
+                let fri_domain_len = fri_domain_len.as_atom()?.as_u64()? as u32;
+                let total_cols = total_cols.as_atom()?.as_u64()?;
+                // compute-table-polys
+                let table_polys_vec = compute_table_polys(&table_marys_vec);
+                let table_polys = table_polys_vec
+                    .iter()
+                    .map(MarySlice::from)
+                    .collect::<Vec<_>>();
+                let engine = CodewordEngine::new(table_polys, fri_domain_len, total_cols);
+                let t = Instant::now();
+                let (codeword_array, height, mh) =
+                    engine.clone().reduce_gpu(gpu::get_available_gpu().unwrap());
+                println!("{}", codeword_array.dat.len());
+                println!("{:?} {:?}", &codeword_array.dat[..10], mh.h);
+                std::fs::write("gpu.txt", format!("{:#?}", &codeword_array.dat)).ok();
+                println!(
+                    "GPU: {:.02} {height} | {} {}",
+                    t.elapsed().as_secs_f32(),
+                    codeword_array.step,
+                    codeword_array.len
+                );
+                let (codeword_array, height, mh) = engine.clone().reduce_cpu();
+                println!("{:?} {:?}", &codeword_array.dat[..10], mh.h);
+                println!(
+                    "CPU: {:.02} {height} | {} {}",
+                    t.elapsed().as_secs_f32(),
+                    codeword_array.step,
+                    codeword_array.len
+                );
+                std::fs::write("cpu.txt", format!("{:#?}", &codeword_array.dat)).ok();
+
+                Ok(())
+            }
+        }
+    }
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -281,5 +412,7 @@ async fn main() -> Result<()> {
 
     match cli.mode {
         Mode::Test(p) => p.run(cli.nockapp_cli).await,
+        #[cfg(feature = "gpu")]
+        Mode::GpuTest(p) => p.run(cli.nockapp_cli).await,
     }
 }
