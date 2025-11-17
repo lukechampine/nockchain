@@ -49,8 +49,57 @@ fn build_recursive_cyclic_mul_circuit() -> [Circuit<u64>; 16] {
 fn fmt_node_id(id: usize) -> String {
     format!("n_{id}")
 }
+
 fn fmt_input(i: usize) -> String {
     format!("(input[{i}] as u64)")
+}
+
+fn fmt_node_id_simd(id: usize) -> String {
+    format!("n_{id}_simd")
+}
+
+fn fmt_input_simd(i: usize, _lanes: usize) -> String {
+    format!("input_{i}_simd")
+}
+
+fn generate_input_loading(
+    outputs: &[Rc<RefCell<Circuit<u64>>>],
+    lanes: usize,
+    simd_type: &str,
+) -> Vec<String> {
+    let mut inputs_used = BTreeSet::new();
+    let mut stack = outputs.to_vec();
+
+    while let Some(erc) = stack.pop() {
+        let e = erc.borrow();
+        match &e.expression {
+            CircuitExpression::Input(i) => {
+                inputs_used.insert(*i);
+            }
+            CircuitExpression::BinaryOperation(_, a, b) => {
+                stack.push(a.clone());
+                stack.push(b.clone());
+            }
+            _ => {}
+        }
+    }
+
+    let mut lines = vec![];
+    for i in inputs_used {
+        let load_expr = match lanes {
+            2 => format!("{simd_type}::from_array([input[0][{i}] as u64, input[1][{i}] as u64])"),
+            4 => format!(
+                "{simd_type}::from_array([input[0][{i}] as u64, input[1][{i}] as u64, input[2][{i}] as u64, input[3][{i}] as u64])"
+            ),
+            8 => format!(
+                "{simd_type}::from_array([input[0][{i}] as u64, input[1][{i}] as u64, input[2][{i}] as u64, input[3][{i}] as u64, input[4][{i}] as u64, input[5][{i}] as u64, input[6][{i}] as u64, input[7][{i}] as u64])"
+            ),
+            _ => panic!("Unsupported lane count: {}", lanes),
+        };
+        lines.push(format!("    let input_{i}_simd = {load_expr};"));
+    }
+
+    lines
 }
 
 /// Count *uses by parents* for each node across all requested outputs.
@@ -110,6 +159,40 @@ fn expand_expr(e: &Circuit<u64>, uses: &BTreeMap<usize, usize>) -> String {
     }
 }
 
+fn expand_expr_simd(
+    e: &Circuit<u64>,
+    uses: &BTreeMap<usize, usize>,
+    lanes: usize,
+    simd_type: &str,
+) -> String {
+    match &e.expression {
+        CircuitExpression::BinaryOperation(o, a, b) => {
+            let a = a.borrow();
+            let b = b.borrow();
+            let a = if uses.contains_key(&a.id) {
+                fmt_node_id_simd(a.id)
+            } else {
+                expand_expr_simd(&a, uses, lanes, simd_type)
+            };
+            let b = if uses.contains_key(&b.id) {
+                fmt_node_id_simd(b.id)
+            } else {
+                expand_expr_simd(&b, uses, lanes, simd_type)
+            };
+            let o = match o {
+                BinOp::Add => "+",
+                BinOp::Sub => "-",
+                BinOp::Mul => "*",
+            };
+            format!("({a} {o} {b})")
+        }
+        CircuitExpression::Input(i) => fmt_input_simd(*i, lanes),
+        CircuitExpression::Constant(c) => {
+            format!("{simd_type}::splat(0x{c:x}u64)")
+        }
+    }
+}
+
 struct DeclLayer {
     exprs: Vec<Rc<RefCell<Circuit<u64>>>>,
 }
@@ -123,6 +206,25 @@ impl DeclLayer {
                 "{indent}let {} = {};",
                 fmt_node_id(e.id),
                 expand_expr(&e, uses)
+            ));
+        }
+        out
+    }
+
+    pub fn spit_code_simd(
+        &self,
+        uses: &BTreeMap<usize, usize>,
+        indent: &str,
+        lanes: usize,
+        simd_type: &str,
+    ) -> Vec<String> {
+        let mut out = vec![];
+        for e in &self.exprs {
+            let e = e.borrow();
+            out.push(format!(
+                "{indent}let {} = {};",
+                fmt_node_id_simd(e.id),
+                expand_expr_simd(&e, uses, lanes, simd_type)
             ));
         }
         out
@@ -215,6 +317,47 @@ impl Compiler {
         lines.push("}".to_string());
         lines.join("\n")
     }
+
+    pub fn spit_code_simd(&mut self, file_name: &str, lanes: usize) -> String {
+        let simd_type = match lanes {
+            2 => "u64x2",
+            4 => "u64x4",
+            8 => "u64x8",
+            _ => panic!("Unsupported lane count: {}", lanes),
+        };
+
+        let mut lines = vec![
+            "".to_string(),
+            "#[allow(unused_parens)]".to_string(),
+            "#[rustfmt::skip]".to_string(),
+            format!(
+                "pub fn {file_name}_simd_x{lanes}(input: &[[u32; 16]; {lanes}]) -> [{simd_type}; {}] {{",
+                self.out.len()
+            ),
+        ];
+
+        // Pre-load all inputs
+        lines.push("    // Load all inputs into SIMD registers".to_string());
+        lines.extend(generate_input_loading(&self.out, lanes, simd_type));
+        lines.push("".to_string());
+
+        for (i, layer) in self.layers.iter().rev().enumerate() {
+            lines.push(format!("    // layer {i}"));
+            lines.extend(layer.spit_code_simd(&self.uses, "    ", lanes, simd_type));
+        }
+
+        lines.push("    // output".to_string());
+        lines.push("    [".to_string());
+        for e in &self.out {
+            lines.push(format!(
+                "        {},",
+                expand_expr_simd(&e.borrow(), &self.uses, lanes, simd_type)
+            ));
+        }
+        lines.push("    ]".to_string());
+        lines.push("}".to_string());
+        lines.join("\n")
+    }
 }
 
 fn fold_identical_exprs(outputs: &[Rc<RefCell<Circuit<u64>>>]) {
@@ -263,10 +406,23 @@ pub fn spit_code(file_name: &str, outputs: &[Circuit<u64>]) {
 
     let mut compiler = Compiler::new(outputs);
     compiler.build_layers();
+
+    // Generate scalar version
+    println!("// ===== SCALAR VERSION =====");
     println!("{}", compiler.spit_code(file_name));
+    println!();
+
+    // Generate SIMD versions
+    for lanes in [2, 4, 8] {
+        println!("// ===== SIMD VERSION (x{} lanes) =====", lanes);
+        println!("{}", compiler.spit_code_simd(file_name, lanes));
+        println!();
+    }
 }
 
 fn main() {
+    println!("use std::simd::*;");
+
     let circuit = build_recursive_cyclic_mul_circuit();
     spit_code("generated", &circuit[..]);
 

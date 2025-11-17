@@ -74,11 +74,39 @@ fn bench_p_ntt(c: &mut Criterion) {
         );
     });
 
+    group.bench_function(BenchmarkId::new("dense simd_x8", "65536"), |b| {
+        b.iter_with_setup(
+            || create_sparse_test_data(65536, 1023),
+            |(log_2_of_n, mut input)| {
+                nockchain_math::p_ntt::simd::dense_x8(
+                    black_box(&mut input),
+                    black_box(&twiddles),
+                    black_box(log_2_of_n),
+                );
+            },
+        );
+    });
+
     group.bench_function(BenchmarkId::new("sparse", "65536"), |b| {
         b.iter_with_setup(
             || create_sparse_test_data(65536, 1023),
             |(log_2_of_n, mut input)| {
                 nockchain_math::p_ntt::scalar::sparse(
+                    black_box(&mut input),
+                    black_box(&twiddles),
+                    black_box(log_2_of_n),
+                    black_box(1023),
+                    black_box(&BIT_REVERSE),
+                );
+            },
+        );
+    });
+
+    group.bench_function(BenchmarkId::new("sparse simd_x8", "65536"), |b| {
+        b.iter_with_setup(
+            || create_sparse_test_data(65536, 1023),
+            |(log_2_of_n, mut input)| {
+                nockchain_math::p_ntt::simd::sparse_x8(
                     black_box(&mut input),
                     black_box(&twiddles),
                     black_box(log_2_of_n),

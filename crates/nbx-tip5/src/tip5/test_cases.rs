@@ -1,5 +1,93 @@
 use crate::melt::Melt;
 
+// Helper functions to reduce boilerplate
+pub fn get_instance(counter: usize) -> [Melt; 16] {
+    INSTANCES[counter % INSTANCES.len()]
+}
+
+pub fn get_instances_x2(counter: usize) -> ([Melt; 16], [Melt; 16]) {
+    (
+        INSTANCES[counter % INSTANCES.len()],
+        INSTANCES[(counter + 1) % INSTANCES.len()],
+    )
+}
+
+pub fn get_instances_x8(counter: usize) -> [[Melt; 16]; 8] {
+    [
+        INSTANCES[counter % INSTANCES.len()],
+        INSTANCES[(counter + 1) % INSTANCES.len()],
+        INSTANCES[(counter + 2) % INSTANCES.len()],
+        INSTANCES[(counter + 3) % INSTANCES.len()],
+        INSTANCES[(counter + 4) % INSTANCES.len()],
+        INSTANCES[(counter + 5) % INSTANCES.len()],
+        INSTANCES[(counter + 6) % INSTANCES.len()],
+        INSTANCES[(counter + 7) % INSTANCES.len()],
+    ]
+}
+
+pub fn get_fixed_instance(counter: usize) -> [Melt; 10] {
+    INSTANCES[counter % INSTANCES.len()][..10]
+        .try_into()
+        .unwrap()
+}
+
+pub fn get_fixed_instances_x2(counter: usize) -> ([Melt; 10], [Melt; 10]) {
+    (
+        INSTANCES[counter % INSTANCES.len()][..10]
+            .try_into()
+            .unwrap(),
+        INSTANCES[(counter + 1) % INSTANCES.len()][..10]
+            .try_into()
+            .unwrap(),
+    )
+}
+
+pub fn get_fixed_instances_x8(counter: usize) -> [[Melt; 10]; 8] {
+    [
+        INSTANCES[counter % INSTANCES.len()][..10]
+            .try_into()
+            .unwrap(),
+        INSTANCES[(counter + 1) % INSTANCES.len()][..10]
+            .try_into()
+            .unwrap(),
+        INSTANCES[(counter + 2) % INSTANCES.len()][..10]
+            .try_into()
+            .unwrap(),
+        INSTANCES[(counter + 3) % INSTANCES.len()][..10]
+            .try_into()
+            .unwrap(),
+        INSTANCES[(counter + 4) % INSTANCES.len()][..10]
+            .try_into()
+            .unwrap(),
+        INSTANCES[(counter + 5) % INSTANCES.len()][..10]
+            .try_into()
+            .unwrap(),
+        INSTANCES[(counter + 6) % INSTANCES.len()][..10]
+            .try_into()
+            .unwrap(),
+        INSTANCES[(counter + 7) % INSTANCES.len()][..10]
+            .try_into()
+            .unwrap(),
+    ]
+}
+
+pub fn get_instances_x8_split(counter: usize) -> ([[Melt; 16]; 4], [[Melt; 16]; 4]) {
+    (
+        [
+            INSTANCES[counter % INSTANCES.len()],
+            INSTANCES[(counter + 2) % INSTANCES.len()],
+            INSTANCES[(counter + 4) % INSTANCES.len()],
+            INSTANCES[(counter + 6) % INSTANCES.len()],
+        ],
+        [
+            INSTANCES[(counter + 1) % INSTANCES.len()],
+            INSTANCES[(counter + 3) % INSTANCES.len()],
+            INSTANCES[(counter + 5) % INSTANCES.len()],
+            INSTANCES[(counter + 7) % INSTANCES.len()],
+        ],
+    )
+}
+
 pub const INSTANCES: [[Melt; 16]; 40] = [
     [
         Melt(0),

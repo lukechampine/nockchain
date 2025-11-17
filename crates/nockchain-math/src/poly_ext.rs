@@ -262,18 +262,18 @@ pub fn p_ntt_twiddled_inplace<T: ElementEx>(
     }
 
     if x.len() == 65536 && last_non_zero_index < 1024 {
-        p_ntt::scalar::sparse(x, twiddles, log_2_of_n, last_non_zero_index, &BIT_REVERSE);
+        p_ntt::sparse(x, twiddles, log_2_of_n, last_non_zero_index, &BIT_REVERSE);
         return;
     }
 
     if x.len() == 4096 && last_non_zero_index < 512 {
-        p_ntt::scalar::sparse(
+        p_ntt::sparse(
             x, twiddles, log_2_of_n, last_non_zero_index, &BIT_REVERSE_4096,
         );
         return;
     }
 
-    p_ntt::scalar::dense(x, twiddles, log_2_of_n);
+    p_ntt::dense(x, twiddles, log_2_of_n);
 }
 
 #[inline(never)]
@@ -504,9 +504,49 @@ pub fn p_coseword<T: ElementEx>(bp: &[T], offset: &T, order: u32, root: &T) -> V
         return res;
     }
 
-    p_shift_nzero(bp, offset, &mut res);
+    let last_non_zero_index = bp.iter().rposition(|e| !e.is_zero()).unwrap_or(0);
 
-    p_ntt_with_last_non_zero_index(res, root, bp.len())
+    let twiddles = p_ntt_twiddles(len_res as usize, root);
+    p_ntt_with_shift(bp, offset, &mut res, &twiddles, last_non_zero_index);
+
+    res
+}
+
+#[inline(never)]
+#[tracing::instrument(skip_all)]
+pub fn p_ntt_with_shift<T: ElementEx>(
+    bp: &[T],
+    offset: &T,
+    x: &mut [T],
+    twiddles: &[impl AsRef<[T]>],
+    last_non_zero_index: usize,
+) {
+    debug_assert!(x.len() <= 65536);
+
+    let log_2_of_n = x.len().ilog2();
+
+    // Combine shift operation with bit-reversal permutation
+    let mut offset_power = T::one();
+    for k in 0..=last_non_zero_index {
+        let rk = (BIT_REVERSE[k] >> (16 - log_2_of_n)) as usize;
+        x[rk] = bp[k] * offset_power;
+        offset_power = offset_power * *offset;
+    }
+
+    // Now apply NTT (sparse or dense depending on sparsity)
+    if x.len() == 65536 && last_non_zero_index < 1024 {
+        p_ntt::sparse(x, twiddles, log_2_of_n, last_non_zero_index, &BIT_REVERSE);
+        return;
+    }
+
+    if x.len() == 4096 && last_non_zero_index < 512 {
+        p_ntt::sparse(
+            x, twiddles, log_2_of_n, last_non_zero_index, &BIT_REVERSE_4096,
+        );
+        return;
+    }
+
+    p_ntt::dense(x, twiddles, log_2_of_n);
 }
 
 #[inline(always)]

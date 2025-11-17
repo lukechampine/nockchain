@@ -36,6 +36,70 @@ pub const fn badd(a: u64, b: u64) -> u64 {
 }
 
 #[inline(always)]
+pub fn badd_simd(a: u64x8, b: u64x8) -> u64x8 {
+    let prime_simd = u64x8::splat(PRIME);
+    let prime_minus_b = prime_simd - b;
+    let x1 = a - prime_minus_b;
+
+    // Overflow detection: c1 is true when a < PRIME - b
+    // Which means a - (PRIME - b) would underflow
+    let c1 = a.simd_lt(prime_minus_b);
+
+    // If c1, add PRIME, otherwise keep x1
+    c1.select(x1 + prime_simd, x1)
+}
+
+#[inline(always)]
+pub fn bsub_simd(a: u64x8, b: u64x8) -> u64x8 {
+    let x1 = a - b;
+    let c1 = a.simd_lt(b);
+    x1 - (u64x8::splat(1 + !PRIME) * c1.select(u64x8::splat(1), u64x8::splat(0)))
+}
+
+#[inline(always)]
+pub fn bmul_simd_x8(a: u64x8, b: u64x8) -> u64x8 {
+    let a_lo = a & u64x8::splat(0xFFFFFFFF);
+    let a_hi = a >> u64x8::splat(32);
+    let b_lo = b & u64x8::splat(0xFFFFFFFF);
+    let b_hi = b >> u64x8::splat(32);
+
+    let p0 = a_lo * b_lo;
+    let p1 = a_lo * b_hi;
+    let p2 = a_hi * b_lo;
+    let p3 = a_hi * b_hi;
+
+    let p1_lo = p1 & u64x8::splat(0xFFFFFFFF);
+    let p1_hi = p1 >> u64x8::splat(32);
+    let p2_lo = p2 & u64x8::splat(0xFFFFFFFF);
+    let p2_hi = p2 >> u64x8::splat(32);
+
+    let mid = p1_lo + p2_lo + (p0 >> u64x8::splat(32));
+    let x1 = (mid << u64x8::splat(32)) | (p0 & u64x8::splat(0xFFFFFFFF));
+    let x2 = p3 + p1_hi + p2_hi + (mid >> u64x8::splat(32));
+
+    // Split 128-bit result into low (0-63), mid (64-95), high (96-127)
+    let low = x1;
+    let mid_u32 = (x2 & u64x8::splat(0xFFFFFFFF)).cast::<u32>();
+    let high = x2 >> u64x8::splat(32);
+
+    reduce_159_simd_x8(low, mid_u32, high)
+}
+
+#[inline(always)]
+pub fn badd_simd_x2(a: u64x2, b: u64x2) -> u64x2 {
+    let prime_simd = u64x2::splat(PRIME);
+    let prime_minus_b = prime_simd - b;
+    let x1 = a - prime_minus_b;
+
+    // Overflow detection: c1 is true when a < PRIME - b
+    // Which means a - (PRIME - b) would underflow
+    let c1 = a.simd_lt(prime_minus_b);
+
+    // If c1, add PRIME, otherwise keep x1
+    c1.select(x1 + prime_simd, x1)
+}
+
+#[inline(always)]
 pub fn bneg(a: u64) -> u64 {
     based!(a);
     if a != 0 {
@@ -156,6 +220,28 @@ pub fn montiply_simd_x2(a: u64x2, b: u64x2) -> u64x2 {
     let x2 = p3 + p1_hi + p2_hi + (mid >> u64x2::splat(32));
 
     mont_reduction_simd_x2(x1, x2)
+}
+
+#[inline(always)]
+pub fn reduce_159_simd_x8(low: u64x8, mid: u32x8, high: u64x8) -> u64x8 {
+    // Step 1: low2 = low - high, handling underflow
+    let low2 = low - high;
+    let carry1 = low.simd_lt(high);
+    let low2 = carry1.select(low2 + u64x8::splat(PRIME), low2);
+
+    // Step 2: product = (mid << 32) - (mid << 32 >> 32)
+    let mid_u64 = mid.cast::<u64>();
+    let product_shl = mid_u64 << u64x8::splat(32);
+    let product = product_shl - (product_shl >> u64x8::splat(32));
+
+    // Step 3: result = product + low2, handling overflow
+    let result = product + low2;
+    let carry2 = result.simd_lt(product) | result.simd_lt(low2);
+    let result = carry2.select(result - u64x8::splat(PRIME), result);
+
+    // Step 4: Final reduction if result >= PRIME
+    let needs_reduction = result.simd_ge(u64x8::splat(PRIME));
+    needs_reduction.select(result - u64x8::splat(PRIME), result)
 }
 
 #[inline(always)]

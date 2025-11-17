@@ -1,3 +1,5 @@
+use std::simd::*;
+// ===== SCALAR VERSION =====
 #[allow(unused_parens)]
 pub const fn generated(input: &[u32; 16]) -> [u64; 16] {
     // layer 0
@@ -217,6 +219,731 @@ pub const fn generated(input: &[u32; 16]) -> [u64; 16] {
         n_159.wrapping_sub(n_1657),
     ]
 }
+
+// ===== SIMD VERSION (x2 lanes) =====
+
+#[allow(unused_parens)]
+#[rustfmt::skip]
+pub fn generated_simd_x2(input: &[[u32; 16]; 2]) -> [u64x2; 16] {
+    // Load all inputs into SIMD registers
+    let input_0_simd = u64x2::from_array([input[0][0] as u64, input[1][0] as u64]);
+    let input_1_simd = u64x2::from_array([input[0][1] as u64, input[1][1] as u64]);
+    let input_2_simd = u64x2::from_array([input[0][2] as u64, input[1][2] as u64]);
+    let input_3_simd = u64x2::from_array([input[0][3] as u64, input[1][3] as u64]);
+    let input_4_simd = u64x2::from_array([input[0][4] as u64, input[1][4] as u64]);
+    let input_5_simd = u64x2::from_array([input[0][5] as u64, input[1][5] as u64]);
+    let input_6_simd = u64x2::from_array([input[0][6] as u64, input[1][6] as u64]);
+    let input_7_simd = u64x2::from_array([input[0][7] as u64, input[1][7] as u64]);
+    let input_8_simd = u64x2::from_array([input[0][8] as u64, input[1][8] as u64]);
+    let input_9_simd = u64x2::from_array([input[0][9] as u64, input[1][9] as u64]);
+    let input_10_simd = u64x2::from_array([input[0][10] as u64, input[1][10] as u64]);
+    let input_11_simd = u64x2::from_array([input[0][11] as u64, input[1][11] as u64]);
+    let input_12_simd = u64x2::from_array([input[0][12] as u64, input[1][12] as u64]);
+    let input_13_simd = u64x2::from_array([input[0][13] as u64, input[1][13] as u64]);
+    let input_14_simd = u64x2::from_array([input[0][14] as u64, input[1][14] as u64]);
+    let input_15_simd = u64x2::from_array([input[0][15] as u64, input[1][15] as u64]);
+
+    // layer 0
+    let n_160_simd = (input_0_simd - input_8_simd);
+    let n_161_simd = (input_1_simd - input_9_simd);
+    let n_162_simd = (input_2_simd - input_10_simd);
+    let n_163_simd = (input_3_simd - input_11_simd);
+    let n_164_simd = (input_4_simd - input_12_simd);
+    let n_165_simd = (input_5_simd - input_13_simd);
+    let n_166_simd = (input_6_simd - input_14_simd);
+    let n_167_simd = (input_7_simd - input_15_simd);
+    // layer 1
+    let n_176_simd = (n_160_simd + n_164_simd);
+    let n_177_simd = (n_161_simd + n_165_simd);
+    let n_178_simd = (n_162_simd + n_166_simd);
+    let n_179_simd = (n_163_simd + n_167_simd);
+    // layer 2
+    let n_34_simd = (input_0_simd + input_8_simd);
+    let n_35_simd = (input_1_simd + input_9_simd);
+    let n_36_simd = (input_2_simd + input_10_simd);
+    let n_37_simd = (input_3_simd + input_11_simd);
+    let n_38_simd = (input_4_simd + input_12_simd);
+    let n_39_simd = (input_5_simd + input_13_simd);
+    let n_40_simd = (input_6_simd + input_14_simd);
+    let n_41_simd = (input_7_simd + input_15_simd);
+    let n_185_simd = (n_161_simd + n_163_simd);
+    let n_270_simd = (n_176_simd + n_178_simd);
+    let n_271_simd = (n_177_simd + n_179_simd);
+    // layer 3
+    let n_90_simd = (n_34_simd - n_38_simd);
+    let n_91_simd = (n_35_simd - n_39_simd);
+    let n_92_simd = (n_36_simd - n_40_simd);
+    let n_93_simd = (n_37_simd - n_41_simd);
+    let n_184_simd = (n_160_simd + n_162_simd);
+    let n_228_simd = (n_165_simd + n_167_simd);
+    let n_1885_simd = (n_271_simd * u64x2::splat(0xfffffffffff931e8u64));
+    let n_1891_simd = (n_177_simd * u64x2::splat(0xfffffffffffac4b0u64));
+    let n_1909_simd = (n_185_simd * u64x2::splat(0xfffffffffffbe968u64));
+    let n_1915_simd = (n_161_simd * u64x2::splat(0xfffffffffffcc698u64));
+    let n_2047_simd = (n_270_simd * u64x2::splat(0x1c070u64));
+    // layer 4
+    let n_50_simd = (n_34_simd + n_38_simd);
+    let n_51_simd = (n_35_simd + n_39_simd);
+    let n_52_simd = (n_36_simd + n_40_simd);
+    let n_53_simd = (n_37_simd + n_41_simd);
+    let n_98_simd = (n_90_simd + n_92_simd);
+    let n_99_simd = (n_91_simd + n_93_simd);
+    let n_227_simd = (n_164_simd + n_166_simd);
+    let n_651_simd = (n_1885_simd - n_1891_simd);
+    let n_1360_simd = (n_1909_simd - n_1915_simd);
+    let n_1630_simd = (n_1891_simd + n_2047_simd);
+    let n_1897_simd = (n_179_simd * u64x2::splat(0xfffffffffffe6d38u64));
+    let n_1921_simd = (n_163_simd * u64x2::splat(0xffffffffffff22d0u64));
+    let n_1933_simd = (n_228_simd * u64x2::splat(0xfffffffffffd4880u64));
+    let n_1939_simd = (n_165_simd * u64x2::splat(0xfffffffffffdfe18u64));
+    let n_2007_simd = (n_184_simd * u64x2::splat(0xffffffffffff0150u64));
+    let n_2035_simd = (n_176_simd * u64x2::splat(0xfffffffffffffc60u64));
+    // layer 5
+    let n_58_simd = (n_50_simd + n_52_simd);
+    let n_59_simd = (n_51_simd + n_53_simd);
+    let n_609_simd = (n_651_simd - n_1897_simd);
+    let n_1321_simd = (n_1933_simd - n_1939_simd);
+    let n_1351_simd = (n_1360_simd - n_1921_simd);
+    let n_1606_simd = (n_1630_simd - n_2035_simd);
+    let n_1615_simd = (n_1915_simd + n_2007_simd);
+    let n_1861_simd = (n_99_simd * u64x2::splat(0xfffffffffffe33b4u64));
+    let n_1865_simd = (n_91_simd * u64x2::splat(0xfffffffffffb7700u64));
+    let n_1879_simd = (n_160_simd * u64x2::splat(0x8b18u64));
+    let n_1903_simd = (n_178_simd * u64x2::splat(0x1c410u64));
+    let n_1927_simd = (n_162_simd * u64x2::splat(0xfffffffffffe7638u64));
+    let n_1945_simd = (n_167_simd * u64x2::splat(0xffffffffffff4a68u64));
+    let n_1970_simd = (n_160_simd * u64x2::splat(0xfffffffffffcc698u64));
+    let n_1973_simd = (n_161_simd * u64x2::splat(0x8b18u64));
+    let n_1976_simd = (n_178_simd * u64x2::splat(0xfffffffffffe6d38u64));
+    let n_1979_simd = (n_179_simd * u64x2::splat(0x1c410u64));
+    let n_1982_simd = (n_162_simd * u64x2::splat(0xffffffffffff22d0u64));
+    let n_1985_simd = (n_163_simd * u64x2::splat(0xfffffffffffe7638u64));
+    let n_2001_simd = (n_98_simd * u64x2::splat(0x563f0u64));
+    let n_2013_simd = (n_227_simd * u64x2::splat(0x2bf20u64));
+    let n_2020_simd = (n_184_simd * u64x2::splat(0xfffffffffffbe968u64));
+    let n_2023_simd = (n_185_simd * u64x2::splat(0xffffffffffff0150u64));
+    let n_2038_simd = (n_176_simd * u64x2::splat(0xfffffffffffac4b0u64));
+    let n_2041_simd = (n_177_simd * u64x2::splat(0xfffffffffffffc60u64));
+    let n_2050_simd = (n_270_simd * u64x2::splat(0xfffffffffff931e8u64));
+    let n_2053_simd = (n_271_simd * u64x2::splat(0x1c070u64));
+    // layer 6
+    let n_62_simd = (n_58_simd + n_59_simd);
+    let n_65_simd = (n_58_simd - n_59_simd);
+    let n_71_simd = (n_50_simd - n_52_simd);
+    let n_72_simd = (n_51_simd - n_53_simd);
+    let n_485_simd = (n_1861_simd - n_1865_simd);
+    let n_570_simd = (n_609_simd + n_1903_simd);
+    let n_970_simd = (n_1865_simd + n_2001_simd);
+    let n_1300_simd = (n_1321_simd - n_1945_simd);
+    let n_1330_simd = (n_1351_simd + n_1927_simd);
+    let n_1573_simd = (n_1606_simd - n_1903_simd);
+    let n_1582_simd = (n_1615_simd - n_1879_simd);
+    let n_1591_simd = (n_1939_simd + n_2013_simd);
+    let n_1729_simd = (n_1982_simd + n_1985_simd);
+    let n_1756_simd = (n_1976_simd + n_1979_simd);
+    let n_1768_simd = (n_1970_simd + n_1973_simd);
+    let n_1786_simd = (n_2038_simd + n_2041_simd);
+    let n_1792_simd = (n_2020_simd + n_2023_simd);
+    let n_1801_simd = (n_2050_simd + n_2053_simd);
+    let n_1857_simd = (n_90_simd * u64x2::splat(0x608f8u64));
+    let n_1869_simd = (n_93_simd * u64x2::splat(0x2bcb4u64));
+    let n_1951_simd = (n_166_simd * u64x2::splat(0x34dd8u64));
+    let n_1957_simd = (n_164_simd * u64x2::splat(0xffffffffffff7148u64));
+    let n_1961_simd = (n_90_simd * u64x2::splat(0xfffffffffffb7700u64));
+    let n_1963_simd = (n_91_simd * u64x2::splat(0x608f8u64));
+    let n_1988_simd = (n_166_simd * u64x2::splat(0xffffffffffff4a68u64));
+    let n_1991_simd = (n_167_simd * u64x2::splat(0x34dd8u64));
+    let n_1994_simd = (n_164_simd * u64x2::splat(0xfffffffffffdfe18u64));
+    let n_1997_simd = (n_165_simd * u64x2::splat(0xffffffffffff7148u64));
+    let n_2015_simd = (n_98_simd * u64x2::splat(0xfffffffffffe33b4u64));
+    let n_2017_simd = (n_99_simd * u64x2::splat(0x563f0u64));
+    let n_2026_simd = (n_227_simd * u64x2::splat(0xfffffffffffd4880u64));
+    let n_2029_simd = (n_228_simd * u64x2::splat(0x2bf20u64));
+    // layer 7
+    let n_64_simd = (n_62_simd * u64x2::splat(0x801d5u64));
+    let n_67_simd = (n_65_simd * u64x2::splat(0xcccbu64));
+    let n_454_simd = (n_485_simd - n_1869_simd);
+    let n_504_simd = (n_570_simd - n_1330_simd);
+    let n_801_simd = (n_1756_simd - n_1729_simd);
+    let n_937_simd = (n_970_simd - n_1857_simd);
+    let n_988_simd = (n_1897_simd - n_1921_simd);
+    let n_1116_simd = (n_1961_simd + n_1963_simd);
+    let n_1140_simd = (n_2015_simd + n_2017_simd);
+    let n_1276_simd = (n_1300_simd + n_1951_simd);
+    let n_1285_simd = (n_1330_simd + n_2035_simd);
+    let n_1420_simd = (n_1729_simd + n_1786_simd);
+    let n_1540_simd = (n_1921_simd + n_1573_simd);
+    let n_1549_simd = (n_1582_simd - n_1927_simd);
+    let n_1558_simd = (n_1591_simd - n_1957_simd);
+    let n_1705_simd = (n_1988_simd + n_1991_simd);
+    let n_1723_simd = (n_1792_simd - n_1768_simd);
+    let n_1741_simd = (n_1994_simd + n_1997_simd);
+    let n_1750_simd = (n_1801_simd - n_1786_simd);
+    let n_1774_simd = (n_2026_simd + n_2029_simd);
+    let n_1851_simd = (n_71_simd * u64x2::splat(0xffffffffffff9af0u64));
+    let n_1853_simd = (n_72_simd * u64x2::splat(0xd29eu64));
+    let n_1873_simd = (n_92_simd * u64x2::splat(0xffffffffffff5af8u64));
+    let n_1958_simd = (n_71_simd * u64x2::splat(0xd29eu64));
+    let n_1959_simd = (n_72_simd * u64x2::splat(0xffffffffffff9af0u64));
+    let n_1965_simd = (n_92_simd * u64x2::splat(0x2bcb4u64));
+    let n_1967_simd = (n_93_simd * u64x2::splat(0xffffffffffff5af8u64));
+    // layer 8
+    let n_69_simd = (n_64_simd + n_67_simd);
+    let n_70_simd = (n_64_simd - n_67_simd);
+    let n_397_simd = (n_1851_simd - n_1853_simd);
+    let n_428_simd = (n_454_simd + n_1873_simd);
+    let n_473_simd = (n_504_simd - n_1276_simd);
+    let n_702_simd = (n_1958_simd + n_1959_simd);
+    let n_769_simd = (n_801_simd - n_1705_simd);
+    let n_912_simd = (n_937_simd - n_1873_simd);
+    let n_955_simd = (n_988_simd - n_1945_simd);
+    let n_1092_simd = (n_1140_simd - n_1116_simd);
+    let n_1096_simd = (n_1965_simd + n_1967_simd);
+    let n_1261_simd = (n_1285_simd - n_1879_simd);
+    let n_1399_simd = (n_1420_simd - n_1768_simd);
+    let n_1516_simd = (n_1540_simd - n_1549_simd);
+    let n_1525_simd = (n_1558_simd - n_1951_simd);
+    let n_1690_simd = (n_1723_simd - n_1729_simd);
+    let n_1699_simd = (n_1774_simd - n_1741_simd);
+    let n_1714_simd = (n_1750_simd - n_1756_simd);
+    // layer 9
+    let n_86_simd = (n_69_simd + n_397_simd);
+    let n_87_simd = (n_69_simd - n_397_simd);
+    let n_88_simd = (n_70_simd + n_702_simd);
+    let n_89_simd = (n_70_simd - n_702_simd);
+    let n_403_simd = (n_1857_simd - n_428_simd);
+    let n_444_simd = (n_473_simd + n_1957_simd);
+    let n_708_simd = (n_1116_simd - n_1096_simd);
+    let n_742_simd = (n_769_simd + n_1741_simd);
+    let n_897_simd = (n_912_simd - n_1869_simd);
+    let n_931_simd = (n_955_simd + n_1525_simd);
+    let n_1077_simd = (n_1092_simd - n_1096_simd);
+    let n_1246_simd = (n_1261_simd - n_1957_simd);
+    let n_1384_simd = (n_1399_simd - n_1741_simd);
+    let n_1501_simd = (n_1516_simd - n_1525_simd);
+    let n_1666_simd = (n_1714_simd - n_1690_simd);
+    let n_1675_simd = (n_1699_simd - n_1705_simd);
+    // layer 10
+    let n_152_simd = (n_86_simd + n_403_simd);
+    let n_153_simd = (n_86_simd - n_403_simd);
+    let n_154_simd = (n_88_simd + n_708_simd);
+    let n_155_simd = (n_88_simd - n_708_simd);
+    let n_156_simd = (n_87_simd + n_897_simd);
+    let n_157_simd = (n_87_simd - n_897_simd);
+    let n_158_simd = (n_89_simd + n_1077_simd);
+    let n_159_simd = (n_89_simd - n_1077_simd);
+    let n_412_simd = (n_1879_simd - n_444_simd);
+    let n_717_simd = (n_1768_simd - n_742_simd);
+    let n_906_simd = (n_1549_simd - n_931_simd);
+    let n_1086_simd = (n_1690_simd - n_1675_simd);
+    let n_1237_simd = (n_1246_simd - n_1276_simd);
+    let n_1375_simd = (n_1384_simd - n_1705_simd);
+    let n_1492_simd = (n_1501_simd - n_1945_simd);
+    let n_1657_simd = (n_1666_simd - n_1675_simd);
+    // output
+    [
+        (n_152_simd + n_412_simd),
+        (n_154_simd + n_717_simd),
+        (n_156_simd + n_906_simd),
+        (n_158_simd + n_1086_simd),
+        (n_153_simd + n_1237_simd),
+        (n_155_simd + n_1375_simd),
+        (n_157_simd + n_1492_simd),
+        (n_159_simd + n_1657_simd),
+        (n_152_simd - n_412_simd),
+        (n_154_simd - n_717_simd),
+        (n_156_simd - n_906_simd),
+        (n_158_simd - n_1086_simd),
+        (n_153_simd - n_1237_simd),
+        (n_155_simd - n_1375_simd),
+        (n_157_simd - n_1492_simd),
+        (n_159_simd - n_1657_simd),
+    ]
+}
+
+// ===== SIMD VERSION (x4 lanes) =====
+
+#[allow(unused_parens)]
+#[rustfmt::skip]
+pub fn generated_simd_x4(input: &[[u32; 16]; 4]) -> [u64x4; 16] {
+    // Load all inputs into SIMD registers
+    let input_0_simd = u64x4::from_array([input[0][0] as u64, input[1][0] as u64, input[2][0] as u64, input[3][0] as u64]);
+    let input_1_simd = u64x4::from_array([input[0][1] as u64, input[1][1] as u64, input[2][1] as u64, input[3][1] as u64]);
+    let input_2_simd = u64x4::from_array([input[0][2] as u64, input[1][2] as u64, input[2][2] as u64, input[3][2] as u64]);
+    let input_3_simd = u64x4::from_array([input[0][3] as u64, input[1][3] as u64, input[2][3] as u64, input[3][3] as u64]);
+    let input_4_simd = u64x4::from_array([input[0][4] as u64, input[1][4] as u64, input[2][4] as u64, input[3][4] as u64]);
+    let input_5_simd = u64x4::from_array([input[0][5] as u64, input[1][5] as u64, input[2][5] as u64, input[3][5] as u64]);
+    let input_6_simd = u64x4::from_array([input[0][6] as u64, input[1][6] as u64, input[2][6] as u64, input[3][6] as u64]);
+    let input_7_simd = u64x4::from_array([input[0][7] as u64, input[1][7] as u64, input[2][7] as u64, input[3][7] as u64]);
+    let input_8_simd = u64x4::from_array([input[0][8] as u64, input[1][8] as u64, input[2][8] as u64, input[3][8] as u64]);
+    let input_9_simd = u64x4::from_array([input[0][9] as u64, input[1][9] as u64, input[2][9] as u64, input[3][9] as u64]);
+    let input_10_simd = u64x4::from_array([input[0][10] as u64, input[1][10] as u64, input[2][10] as u64, input[3][10] as u64]);
+    let input_11_simd = u64x4::from_array([input[0][11] as u64, input[1][11] as u64, input[2][11] as u64, input[3][11] as u64]);
+    let input_12_simd = u64x4::from_array([input[0][12] as u64, input[1][12] as u64, input[2][12] as u64, input[3][12] as u64]);
+    let input_13_simd = u64x4::from_array([input[0][13] as u64, input[1][13] as u64, input[2][13] as u64, input[3][13] as u64]);
+    let input_14_simd = u64x4::from_array([input[0][14] as u64, input[1][14] as u64, input[2][14] as u64, input[3][14] as u64]);
+    let input_15_simd = u64x4::from_array([input[0][15] as u64, input[1][15] as u64, input[2][15] as u64, input[3][15] as u64]);
+
+    // layer 0
+    let n_160_simd = (input_0_simd - input_8_simd);
+    let n_161_simd = (input_1_simd - input_9_simd);
+    let n_162_simd = (input_2_simd - input_10_simd);
+    let n_163_simd = (input_3_simd - input_11_simd);
+    let n_164_simd = (input_4_simd - input_12_simd);
+    let n_165_simd = (input_5_simd - input_13_simd);
+    let n_166_simd = (input_6_simd - input_14_simd);
+    let n_167_simd = (input_7_simd - input_15_simd);
+    // layer 1
+    let n_176_simd = (n_160_simd + n_164_simd);
+    let n_177_simd = (n_161_simd + n_165_simd);
+    let n_178_simd = (n_162_simd + n_166_simd);
+    let n_179_simd = (n_163_simd + n_167_simd);
+    // layer 2
+    let n_34_simd = (input_0_simd + input_8_simd);
+    let n_35_simd = (input_1_simd + input_9_simd);
+    let n_36_simd = (input_2_simd + input_10_simd);
+    let n_37_simd = (input_3_simd + input_11_simd);
+    let n_38_simd = (input_4_simd + input_12_simd);
+    let n_39_simd = (input_5_simd + input_13_simd);
+    let n_40_simd = (input_6_simd + input_14_simd);
+    let n_41_simd = (input_7_simd + input_15_simd);
+    let n_185_simd = (n_161_simd + n_163_simd);
+    let n_270_simd = (n_176_simd + n_178_simd);
+    let n_271_simd = (n_177_simd + n_179_simd);
+    // layer 3
+    let n_90_simd = (n_34_simd - n_38_simd);
+    let n_91_simd = (n_35_simd - n_39_simd);
+    let n_92_simd = (n_36_simd - n_40_simd);
+    let n_93_simd = (n_37_simd - n_41_simd);
+    let n_184_simd = (n_160_simd + n_162_simd);
+    let n_228_simd = (n_165_simd + n_167_simd);
+    let n_1885_simd = (n_271_simd * u64x4::splat(0xfffffffffff931e8u64));
+    let n_1891_simd = (n_177_simd * u64x4::splat(0xfffffffffffac4b0u64));
+    let n_1909_simd = (n_185_simd * u64x4::splat(0xfffffffffffbe968u64));
+    let n_1915_simd = (n_161_simd * u64x4::splat(0xfffffffffffcc698u64));
+    let n_2047_simd = (n_270_simd * u64x4::splat(0x1c070u64));
+    // layer 4
+    let n_50_simd = (n_34_simd + n_38_simd);
+    let n_51_simd = (n_35_simd + n_39_simd);
+    let n_52_simd = (n_36_simd + n_40_simd);
+    let n_53_simd = (n_37_simd + n_41_simd);
+    let n_98_simd = (n_90_simd + n_92_simd);
+    let n_99_simd = (n_91_simd + n_93_simd);
+    let n_227_simd = (n_164_simd + n_166_simd);
+    let n_651_simd = (n_1885_simd - n_1891_simd);
+    let n_1360_simd = (n_1909_simd - n_1915_simd);
+    let n_1630_simd = (n_1891_simd + n_2047_simd);
+    let n_1897_simd = (n_179_simd * u64x4::splat(0xfffffffffffe6d38u64));
+    let n_1921_simd = (n_163_simd * u64x4::splat(0xffffffffffff22d0u64));
+    let n_1933_simd = (n_228_simd * u64x4::splat(0xfffffffffffd4880u64));
+    let n_1939_simd = (n_165_simd * u64x4::splat(0xfffffffffffdfe18u64));
+    let n_2007_simd = (n_184_simd * u64x4::splat(0xffffffffffff0150u64));
+    let n_2035_simd = (n_176_simd * u64x4::splat(0xfffffffffffffc60u64));
+    // layer 5
+    let n_58_simd = (n_50_simd + n_52_simd);
+    let n_59_simd = (n_51_simd + n_53_simd);
+    let n_609_simd = (n_651_simd - n_1897_simd);
+    let n_1321_simd = (n_1933_simd - n_1939_simd);
+    let n_1351_simd = (n_1360_simd - n_1921_simd);
+    let n_1606_simd = (n_1630_simd - n_2035_simd);
+    let n_1615_simd = (n_1915_simd + n_2007_simd);
+    let n_1861_simd = (n_99_simd * u64x4::splat(0xfffffffffffe33b4u64));
+    let n_1865_simd = (n_91_simd * u64x4::splat(0xfffffffffffb7700u64));
+    let n_1879_simd = (n_160_simd * u64x4::splat(0x8b18u64));
+    let n_1903_simd = (n_178_simd * u64x4::splat(0x1c410u64));
+    let n_1927_simd = (n_162_simd * u64x4::splat(0xfffffffffffe7638u64));
+    let n_1945_simd = (n_167_simd * u64x4::splat(0xffffffffffff4a68u64));
+    let n_1970_simd = (n_160_simd * u64x4::splat(0xfffffffffffcc698u64));
+    let n_1973_simd = (n_161_simd * u64x4::splat(0x8b18u64));
+    let n_1976_simd = (n_178_simd * u64x4::splat(0xfffffffffffe6d38u64));
+    let n_1979_simd = (n_179_simd * u64x4::splat(0x1c410u64));
+    let n_1982_simd = (n_162_simd * u64x4::splat(0xffffffffffff22d0u64));
+    let n_1985_simd = (n_163_simd * u64x4::splat(0xfffffffffffe7638u64));
+    let n_2001_simd = (n_98_simd * u64x4::splat(0x563f0u64));
+    let n_2013_simd = (n_227_simd * u64x4::splat(0x2bf20u64));
+    let n_2020_simd = (n_184_simd * u64x4::splat(0xfffffffffffbe968u64));
+    let n_2023_simd = (n_185_simd * u64x4::splat(0xffffffffffff0150u64));
+    let n_2038_simd = (n_176_simd * u64x4::splat(0xfffffffffffac4b0u64));
+    let n_2041_simd = (n_177_simd * u64x4::splat(0xfffffffffffffc60u64));
+    let n_2050_simd = (n_270_simd * u64x4::splat(0xfffffffffff931e8u64));
+    let n_2053_simd = (n_271_simd * u64x4::splat(0x1c070u64));
+    // layer 6
+    let n_62_simd = (n_58_simd + n_59_simd);
+    let n_65_simd = (n_58_simd - n_59_simd);
+    let n_71_simd = (n_50_simd - n_52_simd);
+    let n_72_simd = (n_51_simd - n_53_simd);
+    let n_485_simd = (n_1861_simd - n_1865_simd);
+    let n_570_simd = (n_609_simd + n_1903_simd);
+    let n_970_simd = (n_1865_simd + n_2001_simd);
+    let n_1300_simd = (n_1321_simd - n_1945_simd);
+    let n_1330_simd = (n_1351_simd + n_1927_simd);
+    let n_1573_simd = (n_1606_simd - n_1903_simd);
+    let n_1582_simd = (n_1615_simd - n_1879_simd);
+    let n_1591_simd = (n_1939_simd + n_2013_simd);
+    let n_1729_simd = (n_1982_simd + n_1985_simd);
+    let n_1756_simd = (n_1976_simd + n_1979_simd);
+    let n_1768_simd = (n_1970_simd + n_1973_simd);
+    let n_1786_simd = (n_2038_simd + n_2041_simd);
+    let n_1792_simd = (n_2020_simd + n_2023_simd);
+    let n_1801_simd = (n_2050_simd + n_2053_simd);
+    let n_1857_simd = (n_90_simd * u64x4::splat(0x608f8u64));
+    let n_1869_simd = (n_93_simd * u64x4::splat(0x2bcb4u64));
+    let n_1951_simd = (n_166_simd * u64x4::splat(0x34dd8u64));
+    let n_1957_simd = (n_164_simd * u64x4::splat(0xffffffffffff7148u64));
+    let n_1961_simd = (n_90_simd * u64x4::splat(0xfffffffffffb7700u64));
+    let n_1963_simd = (n_91_simd * u64x4::splat(0x608f8u64));
+    let n_1988_simd = (n_166_simd * u64x4::splat(0xffffffffffff4a68u64));
+    let n_1991_simd = (n_167_simd * u64x4::splat(0x34dd8u64));
+    let n_1994_simd = (n_164_simd * u64x4::splat(0xfffffffffffdfe18u64));
+    let n_1997_simd = (n_165_simd * u64x4::splat(0xffffffffffff7148u64));
+    let n_2015_simd = (n_98_simd * u64x4::splat(0xfffffffffffe33b4u64));
+    let n_2017_simd = (n_99_simd * u64x4::splat(0x563f0u64));
+    let n_2026_simd = (n_227_simd * u64x4::splat(0xfffffffffffd4880u64));
+    let n_2029_simd = (n_228_simd * u64x4::splat(0x2bf20u64));
+    // layer 7
+    let n_64_simd = (n_62_simd * u64x4::splat(0x801d5u64));
+    let n_67_simd = (n_65_simd * u64x4::splat(0xcccbu64));
+    let n_454_simd = (n_485_simd - n_1869_simd);
+    let n_504_simd = (n_570_simd - n_1330_simd);
+    let n_801_simd = (n_1756_simd - n_1729_simd);
+    let n_937_simd = (n_970_simd - n_1857_simd);
+    let n_988_simd = (n_1897_simd - n_1921_simd);
+    let n_1116_simd = (n_1961_simd + n_1963_simd);
+    let n_1140_simd = (n_2015_simd + n_2017_simd);
+    let n_1276_simd = (n_1300_simd + n_1951_simd);
+    let n_1285_simd = (n_1330_simd + n_2035_simd);
+    let n_1420_simd = (n_1729_simd + n_1786_simd);
+    let n_1540_simd = (n_1921_simd + n_1573_simd);
+    let n_1549_simd = (n_1582_simd - n_1927_simd);
+    let n_1558_simd = (n_1591_simd - n_1957_simd);
+    let n_1705_simd = (n_1988_simd + n_1991_simd);
+    let n_1723_simd = (n_1792_simd - n_1768_simd);
+    let n_1741_simd = (n_1994_simd + n_1997_simd);
+    let n_1750_simd = (n_1801_simd - n_1786_simd);
+    let n_1774_simd = (n_2026_simd + n_2029_simd);
+    let n_1851_simd = (n_71_simd * u64x4::splat(0xffffffffffff9af0u64));
+    let n_1853_simd = (n_72_simd * u64x4::splat(0xd29eu64));
+    let n_1873_simd = (n_92_simd * u64x4::splat(0xffffffffffff5af8u64));
+    let n_1958_simd = (n_71_simd * u64x4::splat(0xd29eu64));
+    let n_1959_simd = (n_72_simd * u64x4::splat(0xffffffffffff9af0u64));
+    let n_1965_simd = (n_92_simd * u64x4::splat(0x2bcb4u64));
+    let n_1967_simd = (n_93_simd * u64x4::splat(0xffffffffffff5af8u64));
+    // layer 8
+    let n_69_simd = (n_64_simd + n_67_simd);
+    let n_70_simd = (n_64_simd - n_67_simd);
+    let n_397_simd = (n_1851_simd - n_1853_simd);
+    let n_428_simd = (n_454_simd + n_1873_simd);
+    let n_473_simd = (n_504_simd - n_1276_simd);
+    let n_702_simd = (n_1958_simd + n_1959_simd);
+    let n_769_simd = (n_801_simd - n_1705_simd);
+    let n_912_simd = (n_937_simd - n_1873_simd);
+    let n_955_simd = (n_988_simd - n_1945_simd);
+    let n_1092_simd = (n_1140_simd - n_1116_simd);
+    let n_1096_simd = (n_1965_simd + n_1967_simd);
+    let n_1261_simd = (n_1285_simd - n_1879_simd);
+    let n_1399_simd = (n_1420_simd - n_1768_simd);
+    let n_1516_simd = (n_1540_simd - n_1549_simd);
+    let n_1525_simd = (n_1558_simd - n_1951_simd);
+    let n_1690_simd = (n_1723_simd - n_1729_simd);
+    let n_1699_simd = (n_1774_simd - n_1741_simd);
+    let n_1714_simd = (n_1750_simd - n_1756_simd);
+    // layer 9
+    let n_86_simd = (n_69_simd + n_397_simd);
+    let n_87_simd = (n_69_simd - n_397_simd);
+    let n_88_simd = (n_70_simd + n_702_simd);
+    let n_89_simd = (n_70_simd - n_702_simd);
+    let n_403_simd = (n_1857_simd - n_428_simd);
+    let n_444_simd = (n_473_simd + n_1957_simd);
+    let n_708_simd = (n_1116_simd - n_1096_simd);
+    let n_742_simd = (n_769_simd + n_1741_simd);
+    let n_897_simd = (n_912_simd - n_1869_simd);
+    let n_931_simd = (n_955_simd + n_1525_simd);
+    let n_1077_simd = (n_1092_simd - n_1096_simd);
+    let n_1246_simd = (n_1261_simd - n_1957_simd);
+    let n_1384_simd = (n_1399_simd - n_1741_simd);
+    let n_1501_simd = (n_1516_simd - n_1525_simd);
+    let n_1666_simd = (n_1714_simd - n_1690_simd);
+    let n_1675_simd = (n_1699_simd - n_1705_simd);
+    // layer 10
+    let n_152_simd = (n_86_simd + n_403_simd);
+    let n_153_simd = (n_86_simd - n_403_simd);
+    let n_154_simd = (n_88_simd + n_708_simd);
+    let n_155_simd = (n_88_simd - n_708_simd);
+    let n_156_simd = (n_87_simd + n_897_simd);
+    let n_157_simd = (n_87_simd - n_897_simd);
+    let n_158_simd = (n_89_simd + n_1077_simd);
+    let n_159_simd = (n_89_simd - n_1077_simd);
+    let n_412_simd = (n_1879_simd - n_444_simd);
+    let n_717_simd = (n_1768_simd - n_742_simd);
+    let n_906_simd = (n_1549_simd - n_931_simd);
+    let n_1086_simd = (n_1690_simd - n_1675_simd);
+    let n_1237_simd = (n_1246_simd - n_1276_simd);
+    let n_1375_simd = (n_1384_simd - n_1705_simd);
+    let n_1492_simd = (n_1501_simd - n_1945_simd);
+    let n_1657_simd = (n_1666_simd - n_1675_simd);
+    // output
+    [
+        (n_152_simd + n_412_simd),
+        (n_154_simd + n_717_simd),
+        (n_156_simd + n_906_simd),
+        (n_158_simd + n_1086_simd),
+        (n_153_simd + n_1237_simd),
+        (n_155_simd + n_1375_simd),
+        (n_157_simd + n_1492_simd),
+        (n_159_simd + n_1657_simd),
+        (n_152_simd - n_412_simd),
+        (n_154_simd - n_717_simd),
+        (n_156_simd - n_906_simd),
+        (n_158_simd - n_1086_simd),
+        (n_153_simd - n_1237_simd),
+        (n_155_simd - n_1375_simd),
+        (n_157_simd - n_1492_simd),
+        (n_159_simd - n_1657_simd),
+    ]
+}
+
+// ===== SIMD VERSION (x8 lanes) =====
+
+#[allow(unused_parens)]
+#[rustfmt::skip]
+pub fn generated_simd_x8(input: &[[u32; 16]; 8]) -> [u64x8; 16] {
+    // Load all inputs into SIMD registers
+    let input_0_simd = u64x8::from_array([input[0][0] as u64, input[1][0] as u64, input[2][0] as u64, input[3][0] as u64, input[4][0] as u64, input[5][0] as u64, input[6][0] as u64, input[7][0] as u64]);
+    let input_1_simd = u64x8::from_array([input[0][1] as u64, input[1][1] as u64, input[2][1] as u64, input[3][1] as u64, input[4][1] as u64, input[5][1] as u64, input[6][1] as u64, input[7][1] as u64]);
+    let input_2_simd = u64x8::from_array([input[0][2] as u64, input[1][2] as u64, input[2][2] as u64, input[3][2] as u64, input[4][2] as u64, input[5][2] as u64, input[6][2] as u64, input[7][2] as u64]);
+    let input_3_simd = u64x8::from_array([input[0][3] as u64, input[1][3] as u64, input[2][3] as u64, input[3][3] as u64, input[4][3] as u64, input[5][3] as u64, input[6][3] as u64, input[7][3] as u64]);
+    let input_4_simd = u64x8::from_array([input[0][4] as u64, input[1][4] as u64, input[2][4] as u64, input[3][4] as u64, input[4][4] as u64, input[5][4] as u64, input[6][4] as u64, input[7][4] as u64]);
+    let input_5_simd = u64x8::from_array([input[0][5] as u64, input[1][5] as u64, input[2][5] as u64, input[3][5] as u64, input[4][5] as u64, input[5][5] as u64, input[6][5] as u64, input[7][5] as u64]);
+    let input_6_simd = u64x8::from_array([input[0][6] as u64, input[1][6] as u64, input[2][6] as u64, input[3][6] as u64, input[4][6] as u64, input[5][6] as u64, input[6][6] as u64, input[7][6] as u64]);
+    let input_7_simd = u64x8::from_array([input[0][7] as u64, input[1][7] as u64, input[2][7] as u64, input[3][7] as u64, input[4][7] as u64, input[5][7] as u64, input[6][7] as u64, input[7][7] as u64]);
+    let input_8_simd = u64x8::from_array([input[0][8] as u64, input[1][8] as u64, input[2][8] as u64, input[3][8] as u64, input[4][8] as u64, input[5][8] as u64, input[6][8] as u64, input[7][8] as u64]);
+    let input_9_simd = u64x8::from_array([input[0][9] as u64, input[1][9] as u64, input[2][9] as u64, input[3][9] as u64, input[4][9] as u64, input[5][9] as u64, input[6][9] as u64, input[7][9] as u64]);
+    let input_10_simd = u64x8::from_array([input[0][10] as u64, input[1][10] as u64, input[2][10] as u64, input[3][10] as u64, input[4][10] as u64, input[5][10] as u64, input[6][10] as u64, input[7][10] as u64]);
+    let input_11_simd = u64x8::from_array([input[0][11] as u64, input[1][11] as u64, input[2][11] as u64, input[3][11] as u64, input[4][11] as u64, input[5][11] as u64, input[6][11] as u64, input[7][11] as u64]);
+    let input_12_simd = u64x8::from_array([input[0][12] as u64, input[1][12] as u64, input[2][12] as u64, input[3][12] as u64, input[4][12] as u64, input[5][12] as u64, input[6][12] as u64, input[7][12] as u64]);
+    let input_13_simd = u64x8::from_array([input[0][13] as u64, input[1][13] as u64, input[2][13] as u64, input[3][13] as u64, input[4][13] as u64, input[5][13] as u64, input[6][13] as u64, input[7][13] as u64]);
+    let input_14_simd = u64x8::from_array([input[0][14] as u64, input[1][14] as u64, input[2][14] as u64, input[3][14] as u64, input[4][14] as u64, input[5][14] as u64, input[6][14] as u64, input[7][14] as u64]);
+    let input_15_simd = u64x8::from_array([input[0][15] as u64, input[1][15] as u64, input[2][15] as u64, input[3][15] as u64, input[4][15] as u64, input[5][15] as u64, input[6][15] as u64, input[7][15] as u64]);
+
+    // layer 0
+    let n_160_simd = (input_0_simd - input_8_simd);
+    let n_161_simd = (input_1_simd - input_9_simd);
+    let n_162_simd = (input_2_simd - input_10_simd);
+    let n_163_simd = (input_3_simd - input_11_simd);
+    let n_164_simd = (input_4_simd - input_12_simd);
+    let n_165_simd = (input_5_simd - input_13_simd);
+    let n_166_simd = (input_6_simd - input_14_simd);
+    let n_167_simd = (input_7_simd - input_15_simd);
+    // layer 1
+    let n_176_simd = (n_160_simd + n_164_simd);
+    let n_177_simd = (n_161_simd + n_165_simd);
+    let n_178_simd = (n_162_simd + n_166_simd);
+    let n_179_simd = (n_163_simd + n_167_simd);
+    // layer 2
+    let n_34_simd = (input_0_simd + input_8_simd);
+    let n_35_simd = (input_1_simd + input_9_simd);
+    let n_36_simd = (input_2_simd + input_10_simd);
+    let n_37_simd = (input_3_simd + input_11_simd);
+    let n_38_simd = (input_4_simd + input_12_simd);
+    let n_39_simd = (input_5_simd + input_13_simd);
+    let n_40_simd = (input_6_simd + input_14_simd);
+    let n_41_simd = (input_7_simd + input_15_simd);
+    let n_185_simd = (n_161_simd + n_163_simd);
+    let n_270_simd = (n_176_simd + n_178_simd);
+    let n_271_simd = (n_177_simd + n_179_simd);
+    // layer 3
+    let n_90_simd = (n_34_simd - n_38_simd);
+    let n_91_simd = (n_35_simd - n_39_simd);
+    let n_92_simd = (n_36_simd - n_40_simd);
+    let n_93_simd = (n_37_simd - n_41_simd);
+    let n_184_simd = (n_160_simd + n_162_simd);
+    let n_228_simd = (n_165_simd + n_167_simd);
+    let n_1885_simd = (n_271_simd * u64x8::splat(0xfffffffffff931e8u64));
+    let n_1891_simd = (n_177_simd * u64x8::splat(0xfffffffffffac4b0u64));
+    let n_1909_simd = (n_185_simd * u64x8::splat(0xfffffffffffbe968u64));
+    let n_1915_simd = (n_161_simd * u64x8::splat(0xfffffffffffcc698u64));
+    let n_2047_simd = (n_270_simd * u64x8::splat(0x1c070u64));
+    // layer 4
+    let n_50_simd = (n_34_simd + n_38_simd);
+    let n_51_simd = (n_35_simd + n_39_simd);
+    let n_52_simd = (n_36_simd + n_40_simd);
+    let n_53_simd = (n_37_simd + n_41_simd);
+    let n_98_simd = (n_90_simd + n_92_simd);
+    let n_99_simd = (n_91_simd + n_93_simd);
+    let n_227_simd = (n_164_simd + n_166_simd);
+    let n_651_simd = (n_1885_simd - n_1891_simd);
+    let n_1360_simd = (n_1909_simd - n_1915_simd);
+    let n_1630_simd = (n_1891_simd + n_2047_simd);
+    let n_1897_simd = (n_179_simd * u64x8::splat(0xfffffffffffe6d38u64));
+    let n_1921_simd = (n_163_simd * u64x8::splat(0xffffffffffff22d0u64));
+    let n_1933_simd = (n_228_simd * u64x8::splat(0xfffffffffffd4880u64));
+    let n_1939_simd = (n_165_simd * u64x8::splat(0xfffffffffffdfe18u64));
+    let n_2007_simd = (n_184_simd * u64x8::splat(0xffffffffffff0150u64));
+    let n_2035_simd = (n_176_simd * u64x8::splat(0xfffffffffffffc60u64));
+    // layer 5
+    let n_58_simd = (n_50_simd + n_52_simd);
+    let n_59_simd = (n_51_simd + n_53_simd);
+    let n_609_simd = (n_651_simd - n_1897_simd);
+    let n_1321_simd = (n_1933_simd - n_1939_simd);
+    let n_1351_simd = (n_1360_simd - n_1921_simd);
+    let n_1606_simd = (n_1630_simd - n_2035_simd);
+    let n_1615_simd = (n_1915_simd + n_2007_simd);
+    let n_1861_simd = (n_99_simd * u64x8::splat(0xfffffffffffe33b4u64));
+    let n_1865_simd = (n_91_simd * u64x8::splat(0xfffffffffffb7700u64));
+    let n_1879_simd = (n_160_simd * u64x8::splat(0x8b18u64));
+    let n_1903_simd = (n_178_simd * u64x8::splat(0x1c410u64));
+    let n_1927_simd = (n_162_simd * u64x8::splat(0xfffffffffffe7638u64));
+    let n_1945_simd = (n_167_simd * u64x8::splat(0xffffffffffff4a68u64));
+    let n_1970_simd = (n_160_simd * u64x8::splat(0xfffffffffffcc698u64));
+    let n_1973_simd = (n_161_simd * u64x8::splat(0x8b18u64));
+    let n_1976_simd = (n_178_simd * u64x8::splat(0xfffffffffffe6d38u64));
+    let n_1979_simd = (n_179_simd * u64x8::splat(0x1c410u64));
+    let n_1982_simd = (n_162_simd * u64x8::splat(0xffffffffffff22d0u64));
+    let n_1985_simd = (n_163_simd * u64x8::splat(0xfffffffffffe7638u64));
+    let n_2001_simd = (n_98_simd * u64x8::splat(0x563f0u64));
+    let n_2013_simd = (n_227_simd * u64x8::splat(0x2bf20u64));
+    let n_2020_simd = (n_184_simd * u64x8::splat(0xfffffffffffbe968u64));
+    let n_2023_simd = (n_185_simd * u64x8::splat(0xffffffffffff0150u64));
+    let n_2038_simd = (n_176_simd * u64x8::splat(0xfffffffffffac4b0u64));
+    let n_2041_simd = (n_177_simd * u64x8::splat(0xfffffffffffffc60u64));
+    let n_2050_simd = (n_270_simd * u64x8::splat(0xfffffffffff931e8u64));
+    let n_2053_simd = (n_271_simd * u64x8::splat(0x1c070u64));
+    // layer 6
+    let n_62_simd = (n_58_simd + n_59_simd);
+    let n_65_simd = (n_58_simd - n_59_simd);
+    let n_71_simd = (n_50_simd - n_52_simd);
+    let n_72_simd = (n_51_simd - n_53_simd);
+    let n_485_simd = (n_1861_simd - n_1865_simd);
+    let n_570_simd = (n_609_simd + n_1903_simd);
+    let n_970_simd = (n_1865_simd + n_2001_simd);
+    let n_1300_simd = (n_1321_simd - n_1945_simd);
+    let n_1330_simd = (n_1351_simd + n_1927_simd);
+    let n_1573_simd = (n_1606_simd - n_1903_simd);
+    let n_1582_simd = (n_1615_simd - n_1879_simd);
+    let n_1591_simd = (n_1939_simd + n_2013_simd);
+    let n_1729_simd = (n_1982_simd + n_1985_simd);
+    let n_1756_simd = (n_1976_simd + n_1979_simd);
+    let n_1768_simd = (n_1970_simd + n_1973_simd);
+    let n_1786_simd = (n_2038_simd + n_2041_simd);
+    let n_1792_simd = (n_2020_simd + n_2023_simd);
+    let n_1801_simd = (n_2050_simd + n_2053_simd);
+    let n_1857_simd = (n_90_simd * u64x8::splat(0x608f8u64));
+    let n_1869_simd = (n_93_simd * u64x8::splat(0x2bcb4u64));
+    let n_1951_simd = (n_166_simd * u64x8::splat(0x34dd8u64));
+    let n_1957_simd = (n_164_simd * u64x8::splat(0xffffffffffff7148u64));
+    let n_1961_simd = (n_90_simd * u64x8::splat(0xfffffffffffb7700u64));
+    let n_1963_simd = (n_91_simd * u64x8::splat(0x608f8u64));
+    let n_1988_simd = (n_166_simd * u64x8::splat(0xffffffffffff4a68u64));
+    let n_1991_simd = (n_167_simd * u64x8::splat(0x34dd8u64));
+    let n_1994_simd = (n_164_simd * u64x8::splat(0xfffffffffffdfe18u64));
+    let n_1997_simd = (n_165_simd * u64x8::splat(0xffffffffffff7148u64));
+    let n_2015_simd = (n_98_simd * u64x8::splat(0xfffffffffffe33b4u64));
+    let n_2017_simd = (n_99_simd * u64x8::splat(0x563f0u64));
+    let n_2026_simd = (n_227_simd * u64x8::splat(0xfffffffffffd4880u64));
+    let n_2029_simd = (n_228_simd * u64x8::splat(0x2bf20u64));
+    // layer 7
+    let n_64_simd = (n_62_simd * u64x8::splat(0x801d5u64));
+    let n_67_simd = (n_65_simd * u64x8::splat(0xcccbu64));
+    let n_454_simd = (n_485_simd - n_1869_simd);
+    let n_504_simd = (n_570_simd - n_1330_simd);
+    let n_801_simd = (n_1756_simd - n_1729_simd);
+    let n_937_simd = (n_970_simd - n_1857_simd);
+    let n_988_simd = (n_1897_simd - n_1921_simd);
+    let n_1116_simd = (n_1961_simd + n_1963_simd);
+    let n_1140_simd = (n_2015_simd + n_2017_simd);
+    let n_1276_simd = (n_1300_simd + n_1951_simd);
+    let n_1285_simd = (n_1330_simd + n_2035_simd);
+    let n_1420_simd = (n_1729_simd + n_1786_simd);
+    let n_1540_simd = (n_1921_simd + n_1573_simd);
+    let n_1549_simd = (n_1582_simd - n_1927_simd);
+    let n_1558_simd = (n_1591_simd - n_1957_simd);
+    let n_1705_simd = (n_1988_simd + n_1991_simd);
+    let n_1723_simd = (n_1792_simd - n_1768_simd);
+    let n_1741_simd = (n_1994_simd + n_1997_simd);
+    let n_1750_simd = (n_1801_simd - n_1786_simd);
+    let n_1774_simd = (n_2026_simd + n_2029_simd);
+    let n_1851_simd = (n_71_simd * u64x8::splat(0xffffffffffff9af0u64));
+    let n_1853_simd = (n_72_simd * u64x8::splat(0xd29eu64));
+    let n_1873_simd = (n_92_simd * u64x8::splat(0xffffffffffff5af8u64));
+    let n_1958_simd = (n_71_simd * u64x8::splat(0xd29eu64));
+    let n_1959_simd = (n_72_simd * u64x8::splat(0xffffffffffff9af0u64));
+    let n_1965_simd = (n_92_simd * u64x8::splat(0x2bcb4u64));
+    let n_1967_simd = (n_93_simd * u64x8::splat(0xffffffffffff5af8u64));
+    // layer 8
+    let n_69_simd = (n_64_simd + n_67_simd);
+    let n_70_simd = (n_64_simd - n_67_simd);
+    let n_397_simd = (n_1851_simd - n_1853_simd);
+    let n_428_simd = (n_454_simd + n_1873_simd);
+    let n_473_simd = (n_504_simd - n_1276_simd);
+    let n_702_simd = (n_1958_simd + n_1959_simd);
+    let n_769_simd = (n_801_simd - n_1705_simd);
+    let n_912_simd = (n_937_simd - n_1873_simd);
+    let n_955_simd = (n_988_simd - n_1945_simd);
+    let n_1092_simd = (n_1140_simd - n_1116_simd);
+    let n_1096_simd = (n_1965_simd + n_1967_simd);
+    let n_1261_simd = (n_1285_simd - n_1879_simd);
+    let n_1399_simd = (n_1420_simd - n_1768_simd);
+    let n_1516_simd = (n_1540_simd - n_1549_simd);
+    let n_1525_simd = (n_1558_simd - n_1951_simd);
+    let n_1690_simd = (n_1723_simd - n_1729_simd);
+    let n_1699_simd = (n_1774_simd - n_1741_simd);
+    let n_1714_simd = (n_1750_simd - n_1756_simd);
+    // layer 9
+    let n_86_simd = (n_69_simd + n_397_simd);
+    let n_87_simd = (n_69_simd - n_397_simd);
+    let n_88_simd = (n_70_simd + n_702_simd);
+    let n_89_simd = (n_70_simd - n_702_simd);
+    let n_403_simd = (n_1857_simd - n_428_simd);
+    let n_444_simd = (n_473_simd + n_1957_simd);
+    let n_708_simd = (n_1116_simd - n_1096_simd);
+    let n_742_simd = (n_769_simd + n_1741_simd);
+    let n_897_simd = (n_912_simd - n_1869_simd);
+    let n_931_simd = (n_955_simd + n_1525_simd);
+    let n_1077_simd = (n_1092_simd - n_1096_simd);
+    let n_1246_simd = (n_1261_simd - n_1957_simd);
+    let n_1384_simd = (n_1399_simd - n_1741_simd);
+    let n_1501_simd = (n_1516_simd - n_1525_simd);
+    let n_1666_simd = (n_1714_simd - n_1690_simd);
+    let n_1675_simd = (n_1699_simd - n_1705_simd);
+    // layer 10
+    let n_152_simd = (n_86_simd + n_403_simd);
+    let n_153_simd = (n_86_simd - n_403_simd);
+    let n_154_simd = (n_88_simd + n_708_simd);
+    let n_155_simd = (n_88_simd - n_708_simd);
+    let n_156_simd = (n_87_simd + n_897_simd);
+    let n_157_simd = (n_87_simd - n_897_simd);
+    let n_158_simd = (n_89_simd + n_1077_simd);
+    let n_159_simd = (n_89_simd - n_1077_simd);
+    let n_412_simd = (n_1879_simd - n_444_simd);
+    let n_717_simd = (n_1768_simd - n_742_simd);
+    let n_906_simd = (n_1549_simd - n_931_simd);
+    let n_1086_simd = (n_1690_simd - n_1675_simd);
+    let n_1237_simd = (n_1246_simd - n_1276_simd);
+    let n_1375_simd = (n_1384_simd - n_1705_simd);
+    let n_1492_simd = (n_1501_simd - n_1945_simd);
+    let n_1657_simd = (n_1666_simd - n_1675_simd);
+    // output
+    [
+        (n_152_simd + n_412_simd),
+        (n_154_simd + n_717_simd),
+        (n_156_simd + n_906_simd),
+        (n_158_simd + n_1086_simd),
+        (n_153_simd + n_1237_simd),
+        (n_155_simd + n_1375_simd),
+        (n_157_simd + n_1492_simd),
+        (n_159_simd + n_1657_simd),
+        (n_152_simd - n_412_simd),
+        (n_154_simd - n_717_simd),
+        (n_156_simd - n_906_simd),
+        (n_158_simd - n_1086_simd),
+        (n_153_simd - n_1237_simd),
+        (n_155_simd - n_1375_simd),
+        (n_157_simd - n_1492_simd),
+        (n_159_simd - n_1657_simd),
+    ]
+}
+
+// ===== SCALAR VERSION =====
 #[allow(unused_parens)]
 pub const fn generated_intermediate(input: &[u32; 16]) -> [u64; 6] {
     // layer 0
@@ -412,6 +1139,659 @@ pub const fn generated_intermediate(input: &[u32; 16]) -> [u64; 6] {
         n_159.wrapping_sub(n_1657),
     ]
 }
+
+// ===== SIMD VERSION (x2 lanes) =====
+
+#[allow(unused_parens)]
+#[rustfmt::skip]
+pub fn generated_intermediate_simd_x2(input: &[[u32; 16]; 2]) -> [u64x2; 6] {
+    // Load all inputs into SIMD registers
+    let input_0_simd = u64x2::from_array([input[0][0] as u64, input[1][0] as u64]);
+    let input_1_simd = u64x2::from_array([input[0][1] as u64, input[1][1] as u64]);
+    let input_2_simd = u64x2::from_array([input[0][2] as u64, input[1][2] as u64]);
+    let input_3_simd = u64x2::from_array([input[0][3] as u64, input[1][3] as u64]);
+    let input_4_simd = u64x2::from_array([input[0][4] as u64, input[1][4] as u64]);
+    let input_5_simd = u64x2::from_array([input[0][5] as u64, input[1][5] as u64]);
+    let input_6_simd = u64x2::from_array([input[0][6] as u64, input[1][6] as u64]);
+    let input_7_simd = u64x2::from_array([input[0][7] as u64, input[1][7] as u64]);
+    let input_8_simd = u64x2::from_array([input[0][8] as u64, input[1][8] as u64]);
+    let input_9_simd = u64x2::from_array([input[0][9] as u64, input[1][9] as u64]);
+    let input_10_simd = u64x2::from_array([input[0][10] as u64, input[1][10] as u64]);
+    let input_11_simd = u64x2::from_array([input[0][11] as u64, input[1][11] as u64]);
+    let input_12_simd = u64x2::from_array([input[0][12] as u64, input[1][12] as u64]);
+    let input_13_simd = u64x2::from_array([input[0][13] as u64, input[1][13] as u64]);
+    let input_14_simd = u64x2::from_array([input[0][14] as u64, input[1][14] as u64]);
+    let input_15_simd = u64x2::from_array([input[0][15] as u64, input[1][15] as u64]);
+
+    // layer 0
+    let n_160_simd = (input_0_simd - input_8_simd);
+    let n_162_simd = (input_2_simd - input_10_simd);
+    let n_164_simd = (input_4_simd - input_12_simd);
+    let n_166_simd = (input_6_simd - input_14_simd);
+    // layer 1
+    let n_161_simd = (input_1_simd - input_9_simd);
+    let n_163_simd = (input_3_simd - input_11_simd);
+    let n_165_simd = (input_5_simd - input_13_simd);
+    let n_176_simd = (n_160_simd + n_164_simd);
+    let n_178_simd = (n_162_simd + n_166_simd);
+    // layer 2
+    let n_34_simd = (input_0_simd + input_8_simd);
+    let n_35_simd = (input_1_simd + input_9_simd);
+    let n_36_simd = (input_2_simd + input_10_simd);
+    let n_37_simd = (input_3_simd + input_11_simd);
+    let n_38_simd = (input_4_simd + input_12_simd);
+    let n_39_simd = (input_5_simd + input_13_simd);
+    let n_40_simd = (input_6_simd + input_14_simd);
+    let n_41_simd = (input_7_simd + input_15_simd);
+    let n_167_simd = (input_7_simd - input_15_simd);
+    let n_177_simd = (n_161_simd + n_165_simd);
+    let n_185_simd = (n_161_simd + n_163_simd);
+    let n_270_simd = (n_176_simd + n_178_simd);
+    // layer 3
+    let n_90_simd = (n_34_simd - n_38_simd);
+    let n_91_simd = (n_35_simd - n_39_simd);
+    let n_92_simd = (n_36_simd - n_40_simd);
+    let n_93_simd = (n_37_simd - n_41_simd);
+    let n_179_simd = (n_163_simd + n_167_simd);
+    let n_184_simd = (n_160_simd + n_162_simd);
+    let n_1891_simd = (n_177_simd * u64x2::splat(0xfffffffffffac4b0u64));
+    let n_1909_simd = (n_185_simd * u64x2::splat(0xfffffffffffbe968u64));
+    let n_1915_simd = (n_161_simd * u64x2::splat(0xfffffffffffcc698u64));
+    let n_2047_simd = (n_270_simd * u64x2::splat(0x1c070u64));
+    // layer 4
+    let n_50_simd = (n_34_simd + n_38_simd);
+    let n_51_simd = (n_35_simd + n_39_simd);
+    let n_52_simd = (n_36_simd + n_40_simd);
+    let n_53_simd = (n_37_simd + n_41_simd);
+    let n_98_simd = (n_90_simd + n_92_simd);
+    let n_99_simd = (n_91_simd + n_93_simd);
+    let n_227_simd = (n_164_simd + n_166_simd);
+    let n_271_simd = (n_177_simd + n_179_simd);
+    let n_1360_simd = (n_1909_simd - n_1915_simd);
+    let n_1630_simd = (n_1891_simd + n_2047_simd);
+    let n_1921_simd = (n_163_simd * u64x2::splat(0xffffffffffff22d0u64));
+    let n_2007_simd = (n_184_simd * u64x2::splat(0xffffffffffff0150u64));
+    let n_2035_simd = (n_176_simd * u64x2::splat(0xfffffffffffffc60u64));
+    // layer 5
+    let n_58_simd = (n_50_simd + n_52_simd);
+    let n_59_simd = (n_51_simd + n_53_simd);
+    let n_228_simd = (n_165_simd + n_167_simd);
+    let n_1351_simd = (n_1360_simd - n_1921_simd);
+    let n_1606_simd = (n_1630_simd - n_2035_simd);
+    let n_1615_simd = (n_1915_simd + n_2007_simd);
+    let n_1861_simd = (n_99_simd * u64x2::splat(0xfffffffffffe33b4u64));
+    let n_1865_simd = (n_91_simd * u64x2::splat(0xfffffffffffb7700u64));
+    let n_1879_simd = (n_160_simd * u64x2::splat(0x8b18u64));
+    let n_1903_simd = (n_178_simd * u64x2::splat(0x1c410u64));
+    let n_1927_simd = (n_162_simd * u64x2::splat(0xfffffffffffe7638u64));
+    let n_1939_simd = (n_165_simd * u64x2::splat(0xfffffffffffdfe18u64));
+    let n_1970_simd = (n_160_simd * u64x2::splat(0xfffffffffffcc698u64));
+    let n_1973_simd = (n_161_simd * u64x2::splat(0x8b18u64));
+    let n_1982_simd = (n_162_simd * u64x2::splat(0xffffffffffff22d0u64));
+    let n_1985_simd = (n_163_simd * u64x2::splat(0xfffffffffffe7638u64));
+    let n_2001_simd = (n_98_simd * u64x2::splat(0x563f0u64));
+    let n_2013_simd = (n_227_simd * u64x2::splat(0x2bf20u64));
+    let n_2020_simd = (n_184_simd * u64x2::splat(0xfffffffffffbe968u64));
+    let n_2023_simd = (n_185_simd * u64x2::splat(0xffffffffffff0150u64));
+    let n_2038_simd = (n_176_simd * u64x2::splat(0xfffffffffffac4b0u64));
+    let n_2041_simd = (n_177_simd * u64x2::splat(0xfffffffffffffc60u64));
+    let n_2050_simd = (n_270_simd * u64x2::splat(0xfffffffffff931e8u64));
+    let n_2053_simd = (n_271_simd * u64x2::splat(0x1c070u64));
+    // layer 6
+    let n_62_simd = (n_58_simd + n_59_simd);
+    let n_65_simd = (n_58_simd - n_59_simd);
+    let n_71_simd = (n_50_simd - n_52_simd);
+    let n_72_simd = (n_51_simd - n_53_simd);
+    let n_485_simd = (n_1861_simd - n_1865_simd);
+    let n_970_simd = (n_1865_simd + n_2001_simd);
+    let n_1330_simd = (n_1351_simd + n_1927_simd);
+    let n_1573_simd = (n_1606_simd - n_1903_simd);
+    let n_1582_simd = (n_1615_simd - n_1879_simd);
+    let n_1591_simd = (n_1939_simd + n_2013_simd);
+    let n_1729_simd = (n_1982_simd + n_1985_simd);
+    let n_1768_simd = (n_1970_simd + n_1973_simd);
+    let n_1786_simd = (n_2038_simd + n_2041_simd);
+    let n_1792_simd = (n_2020_simd + n_2023_simd);
+    let n_1801_simd = (n_2050_simd + n_2053_simd);
+    let n_1857_simd = (n_90_simd * u64x2::splat(0x608f8u64));
+    let n_1869_simd = (n_93_simd * u64x2::splat(0x2bcb4u64));
+    let n_1897_simd = (n_179_simd * u64x2::splat(0xfffffffffffe6d38u64));
+    let n_1933_simd = (n_228_simd * u64x2::splat(0xfffffffffffd4880u64));
+    let n_1957_simd = (n_164_simd * u64x2::splat(0xffffffffffff7148u64));
+    let n_1961_simd = (n_90_simd * u64x2::splat(0xfffffffffffb7700u64));
+    let n_1963_simd = (n_91_simd * u64x2::splat(0x608f8u64));
+    let n_1976_simd = (n_178_simd * u64x2::splat(0xfffffffffffe6d38u64));
+    let n_1979_simd = (n_179_simd * u64x2::splat(0x1c410u64));
+    let n_1994_simd = (n_164_simd * u64x2::splat(0xfffffffffffdfe18u64));
+    let n_1997_simd = (n_165_simd * u64x2::splat(0xffffffffffff7148u64));
+    let n_2015_simd = (n_98_simd * u64x2::splat(0xfffffffffffe33b4u64));
+    let n_2017_simd = (n_99_simd * u64x2::splat(0x563f0u64));
+    let n_2026_simd = (n_227_simd * u64x2::splat(0xfffffffffffd4880u64));
+    let n_2029_simd = (n_228_simd * u64x2::splat(0x2bf20u64));
+    // layer 7
+    let n_64_simd = (n_62_simd * u64x2::splat(0x801d5u64));
+    let n_67_simd = (n_65_simd * u64x2::splat(0xcccbu64));
+    let n_454_simd = (n_485_simd - n_1869_simd);
+    let n_937_simd = (n_970_simd - n_1857_simd);
+    let n_988_simd = (n_1897_simd - n_1921_simd);
+    let n_1116_simd = (n_1961_simd + n_1963_simd);
+    let n_1140_simd = (n_2015_simd + n_2017_simd);
+    let n_1285_simd = (n_1330_simd + n_2035_simd);
+    let n_1321_simd = (n_1933_simd - n_1939_simd);
+    let n_1420_simd = (n_1729_simd + n_1786_simd);
+    let n_1540_simd = (n_1921_simd + n_1573_simd);
+    let n_1549_simd = (n_1582_simd - n_1927_simd);
+    let n_1558_simd = (n_1591_simd - n_1957_simd);
+    let n_1723_simd = (n_1792_simd - n_1768_simd);
+    let n_1741_simd = (n_1994_simd + n_1997_simd);
+    let n_1750_simd = (n_1801_simd - n_1786_simd);
+    let n_1756_simd = (n_1976_simd + n_1979_simd);
+    let n_1774_simd = (n_2026_simd + n_2029_simd);
+    let n_1851_simd = (n_71_simd * u64x2::splat(0xffffffffffff9af0u64));
+    let n_1853_simd = (n_72_simd * u64x2::splat(0xd29eu64));
+    let n_1873_simd = (n_92_simd * u64x2::splat(0xffffffffffff5af8u64));
+    let n_1945_simd = (n_167_simd * u64x2::splat(0xffffffffffff4a68u64));
+    let n_1951_simd = (n_166_simd * u64x2::splat(0x34dd8u64));
+    let n_1958_simd = (n_71_simd * u64x2::splat(0xd29eu64));
+    let n_1959_simd = (n_72_simd * u64x2::splat(0xffffffffffff9af0u64));
+    let n_1965_simd = (n_92_simd * u64x2::splat(0x2bcb4u64));
+    let n_1967_simd = (n_93_simd * u64x2::splat(0xffffffffffff5af8u64));
+    let n_1988_simd = (n_166_simd * u64x2::splat(0xffffffffffff4a68u64));
+    let n_1991_simd = (n_167_simd * u64x2::splat(0x34dd8u64));
+    // layer 8
+    let n_69_simd = (n_64_simd + n_67_simd);
+    let n_70_simd = (n_64_simd - n_67_simd);
+    let n_397_simd = (n_1851_simd - n_1853_simd);
+    let n_428_simd = (n_454_simd + n_1873_simd);
+    let n_702_simd = (n_1958_simd + n_1959_simd);
+    let n_912_simd = (n_937_simd - n_1873_simd);
+    let n_955_simd = (n_988_simd - n_1945_simd);
+    let n_1092_simd = (n_1140_simd - n_1116_simd);
+    let n_1096_simd = (n_1965_simd + n_1967_simd);
+    let n_1261_simd = (n_1285_simd - n_1879_simd);
+    let n_1300_simd = (n_1321_simd - n_1945_simd);
+    let n_1399_simd = (n_1420_simd - n_1768_simd);
+    let n_1516_simd = (n_1540_simd - n_1549_simd);
+    let n_1525_simd = (n_1558_simd - n_1951_simd);
+    let n_1690_simd = (n_1723_simd - n_1729_simd);
+    let n_1699_simd = (n_1774_simd - n_1741_simd);
+    let n_1705_simd = (n_1988_simd + n_1991_simd);
+    let n_1714_simd = (n_1750_simd - n_1756_simd);
+    // layer 9
+    let n_86_simd = (n_69_simd + n_397_simd);
+    let n_87_simd = (n_69_simd - n_397_simd);
+    let n_88_simd = (n_70_simd + n_702_simd);
+    let n_89_simd = (n_70_simd - n_702_simd);
+    let n_403_simd = (n_1857_simd - n_428_simd);
+    let n_708_simd = (n_1116_simd - n_1096_simd);
+    let n_897_simd = (n_912_simd - n_1869_simd);
+    let n_931_simd = (n_955_simd + n_1525_simd);
+    let n_1077_simd = (n_1092_simd - n_1096_simd);
+    let n_1246_simd = (n_1261_simd - n_1957_simd);
+    let n_1276_simd = (n_1300_simd + n_1951_simd);
+    let n_1384_simd = (n_1399_simd - n_1741_simd);
+    let n_1501_simd = (n_1516_simd - n_1525_simd);
+    let n_1666_simd = (n_1714_simd - n_1690_simd);
+    let n_1675_simd = (n_1699_simd - n_1705_simd);
+    // layer 10
+    let n_153_simd = (n_86_simd - n_403_simd);
+    let n_155_simd = (n_88_simd - n_708_simd);
+    let n_156_simd = (n_87_simd + n_897_simd);
+    let n_157_simd = (n_87_simd - n_897_simd);
+    let n_158_simd = (n_89_simd + n_1077_simd);
+    let n_159_simd = (n_89_simd - n_1077_simd);
+    let n_906_simd = (n_1549_simd - n_931_simd);
+    let n_1086_simd = (n_1690_simd - n_1675_simd);
+    let n_1237_simd = (n_1246_simd - n_1276_simd);
+    let n_1375_simd = (n_1384_simd - n_1705_simd);
+    let n_1492_simd = (n_1501_simd - n_1945_simd);
+    let n_1657_simd = (n_1666_simd - n_1675_simd);
+    // output
+    [
+        (n_156_simd - n_906_simd),
+        (n_158_simd - n_1086_simd),
+        (n_153_simd - n_1237_simd),
+        (n_155_simd - n_1375_simd),
+        (n_157_simd - n_1492_simd),
+        (n_159_simd - n_1657_simd),
+    ]
+}
+
+// ===== SIMD VERSION (x4 lanes) =====
+
+#[allow(unused_parens)]
+#[rustfmt::skip]
+pub fn generated_intermediate_simd_x4(input: &[[u32; 16]; 4]) -> [u64x4; 6] {
+    // Load all inputs into SIMD registers
+    let input_0_simd = u64x4::from_array([input[0][0] as u64, input[1][0] as u64, input[2][0] as u64, input[3][0] as u64]);
+    let input_1_simd = u64x4::from_array([input[0][1] as u64, input[1][1] as u64, input[2][1] as u64, input[3][1] as u64]);
+    let input_2_simd = u64x4::from_array([input[0][2] as u64, input[1][2] as u64, input[2][2] as u64, input[3][2] as u64]);
+    let input_3_simd = u64x4::from_array([input[0][3] as u64, input[1][3] as u64, input[2][3] as u64, input[3][3] as u64]);
+    let input_4_simd = u64x4::from_array([input[0][4] as u64, input[1][4] as u64, input[2][4] as u64, input[3][4] as u64]);
+    let input_5_simd = u64x4::from_array([input[0][5] as u64, input[1][5] as u64, input[2][5] as u64, input[3][5] as u64]);
+    let input_6_simd = u64x4::from_array([input[0][6] as u64, input[1][6] as u64, input[2][6] as u64, input[3][6] as u64]);
+    let input_7_simd = u64x4::from_array([input[0][7] as u64, input[1][7] as u64, input[2][7] as u64, input[3][7] as u64]);
+    let input_8_simd = u64x4::from_array([input[0][8] as u64, input[1][8] as u64, input[2][8] as u64, input[3][8] as u64]);
+    let input_9_simd = u64x4::from_array([input[0][9] as u64, input[1][9] as u64, input[2][9] as u64, input[3][9] as u64]);
+    let input_10_simd = u64x4::from_array([input[0][10] as u64, input[1][10] as u64, input[2][10] as u64, input[3][10] as u64]);
+    let input_11_simd = u64x4::from_array([input[0][11] as u64, input[1][11] as u64, input[2][11] as u64, input[3][11] as u64]);
+    let input_12_simd = u64x4::from_array([input[0][12] as u64, input[1][12] as u64, input[2][12] as u64, input[3][12] as u64]);
+    let input_13_simd = u64x4::from_array([input[0][13] as u64, input[1][13] as u64, input[2][13] as u64, input[3][13] as u64]);
+    let input_14_simd = u64x4::from_array([input[0][14] as u64, input[1][14] as u64, input[2][14] as u64, input[3][14] as u64]);
+    let input_15_simd = u64x4::from_array([input[0][15] as u64, input[1][15] as u64, input[2][15] as u64, input[3][15] as u64]);
+
+    // layer 0
+    let n_160_simd = (input_0_simd - input_8_simd);
+    let n_162_simd = (input_2_simd - input_10_simd);
+    let n_164_simd = (input_4_simd - input_12_simd);
+    let n_166_simd = (input_6_simd - input_14_simd);
+    // layer 1
+    let n_161_simd = (input_1_simd - input_9_simd);
+    let n_163_simd = (input_3_simd - input_11_simd);
+    let n_165_simd = (input_5_simd - input_13_simd);
+    let n_176_simd = (n_160_simd + n_164_simd);
+    let n_178_simd = (n_162_simd + n_166_simd);
+    // layer 2
+    let n_34_simd = (input_0_simd + input_8_simd);
+    let n_35_simd = (input_1_simd + input_9_simd);
+    let n_36_simd = (input_2_simd + input_10_simd);
+    let n_37_simd = (input_3_simd + input_11_simd);
+    let n_38_simd = (input_4_simd + input_12_simd);
+    let n_39_simd = (input_5_simd + input_13_simd);
+    let n_40_simd = (input_6_simd + input_14_simd);
+    let n_41_simd = (input_7_simd + input_15_simd);
+    let n_167_simd = (input_7_simd - input_15_simd);
+    let n_177_simd = (n_161_simd + n_165_simd);
+    let n_185_simd = (n_161_simd + n_163_simd);
+    let n_270_simd = (n_176_simd + n_178_simd);
+    // layer 3
+    let n_90_simd = (n_34_simd - n_38_simd);
+    let n_91_simd = (n_35_simd - n_39_simd);
+    let n_92_simd = (n_36_simd - n_40_simd);
+    let n_93_simd = (n_37_simd - n_41_simd);
+    let n_179_simd = (n_163_simd + n_167_simd);
+    let n_184_simd = (n_160_simd + n_162_simd);
+    let n_1891_simd = (n_177_simd * u64x4::splat(0xfffffffffffac4b0u64));
+    let n_1909_simd = (n_185_simd * u64x4::splat(0xfffffffffffbe968u64));
+    let n_1915_simd = (n_161_simd * u64x4::splat(0xfffffffffffcc698u64));
+    let n_2047_simd = (n_270_simd * u64x4::splat(0x1c070u64));
+    // layer 4
+    let n_50_simd = (n_34_simd + n_38_simd);
+    let n_51_simd = (n_35_simd + n_39_simd);
+    let n_52_simd = (n_36_simd + n_40_simd);
+    let n_53_simd = (n_37_simd + n_41_simd);
+    let n_98_simd = (n_90_simd + n_92_simd);
+    let n_99_simd = (n_91_simd + n_93_simd);
+    let n_227_simd = (n_164_simd + n_166_simd);
+    let n_271_simd = (n_177_simd + n_179_simd);
+    let n_1360_simd = (n_1909_simd - n_1915_simd);
+    let n_1630_simd = (n_1891_simd + n_2047_simd);
+    let n_1921_simd = (n_163_simd * u64x4::splat(0xffffffffffff22d0u64));
+    let n_2007_simd = (n_184_simd * u64x4::splat(0xffffffffffff0150u64));
+    let n_2035_simd = (n_176_simd * u64x4::splat(0xfffffffffffffc60u64));
+    // layer 5
+    let n_58_simd = (n_50_simd + n_52_simd);
+    let n_59_simd = (n_51_simd + n_53_simd);
+    let n_228_simd = (n_165_simd + n_167_simd);
+    let n_1351_simd = (n_1360_simd - n_1921_simd);
+    let n_1606_simd = (n_1630_simd - n_2035_simd);
+    let n_1615_simd = (n_1915_simd + n_2007_simd);
+    let n_1861_simd = (n_99_simd * u64x4::splat(0xfffffffffffe33b4u64));
+    let n_1865_simd = (n_91_simd * u64x4::splat(0xfffffffffffb7700u64));
+    let n_1879_simd = (n_160_simd * u64x4::splat(0x8b18u64));
+    let n_1903_simd = (n_178_simd * u64x4::splat(0x1c410u64));
+    let n_1927_simd = (n_162_simd * u64x4::splat(0xfffffffffffe7638u64));
+    let n_1939_simd = (n_165_simd * u64x4::splat(0xfffffffffffdfe18u64));
+    let n_1970_simd = (n_160_simd * u64x4::splat(0xfffffffffffcc698u64));
+    let n_1973_simd = (n_161_simd * u64x4::splat(0x8b18u64));
+    let n_1982_simd = (n_162_simd * u64x4::splat(0xffffffffffff22d0u64));
+    let n_1985_simd = (n_163_simd * u64x4::splat(0xfffffffffffe7638u64));
+    let n_2001_simd = (n_98_simd * u64x4::splat(0x563f0u64));
+    let n_2013_simd = (n_227_simd * u64x4::splat(0x2bf20u64));
+    let n_2020_simd = (n_184_simd * u64x4::splat(0xfffffffffffbe968u64));
+    let n_2023_simd = (n_185_simd * u64x4::splat(0xffffffffffff0150u64));
+    let n_2038_simd = (n_176_simd * u64x4::splat(0xfffffffffffac4b0u64));
+    let n_2041_simd = (n_177_simd * u64x4::splat(0xfffffffffffffc60u64));
+    let n_2050_simd = (n_270_simd * u64x4::splat(0xfffffffffff931e8u64));
+    let n_2053_simd = (n_271_simd * u64x4::splat(0x1c070u64));
+    // layer 6
+    let n_62_simd = (n_58_simd + n_59_simd);
+    let n_65_simd = (n_58_simd - n_59_simd);
+    let n_71_simd = (n_50_simd - n_52_simd);
+    let n_72_simd = (n_51_simd - n_53_simd);
+    let n_485_simd = (n_1861_simd - n_1865_simd);
+    let n_970_simd = (n_1865_simd + n_2001_simd);
+    let n_1330_simd = (n_1351_simd + n_1927_simd);
+    let n_1573_simd = (n_1606_simd - n_1903_simd);
+    let n_1582_simd = (n_1615_simd - n_1879_simd);
+    let n_1591_simd = (n_1939_simd + n_2013_simd);
+    let n_1729_simd = (n_1982_simd + n_1985_simd);
+    let n_1768_simd = (n_1970_simd + n_1973_simd);
+    let n_1786_simd = (n_2038_simd + n_2041_simd);
+    let n_1792_simd = (n_2020_simd + n_2023_simd);
+    let n_1801_simd = (n_2050_simd + n_2053_simd);
+    let n_1857_simd = (n_90_simd * u64x4::splat(0x608f8u64));
+    let n_1869_simd = (n_93_simd * u64x4::splat(0x2bcb4u64));
+    let n_1897_simd = (n_179_simd * u64x4::splat(0xfffffffffffe6d38u64));
+    let n_1933_simd = (n_228_simd * u64x4::splat(0xfffffffffffd4880u64));
+    let n_1957_simd = (n_164_simd * u64x4::splat(0xffffffffffff7148u64));
+    let n_1961_simd = (n_90_simd * u64x4::splat(0xfffffffffffb7700u64));
+    let n_1963_simd = (n_91_simd * u64x4::splat(0x608f8u64));
+    let n_1976_simd = (n_178_simd * u64x4::splat(0xfffffffffffe6d38u64));
+    let n_1979_simd = (n_179_simd * u64x4::splat(0x1c410u64));
+    let n_1994_simd = (n_164_simd * u64x4::splat(0xfffffffffffdfe18u64));
+    let n_1997_simd = (n_165_simd * u64x4::splat(0xffffffffffff7148u64));
+    let n_2015_simd = (n_98_simd * u64x4::splat(0xfffffffffffe33b4u64));
+    let n_2017_simd = (n_99_simd * u64x4::splat(0x563f0u64));
+    let n_2026_simd = (n_227_simd * u64x4::splat(0xfffffffffffd4880u64));
+    let n_2029_simd = (n_228_simd * u64x4::splat(0x2bf20u64));
+    // layer 7
+    let n_64_simd = (n_62_simd * u64x4::splat(0x801d5u64));
+    let n_67_simd = (n_65_simd * u64x4::splat(0xcccbu64));
+    let n_454_simd = (n_485_simd - n_1869_simd);
+    let n_937_simd = (n_970_simd - n_1857_simd);
+    let n_988_simd = (n_1897_simd - n_1921_simd);
+    let n_1116_simd = (n_1961_simd + n_1963_simd);
+    let n_1140_simd = (n_2015_simd + n_2017_simd);
+    let n_1285_simd = (n_1330_simd + n_2035_simd);
+    let n_1321_simd = (n_1933_simd - n_1939_simd);
+    let n_1420_simd = (n_1729_simd + n_1786_simd);
+    let n_1540_simd = (n_1921_simd + n_1573_simd);
+    let n_1549_simd = (n_1582_simd - n_1927_simd);
+    let n_1558_simd = (n_1591_simd - n_1957_simd);
+    let n_1723_simd = (n_1792_simd - n_1768_simd);
+    let n_1741_simd = (n_1994_simd + n_1997_simd);
+    let n_1750_simd = (n_1801_simd - n_1786_simd);
+    let n_1756_simd = (n_1976_simd + n_1979_simd);
+    let n_1774_simd = (n_2026_simd + n_2029_simd);
+    let n_1851_simd = (n_71_simd * u64x4::splat(0xffffffffffff9af0u64));
+    let n_1853_simd = (n_72_simd * u64x4::splat(0xd29eu64));
+    let n_1873_simd = (n_92_simd * u64x4::splat(0xffffffffffff5af8u64));
+    let n_1945_simd = (n_167_simd * u64x4::splat(0xffffffffffff4a68u64));
+    let n_1951_simd = (n_166_simd * u64x4::splat(0x34dd8u64));
+    let n_1958_simd = (n_71_simd * u64x4::splat(0xd29eu64));
+    let n_1959_simd = (n_72_simd * u64x4::splat(0xffffffffffff9af0u64));
+    let n_1965_simd = (n_92_simd * u64x4::splat(0x2bcb4u64));
+    let n_1967_simd = (n_93_simd * u64x4::splat(0xffffffffffff5af8u64));
+    let n_1988_simd = (n_166_simd * u64x4::splat(0xffffffffffff4a68u64));
+    let n_1991_simd = (n_167_simd * u64x4::splat(0x34dd8u64));
+    // layer 8
+    let n_69_simd = (n_64_simd + n_67_simd);
+    let n_70_simd = (n_64_simd - n_67_simd);
+    let n_397_simd = (n_1851_simd - n_1853_simd);
+    let n_428_simd = (n_454_simd + n_1873_simd);
+    let n_702_simd = (n_1958_simd + n_1959_simd);
+    let n_912_simd = (n_937_simd - n_1873_simd);
+    let n_955_simd = (n_988_simd - n_1945_simd);
+    let n_1092_simd = (n_1140_simd - n_1116_simd);
+    let n_1096_simd = (n_1965_simd + n_1967_simd);
+    let n_1261_simd = (n_1285_simd - n_1879_simd);
+    let n_1300_simd = (n_1321_simd - n_1945_simd);
+    let n_1399_simd = (n_1420_simd - n_1768_simd);
+    let n_1516_simd = (n_1540_simd - n_1549_simd);
+    let n_1525_simd = (n_1558_simd - n_1951_simd);
+    let n_1690_simd = (n_1723_simd - n_1729_simd);
+    let n_1699_simd = (n_1774_simd - n_1741_simd);
+    let n_1705_simd = (n_1988_simd + n_1991_simd);
+    let n_1714_simd = (n_1750_simd - n_1756_simd);
+    // layer 9
+    let n_86_simd = (n_69_simd + n_397_simd);
+    let n_87_simd = (n_69_simd - n_397_simd);
+    let n_88_simd = (n_70_simd + n_702_simd);
+    let n_89_simd = (n_70_simd - n_702_simd);
+    let n_403_simd = (n_1857_simd - n_428_simd);
+    let n_708_simd = (n_1116_simd - n_1096_simd);
+    let n_897_simd = (n_912_simd - n_1869_simd);
+    let n_931_simd = (n_955_simd + n_1525_simd);
+    let n_1077_simd = (n_1092_simd - n_1096_simd);
+    let n_1246_simd = (n_1261_simd - n_1957_simd);
+    let n_1276_simd = (n_1300_simd + n_1951_simd);
+    let n_1384_simd = (n_1399_simd - n_1741_simd);
+    let n_1501_simd = (n_1516_simd - n_1525_simd);
+    let n_1666_simd = (n_1714_simd - n_1690_simd);
+    let n_1675_simd = (n_1699_simd - n_1705_simd);
+    // layer 10
+    let n_153_simd = (n_86_simd - n_403_simd);
+    let n_155_simd = (n_88_simd - n_708_simd);
+    let n_156_simd = (n_87_simd + n_897_simd);
+    let n_157_simd = (n_87_simd - n_897_simd);
+    let n_158_simd = (n_89_simd + n_1077_simd);
+    let n_159_simd = (n_89_simd - n_1077_simd);
+    let n_906_simd = (n_1549_simd - n_931_simd);
+    let n_1086_simd = (n_1690_simd - n_1675_simd);
+    let n_1237_simd = (n_1246_simd - n_1276_simd);
+    let n_1375_simd = (n_1384_simd - n_1705_simd);
+    let n_1492_simd = (n_1501_simd - n_1945_simd);
+    let n_1657_simd = (n_1666_simd - n_1675_simd);
+    // output
+    [
+        (n_156_simd - n_906_simd),
+        (n_158_simd - n_1086_simd),
+        (n_153_simd - n_1237_simd),
+        (n_155_simd - n_1375_simd),
+        (n_157_simd - n_1492_simd),
+        (n_159_simd - n_1657_simd),
+    ]
+}
+
+// ===== SIMD VERSION (x8 lanes) =====
+
+#[allow(unused_parens)]
+#[rustfmt::skip]
+pub fn generated_intermediate_simd_x8(input: &[[u32; 16]; 8]) -> [u64x8; 6] {
+    // Load all inputs into SIMD registers
+    let input_0_simd = u64x8::from_array([input[0][0] as u64, input[1][0] as u64, input[2][0] as u64, input[3][0] as u64, input[4][0] as u64, input[5][0] as u64, input[6][0] as u64, input[7][0] as u64]);
+    let input_1_simd = u64x8::from_array([input[0][1] as u64, input[1][1] as u64, input[2][1] as u64, input[3][1] as u64, input[4][1] as u64, input[5][1] as u64, input[6][1] as u64, input[7][1] as u64]);
+    let input_2_simd = u64x8::from_array([input[0][2] as u64, input[1][2] as u64, input[2][2] as u64, input[3][2] as u64, input[4][2] as u64, input[5][2] as u64, input[6][2] as u64, input[7][2] as u64]);
+    let input_3_simd = u64x8::from_array([input[0][3] as u64, input[1][3] as u64, input[2][3] as u64, input[3][3] as u64, input[4][3] as u64, input[5][3] as u64, input[6][3] as u64, input[7][3] as u64]);
+    let input_4_simd = u64x8::from_array([input[0][4] as u64, input[1][4] as u64, input[2][4] as u64, input[3][4] as u64, input[4][4] as u64, input[5][4] as u64, input[6][4] as u64, input[7][4] as u64]);
+    let input_5_simd = u64x8::from_array([input[0][5] as u64, input[1][5] as u64, input[2][5] as u64, input[3][5] as u64, input[4][5] as u64, input[5][5] as u64, input[6][5] as u64, input[7][5] as u64]);
+    let input_6_simd = u64x8::from_array([input[0][6] as u64, input[1][6] as u64, input[2][6] as u64, input[3][6] as u64, input[4][6] as u64, input[5][6] as u64, input[6][6] as u64, input[7][6] as u64]);
+    let input_7_simd = u64x8::from_array([input[0][7] as u64, input[1][7] as u64, input[2][7] as u64, input[3][7] as u64, input[4][7] as u64, input[5][7] as u64, input[6][7] as u64, input[7][7] as u64]);
+    let input_8_simd = u64x8::from_array([input[0][8] as u64, input[1][8] as u64, input[2][8] as u64, input[3][8] as u64, input[4][8] as u64, input[5][8] as u64, input[6][8] as u64, input[7][8] as u64]);
+    let input_9_simd = u64x8::from_array([input[0][9] as u64, input[1][9] as u64, input[2][9] as u64, input[3][9] as u64, input[4][9] as u64, input[5][9] as u64, input[6][9] as u64, input[7][9] as u64]);
+    let input_10_simd = u64x8::from_array([input[0][10] as u64, input[1][10] as u64, input[2][10] as u64, input[3][10] as u64, input[4][10] as u64, input[5][10] as u64, input[6][10] as u64, input[7][10] as u64]);
+    let input_11_simd = u64x8::from_array([input[0][11] as u64, input[1][11] as u64, input[2][11] as u64, input[3][11] as u64, input[4][11] as u64, input[5][11] as u64, input[6][11] as u64, input[7][11] as u64]);
+    let input_12_simd = u64x8::from_array([input[0][12] as u64, input[1][12] as u64, input[2][12] as u64, input[3][12] as u64, input[4][12] as u64, input[5][12] as u64, input[6][12] as u64, input[7][12] as u64]);
+    let input_13_simd = u64x8::from_array([input[0][13] as u64, input[1][13] as u64, input[2][13] as u64, input[3][13] as u64, input[4][13] as u64, input[5][13] as u64, input[6][13] as u64, input[7][13] as u64]);
+    let input_14_simd = u64x8::from_array([input[0][14] as u64, input[1][14] as u64, input[2][14] as u64, input[3][14] as u64, input[4][14] as u64, input[5][14] as u64, input[6][14] as u64, input[7][14] as u64]);
+    let input_15_simd = u64x8::from_array([input[0][15] as u64, input[1][15] as u64, input[2][15] as u64, input[3][15] as u64, input[4][15] as u64, input[5][15] as u64, input[6][15] as u64, input[7][15] as u64]);
+
+    // layer 0
+    let n_160_simd = (input_0_simd - input_8_simd);
+    let n_162_simd = (input_2_simd - input_10_simd);
+    let n_164_simd = (input_4_simd - input_12_simd);
+    let n_166_simd = (input_6_simd - input_14_simd);
+    // layer 1
+    let n_161_simd = (input_1_simd - input_9_simd);
+    let n_163_simd = (input_3_simd - input_11_simd);
+    let n_165_simd = (input_5_simd - input_13_simd);
+    let n_176_simd = (n_160_simd + n_164_simd);
+    let n_178_simd = (n_162_simd + n_166_simd);
+    // layer 2
+    let n_34_simd = (input_0_simd + input_8_simd);
+    let n_35_simd = (input_1_simd + input_9_simd);
+    let n_36_simd = (input_2_simd + input_10_simd);
+    let n_37_simd = (input_3_simd + input_11_simd);
+    let n_38_simd = (input_4_simd + input_12_simd);
+    let n_39_simd = (input_5_simd + input_13_simd);
+    let n_40_simd = (input_6_simd + input_14_simd);
+    let n_41_simd = (input_7_simd + input_15_simd);
+    let n_167_simd = (input_7_simd - input_15_simd);
+    let n_177_simd = (n_161_simd + n_165_simd);
+    let n_185_simd = (n_161_simd + n_163_simd);
+    let n_270_simd = (n_176_simd + n_178_simd);
+    // layer 3
+    let n_90_simd = (n_34_simd - n_38_simd);
+    let n_91_simd = (n_35_simd - n_39_simd);
+    let n_92_simd = (n_36_simd - n_40_simd);
+    let n_93_simd = (n_37_simd - n_41_simd);
+    let n_179_simd = (n_163_simd + n_167_simd);
+    let n_184_simd = (n_160_simd + n_162_simd);
+    let n_1891_simd = (n_177_simd * u64x8::splat(0xfffffffffffac4b0u64));
+    let n_1909_simd = (n_185_simd * u64x8::splat(0xfffffffffffbe968u64));
+    let n_1915_simd = (n_161_simd * u64x8::splat(0xfffffffffffcc698u64));
+    let n_2047_simd = (n_270_simd * u64x8::splat(0x1c070u64));
+    // layer 4
+    let n_50_simd = (n_34_simd + n_38_simd);
+    let n_51_simd = (n_35_simd + n_39_simd);
+    let n_52_simd = (n_36_simd + n_40_simd);
+    let n_53_simd = (n_37_simd + n_41_simd);
+    let n_98_simd = (n_90_simd + n_92_simd);
+    let n_99_simd = (n_91_simd + n_93_simd);
+    let n_227_simd = (n_164_simd + n_166_simd);
+    let n_271_simd = (n_177_simd + n_179_simd);
+    let n_1360_simd = (n_1909_simd - n_1915_simd);
+    let n_1630_simd = (n_1891_simd + n_2047_simd);
+    let n_1921_simd = (n_163_simd * u64x8::splat(0xffffffffffff22d0u64));
+    let n_2007_simd = (n_184_simd * u64x8::splat(0xffffffffffff0150u64));
+    let n_2035_simd = (n_176_simd * u64x8::splat(0xfffffffffffffc60u64));
+    // layer 5
+    let n_58_simd = (n_50_simd + n_52_simd);
+    let n_59_simd = (n_51_simd + n_53_simd);
+    let n_228_simd = (n_165_simd + n_167_simd);
+    let n_1351_simd = (n_1360_simd - n_1921_simd);
+    let n_1606_simd = (n_1630_simd - n_2035_simd);
+    let n_1615_simd = (n_1915_simd + n_2007_simd);
+    let n_1861_simd = (n_99_simd * u64x8::splat(0xfffffffffffe33b4u64));
+    let n_1865_simd = (n_91_simd * u64x8::splat(0xfffffffffffb7700u64));
+    let n_1879_simd = (n_160_simd * u64x8::splat(0x8b18u64));
+    let n_1903_simd = (n_178_simd * u64x8::splat(0x1c410u64));
+    let n_1927_simd = (n_162_simd * u64x8::splat(0xfffffffffffe7638u64));
+    let n_1939_simd = (n_165_simd * u64x8::splat(0xfffffffffffdfe18u64));
+    let n_1970_simd = (n_160_simd * u64x8::splat(0xfffffffffffcc698u64));
+    let n_1973_simd = (n_161_simd * u64x8::splat(0x8b18u64));
+    let n_1982_simd = (n_162_simd * u64x8::splat(0xffffffffffff22d0u64));
+    let n_1985_simd = (n_163_simd * u64x8::splat(0xfffffffffffe7638u64));
+    let n_2001_simd = (n_98_simd * u64x8::splat(0x563f0u64));
+    let n_2013_simd = (n_227_simd * u64x8::splat(0x2bf20u64));
+    let n_2020_simd = (n_184_simd * u64x8::splat(0xfffffffffffbe968u64));
+    let n_2023_simd = (n_185_simd * u64x8::splat(0xffffffffffff0150u64));
+    let n_2038_simd = (n_176_simd * u64x8::splat(0xfffffffffffac4b0u64));
+    let n_2041_simd = (n_177_simd * u64x8::splat(0xfffffffffffffc60u64));
+    let n_2050_simd = (n_270_simd * u64x8::splat(0xfffffffffff931e8u64));
+    let n_2053_simd = (n_271_simd * u64x8::splat(0x1c070u64));
+    // layer 6
+    let n_62_simd = (n_58_simd + n_59_simd);
+    let n_65_simd = (n_58_simd - n_59_simd);
+    let n_71_simd = (n_50_simd - n_52_simd);
+    let n_72_simd = (n_51_simd - n_53_simd);
+    let n_485_simd = (n_1861_simd - n_1865_simd);
+    let n_970_simd = (n_1865_simd + n_2001_simd);
+    let n_1330_simd = (n_1351_simd + n_1927_simd);
+    let n_1573_simd = (n_1606_simd - n_1903_simd);
+    let n_1582_simd = (n_1615_simd - n_1879_simd);
+    let n_1591_simd = (n_1939_simd + n_2013_simd);
+    let n_1729_simd = (n_1982_simd + n_1985_simd);
+    let n_1768_simd = (n_1970_simd + n_1973_simd);
+    let n_1786_simd = (n_2038_simd + n_2041_simd);
+    let n_1792_simd = (n_2020_simd + n_2023_simd);
+    let n_1801_simd = (n_2050_simd + n_2053_simd);
+    let n_1857_simd = (n_90_simd * u64x8::splat(0x608f8u64));
+    let n_1869_simd = (n_93_simd * u64x8::splat(0x2bcb4u64));
+    let n_1897_simd = (n_179_simd * u64x8::splat(0xfffffffffffe6d38u64));
+    let n_1933_simd = (n_228_simd * u64x8::splat(0xfffffffffffd4880u64));
+    let n_1957_simd = (n_164_simd * u64x8::splat(0xffffffffffff7148u64));
+    let n_1961_simd = (n_90_simd * u64x8::splat(0xfffffffffffb7700u64));
+    let n_1963_simd = (n_91_simd * u64x8::splat(0x608f8u64));
+    let n_1976_simd = (n_178_simd * u64x8::splat(0xfffffffffffe6d38u64));
+    let n_1979_simd = (n_179_simd * u64x8::splat(0x1c410u64));
+    let n_1994_simd = (n_164_simd * u64x8::splat(0xfffffffffffdfe18u64));
+    let n_1997_simd = (n_165_simd * u64x8::splat(0xffffffffffff7148u64));
+    let n_2015_simd = (n_98_simd * u64x8::splat(0xfffffffffffe33b4u64));
+    let n_2017_simd = (n_99_simd * u64x8::splat(0x563f0u64));
+    let n_2026_simd = (n_227_simd * u64x8::splat(0xfffffffffffd4880u64));
+    let n_2029_simd = (n_228_simd * u64x8::splat(0x2bf20u64));
+    // layer 7
+    let n_64_simd = (n_62_simd * u64x8::splat(0x801d5u64));
+    let n_67_simd = (n_65_simd * u64x8::splat(0xcccbu64));
+    let n_454_simd = (n_485_simd - n_1869_simd);
+    let n_937_simd = (n_970_simd - n_1857_simd);
+    let n_988_simd = (n_1897_simd - n_1921_simd);
+    let n_1116_simd = (n_1961_simd + n_1963_simd);
+    let n_1140_simd = (n_2015_simd + n_2017_simd);
+    let n_1285_simd = (n_1330_simd + n_2035_simd);
+    let n_1321_simd = (n_1933_simd - n_1939_simd);
+    let n_1420_simd = (n_1729_simd + n_1786_simd);
+    let n_1540_simd = (n_1921_simd + n_1573_simd);
+    let n_1549_simd = (n_1582_simd - n_1927_simd);
+    let n_1558_simd = (n_1591_simd - n_1957_simd);
+    let n_1723_simd = (n_1792_simd - n_1768_simd);
+    let n_1741_simd = (n_1994_simd + n_1997_simd);
+    let n_1750_simd = (n_1801_simd - n_1786_simd);
+    let n_1756_simd = (n_1976_simd + n_1979_simd);
+    let n_1774_simd = (n_2026_simd + n_2029_simd);
+    let n_1851_simd = (n_71_simd * u64x8::splat(0xffffffffffff9af0u64));
+    let n_1853_simd = (n_72_simd * u64x8::splat(0xd29eu64));
+    let n_1873_simd = (n_92_simd * u64x8::splat(0xffffffffffff5af8u64));
+    let n_1945_simd = (n_167_simd * u64x8::splat(0xffffffffffff4a68u64));
+    let n_1951_simd = (n_166_simd * u64x8::splat(0x34dd8u64));
+    let n_1958_simd = (n_71_simd * u64x8::splat(0xd29eu64));
+    let n_1959_simd = (n_72_simd * u64x8::splat(0xffffffffffff9af0u64));
+    let n_1965_simd = (n_92_simd * u64x8::splat(0x2bcb4u64));
+    let n_1967_simd = (n_93_simd * u64x8::splat(0xffffffffffff5af8u64));
+    let n_1988_simd = (n_166_simd * u64x8::splat(0xffffffffffff4a68u64));
+    let n_1991_simd = (n_167_simd * u64x8::splat(0x34dd8u64));
+    // layer 8
+    let n_69_simd = (n_64_simd + n_67_simd);
+    let n_70_simd = (n_64_simd - n_67_simd);
+    let n_397_simd = (n_1851_simd - n_1853_simd);
+    let n_428_simd = (n_454_simd + n_1873_simd);
+    let n_702_simd = (n_1958_simd + n_1959_simd);
+    let n_912_simd = (n_937_simd - n_1873_simd);
+    let n_955_simd = (n_988_simd - n_1945_simd);
+    let n_1092_simd = (n_1140_simd - n_1116_simd);
+    let n_1096_simd = (n_1965_simd + n_1967_simd);
+    let n_1261_simd = (n_1285_simd - n_1879_simd);
+    let n_1300_simd = (n_1321_simd - n_1945_simd);
+    let n_1399_simd = (n_1420_simd - n_1768_simd);
+    let n_1516_simd = (n_1540_simd - n_1549_simd);
+    let n_1525_simd = (n_1558_simd - n_1951_simd);
+    let n_1690_simd = (n_1723_simd - n_1729_simd);
+    let n_1699_simd = (n_1774_simd - n_1741_simd);
+    let n_1705_simd = (n_1988_simd + n_1991_simd);
+    let n_1714_simd = (n_1750_simd - n_1756_simd);
+    // layer 9
+    let n_86_simd = (n_69_simd + n_397_simd);
+    let n_87_simd = (n_69_simd - n_397_simd);
+    let n_88_simd = (n_70_simd + n_702_simd);
+    let n_89_simd = (n_70_simd - n_702_simd);
+    let n_403_simd = (n_1857_simd - n_428_simd);
+    let n_708_simd = (n_1116_simd - n_1096_simd);
+    let n_897_simd = (n_912_simd - n_1869_simd);
+    let n_931_simd = (n_955_simd + n_1525_simd);
+    let n_1077_simd = (n_1092_simd - n_1096_simd);
+    let n_1246_simd = (n_1261_simd - n_1957_simd);
+    let n_1276_simd = (n_1300_simd + n_1951_simd);
+    let n_1384_simd = (n_1399_simd - n_1741_simd);
+    let n_1501_simd = (n_1516_simd - n_1525_simd);
+    let n_1666_simd = (n_1714_simd - n_1690_simd);
+    let n_1675_simd = (n_1699_simd - n_1705_simd);
+    // layer 10
+    let n_153_simd = (n_86_simd - n_403_simd);
+    let n_155_simd = (n_88_simd - n_708_simd);
+    let n_156_simd = (n_87_simd + n_897_simd);
+    let n_157_simd = (n_87_simd - n_897_simd);
+    let n_158_simd = (n_89_simd + n_1077_simd);
+    let n_159_simd = (n_89_simd - n_1077_simd);
+    let n_906_simd = (n_1549_simd - n_931_simd);
+    let n_1086_simd = (n_1690_simd - n_1675_simd);
+    let n_1237_simd = (n_1246_simd - n_1276_simd);
+    let n_1375_simd = (n_1384_simd - n_1705_simd);
+    let n_1492_simd = (n_1501_simd - n_1945_simd);
+    let n_1657_simd = (n_1666_simd - n_1675_simd);
+    // output
+    [
+        (n_156_simd - n_906_simd),
+        (n_158_simd - n_1086_simd),
+        (n_153_simd - n_1237_simd),
+        (n_155_simd - n_1375_simd),
+        (n_157_simd - n_1492_simd),
+        (n_159_simd - n_1657_simd),
+    ]
+}
+
+// ===== SCALAR VERSION =====
 #[allow(unused_parens)]
 pub const fn generated_last(input: &[u32; 16]) -> [u64; 5] {
     // layer 0
@@ -592,5 +1972,617 @@ pub const fn generated_last(input: &[u32; 16]) -> [u64; 5] {
         n_156.wrapping_add(n_906),
         n_158.wrapping_add(n_1086),
         n_153.wrapping_add(n_1237),
+    ]
+}
+
+// ===== SIMD VERSION (x2 lanes) =====
+
+#[allow(unused_parens)]
+#[rustfmt::skip]
+pub fn generated_last_simd_x2(input: &[[u32; 16]; 2]) -> [u64x2; 5] {
+    // Load all inputs into SIMD registers
+    let input_0_simd = u64x2::from_array([input[0][0] as u64, input[1][0] as u64]);
+    let input_1_simd = u64x2::from_array([input[0][1] as u64, input[1][1] as u64]);
+    let input_2_simd = u64x2::from_array([input[0][2] as u64, input[1][2] as u64]);
+    let input_3_simd = u64x2::from_array([input[0][3] as u64, input[1][3] as u64]);
+    let input_4_simd = u64x2::from_array([input[0][4] as u64, input[1][4] as u64]);
+    let input_5_simd = u64x2::from_array([input[0][5] as u64, input[1][5] as u64]);
+    let input_6_simd = u64x2::from_array([input[0][6] as u64, input[1][6] as u64]);
+    let input_7_simd = u64x2::from_array([input[0][7] as u64, input[1][7] as u64]);
+    let input_8_simd = u64x2::from_array([input[0][8] as u64, input[1][8] as u64]);
+    let input_9_simd = u64x2::from_array([input[0][9] as u64, input[1][9] as u64]);
+    let input_10_simd = u64x2::from_array([input[0][10] as u64, input[1][10] as u64]);
+    let input_11_simd = u64x2::from_array([input[0][11] as u64, input[1][11] as u64]);
+    let input_12_simd = u64x2::from_array([input[0][12] as u64, input[1][12] as u64]);
+    let input_13_simd = u64x2::from_array([input[0][13] as u64, input[1][13] as u64]);
+    let input_14_simd = u64x2::from_array([input[0][14] as u64, input[1][14] as u64]);
+    let input_15_simd = u64x2::from_array([input[0][15] as u64, input[1][15] as u64]);
+
+    // layer 0
+    let n_161_simd = (input_1_simd - input_9_simd);
+    let n_163_simd = (input_3_simd - input_11_simd);
+    let n_165_simd = (input_5_simd - input_13_simd);
+    let n_167_simd = (input_7_simd - input_15_simd);
+    // layer 1
+    let n_177_simd = (n_161_simd + n_165_simd);
+    let n_179_simd = (n_163_simd + n_167_simd);
+    // layer 2
+    let n_34_simd = (input_0_simd + input_8_simd);
+    let n_35_simd = (input_1_simd + input_9_simd);
+    let n_36_simd = (input_2_simd + input_10_simd);
+    let n_37_simd = (input_3_simd + input_11_simd);
+    let n_38_simd = (input_4_simd + input_12_simd);
+    let n_39_simd = (input_5_simd + input_13_simd);
+    let n_40_simd = (input_6_simd + input_14_simd);
+    let n_41_simd = (input_7_simd + input_15_simd);
+    let n_185_simd = (n_161_simd + n_163_simd);
+    let n_271_simd = (n_177_simd + n_179_simd);
+    // layer 3
+    let n_90_simd = (n_34_simd - n_38_simd);
+    let n_91_simd = (n_35_simd - n_39_simd);
+    let n_92_simd = (n_36_simd - n_40_simd);
+    let n_93_simd = (n_37_simd - n_41_simd);
+    let n_162_simd = (input_2_simd - input_10_simd);
+    let n_164_simd = (input_4_simd - input_12_simd);
+    let n_166_simd = (input_6_simd - input_14_simd);
+    let n_228_simd = (n_165_simd + n_167_simd);
+    let n_1885_simd = (n_271_simd * u64x2::splat(0xfffffffffff931e8u64));
+    let n_1891_simd = (n_177_simd * u64x2::splat(0xfffffffffffac4b0u64));
+    let n_1909_simd = (n_185_simd * u64x2::splat(0xfffffffffffbe968u64));
+    let n_1915_simd = (n_161_simd * u64x2::splat(0xfffffffffffcc698u64));
+    // layer 4
+    let n_50_simd = (n_34_simd + n_38_simd);
+    let n_51_simd = (n_35_simd + n_39_simd);
+    let n_52_simd = (n_36_simd + n_40_simd);
+    let n_53_simd = (n_37_simd + n_41_simd);
+    let n_98_simd = (n_90_simd + n_92_simd);
+    let n_99_simd = (n_91_simd + n_93_simd);
+    let n_160_simd = (input_0_simd - input_8_simd);
+    let n_178_simd = (n_162_simd + n_166_simd);
+    let n_227_simd = (n_164_simd + n_166_simd);
+    let n_651_simd = (n_1885_simd - n_1891_simd);
+    let n_1360_simd = (n_1909_simd - n_1915_simd);
+    let n_1897_simd = (n_179_simd * u64x2::splat(0xfffffffffffe6d38u64));
+    let n_1921_simd = (n_163_simd * u64x2::splat(0xffffffffffff22d0u64));
+    let n_1933_simd = (n_228_simd * u64x2::splat(0xfffffffffffd4880u64));
+    let n_1939_simd = (n_165_simd * u64x2::splat(0xfffffffffffdfe18u64));
+    // layer 5
+    let n_58_simd = (n_50_simd + n_52_simd);
+    let n_59_simd = (n_51_simd + n_53_simd);
+    let n_176_simd = (n_160_simd + n_164_simd);
+    let n_184_simd = (n_160_simd + n_162_simd);
+    let n_609_simd = (n_651_simd - n_1897_simd);
+    let n_1321_simd = (n_1933_simd - n_1939_simd);
+    let n_1351_simd = (n_1360_simd - n_1921_simd);
+    let n_1861_simd = (n_99_simd * u64x2::splat(0xfffffffffffe33b4u64));
+    let n_1865_simd = (n_91_simd * u64x2::splat(0xfffffffffffb7700u64));
+    let n_1903_simd = (n_178_simd * u64x2::splat(0x1c410u64));
+    let n_1927_simd = (n_162_simd * u64x2::splat(0xfffffffffffe7638u64));
+    let n_1945_simd = (n_167_simd * u64x2::splat(0xffffffffffff4a68u64));
+    let n_1976_simd = (n_178_simd * u64x2::splat(0xfffffffffffe6d38u64));
+    let n_1979_simd = (n_179_simd * u64x2::splat(0x1c410u64));
+    let n_1982_simd = (n_162_simd * u64x2::splat(0xffffffffffff22d0u64));
+    let n_1985_simd = (n_163_simd * u64x2::splat(0xfffffffffffe7638u64));
+    let n_2001_simd = (n_98_simd * u64x2::splat(0x563f0u64));
+    let n_2013_simd = (n_227_simd * u64x2::splat(0x2bf20u64));
+    // layer 6
+    let n_62_simd = (n_58_simd + n_59_simd);
+    let n_65_simd = (n_58_simd - n_59_simd);
+    let n_71_simd = (n_50_simd - n_52_simd);
+    let n_72_simd = (n_51_simd - n_53_simd);
+    let n_485_simd = (n_1861_simd - n_1865_simd);
+    let n_570_simd = (n_609_simd + n_1903_simd);
+    let n_970_simd = (n_1865_simd + n_2001_simd);
+    let n_1300_simd = (n_1321_simd - n_1945_simd);
+    let n_1330_simd = (n_1351_simd + n_1927_simd);
+    let n_1591_simd = (n_1939_simd + n_2013_simd);
+    let n_1729_simd = (n_1982_simd + n_1985_simd);
+    let n_1756_simd = (n_1976_simd + n_1979_simd);
+    let n_1857_simd = (n_90_simd * u64x2::splat(0x608f8u64));
+    let n_1869_simd = (n_93_simd * u64x2::splat(0x2bcb4u64));
+    let n_1951_simd = (n_166_simd * u64x2::splat(0x34dd8u64));
+    let n_1957_simd = (n_164_simd * u64x2::splat(0xffffffffffff7148u64));
+    let n_1961_simd = (n_90_simd * u64x2::splat(0xfffffffffffb7700u64));
+    let n_1963_simd = (n_91_simd * u64x2::splat(0x608f8u64));
+    let n_1970_simd = (n_160_simd * u64x2::splat(0xfffffffffffcc698u64));
+    let n_1973_simd = (n_161_simd * u64x2::splat(0x8b18u64));
+    let n_1988_simd = (n_166_simd * u64x2::splat(0xffffffffffff4a68u64));
+    let n_1991_simd = (n_167_simd * u64x2::splat(0x34dd8u64));
+    let n_1994_simd = (n_164_simd * u64x2::splat(0xfffffffffffdfe18u64));
+    let n_1997_simd = (n_165_simd * u64x2::splat(0xffffffffffff7148u64));
+    let n_2007_simd = (n_184_simd * u64x2::splat(0xffffffffffff0150u64));
+    let n_2015_simd = (n_98_simd * u64x2::splat(0xfffffffffffe33b4u64));
+    let n_2017_simd = (n_99_simd * u64x2::splat(0x563f0u64));
+    let n_2020_simd = (n_184_simd * u64x2::splat(0xfffffffffffbe968u64));
+    let n_2023_simd = (n_185_simd * u64x2::splat(0xffffffffffff0150u64));
+    let n_2026_simd = (n_227_simd * u64x2::splat(0xfffffffffffd4880u64));
+    let n_2029_simd = (n_228_simd * u64x2::splat(0x2bf20u64));
+    let n_2035_simd = (n_176_simd * u64x2::splat(0xfffffffffffffc60u64));
+    // layer 7
+    let n_64_simd = (n_62_simd * u64x2::splat(0x801d5u64));
+    let n_67_simd = (n_65_simd * u64x2::splat(0xcccbu64));
+    let n_454_simd = (n_485_simd - n_1869_simd);
+    let n_504_simd = (n_570_simd - n_1330_simd);
+    let n_801_simd = (n_1756_simd - n_1729_simd);
+    let n_937_simd = (n_970_simd - n_1857_simd);
+    let n_988_simd = (n_1897_simd - n_1921_simd);
+    let n_1116_simd = (n_1961_simd + n_1963_simd);
+    let n_1140_simd = (n_2015_simd + n_2017_simd);
+    let n_1276_simd = (n_1300_simd + n_1951_simd);
+    let n_1285_simd = (n_1330_simd + n_2035_simd);
+    let n_1558_simd = (n_1591_simd - n_1957_simd);
+    let n_1615_simd = (n_1915_simd + n_2007_simd);
+    let n_1705_simd = (n_1988_simd + n_1991_simd);
+    let n_1741_simd = (n_1994_simd + n_1997_simd);
+    let n_1768_simd = (n_1970_simd + n_1973_simd);
+    let n_1774_simd = (n_2026_simd + n_2029_simd);
+    let n_1792_simd = (n_2020_simd + n_2023_simd);
+    let n_1851_simd = (n_71_simd * u64x2::splat(0xffffffffffff9af0u64));
+    let n_1853_simd = (n_72_simd * u64x2::splat(0xd29eu64));
+    let n_1873_simd = (n_92_simd * u64x2::splat(0xffffffffffff5af8u64));
+    let n_1879_simd = (n_160_simd * u64x2::splat(0x8b18u64));
+    let n_1958_simd = (n_71_simd * u64x2::splat(0xd29eu64));
+    let n_1959_simd = (n_72_simd * u64x2::splat(0xffffffffffff9af0u64));
+    let n_1965_simd = (n_92_simd * u64x2::splat(0x2bcb4u64));
+    let n_1967_simd = (n_93_simd * u64x2::splat(0xffffffffffff5af8u64));
+    // layer 8
+    let n_69_simd = (n_64_simd + n_67_simd);
+    let n_70_simd = (n_64_simd - n_67_simd);
+    let n_397_simd = (n_1851_simd - n_1853_simd);
+    let n_428_simd = (n_454_simd + n_1873_simd);
+    let n_473_simd = (n_504_simd - n_1276_simd);
+    let n_702_simd = (n_1958_simd + n_1959_simd);
+    let n_769_simd = (n_801_simd - n_1705_simd);
+    let n_912_simd = (n_937_simd - n_1873_simd);
+    let n_955_simd = (n_988_simd - n_1945_simd);
+    let n_1092_simd = (n_1140_simd - n_1116_simd);
+    let n_1096_simd = (n_1965_simd + n_1967_simd);
+    let n_1261_simd = (n_1285_simd - n_1879_simd);
+    let n_1525_simd = (n_1558_simd - n_1951_simd);
+    let n_1582_simd = (n_1615_simd - n_1879_simd);
+    let n_1699_simd = (n_1774_simd - n_1741_simd);
+    let n_1723_simd = (n_1792_simd - n_1768_simd);
+    // layer 9
+    let n_86_simd = (n_69_simd + n_397_simd);
+    let n_87_simd = (n_69_simd - n_397_simd);
+    let n_88_simd = (n_70_simd + n_702_simd);
+    let n_89_simd = (n_70_simd - n_702_simd);
+    let n_403_simd = (n_1857_simd - n_428_simd);
+    let n_444_simd = (n_473_simd + n_1957_simd);
+    let n_708_simd = (n_1116_simd - n_1096_simd);
+    let n_742_simd = (n_769_simd + n_1741_simd);
+    let n_897_simd = (n_912_simd - n_1869_simd);
+    let n_931_simd = (n_955_simd + n_1525_simd);
+    let n_1077_simd = (n_1092_simd - n_1096_simd);
+    let n_1246_simd = (n_1261_simd - n_1957_simd);
+    let n_1549_simd = (n_1582_simd - n_1927_simd);
+    let n_1675_simd = (n_1699_simd - n_1705_simd);
+    let n_1690_simd = (n_1723_simd - n_1729_simd);
+    // layer 10
+    let n_152_simd = (n_86_simd + n_403_simd);
+    let n_153_simd = (n_86_simd - n_403_simd);
+    let n_154_simd = (n_88_simd + n_708_simd);
+    let n_156_simd = (n_87_simd + n_897_simd);
+    let n_158_simd = (n_89_simd + n_1077_simd);
+    let n_412_simd = (n_1879_simd - n_444_simd);
+    let n_717_simd = (n_1768_simd - n_742_simd);
+    let n_906_simd = (n_1549_simd - n_931_simd);
+    let n_1086_simd = (n_1690_simd - n_1675_simd);
+    let n_1237_simd = (n_1246_simd - n_1276_simd);
+    // output
+    [
+        (n_152_simd + n_412_simd),
+        (n_154_simd + n_717_simd),
+        (n_156_simd + n_906_simd),
+        (n_158_simd + n_1086_simd),
+        (n_153_simd + n_1237_simd),
+    ]
+}
+
+// ===== SIMD VERSION (x4 lanes) =====
+
+#[allow(unused_parens)]
+#[rustfmt::skip]
+pub fn generated_last_simd_x4(input: &[[u32; 16]; 4]) -> [u64x4; 5] {
+    // Load all inputs into SIMD registers
+    let input_0_simd = u64x4::from_array([input[0][0] as u64, input[1][0] as u64, input[2][0] as u64, input[3][0] as u64]);
+    let input_1_simd = u64x4::from_array([input[0][1] as u64, input[1][1] as u64, input[2][1] as u64, input[3][1] as u64]);
+    let input_2_simd = u64x4::from_array([input[0][2] as u64, input[1][2] as u64, input[2][2] as u64, input[3][2] as u64]);
+    let input_3_simd = u64x4::from_array([input[0][3] as u64, input[1][3] as u64, input[2][3] as u64, input[3][3] as u64]);
+    let input_4_simd = u64x4::from_array([input[0][4] as u64, input[1][4] as u64, input[2][4] as u64, input[3][4] as u64]);
+    let input_5_simd = u64x4::from_array([input[0][5] as u64, input[1][5] as u64, input[2][5] as u64, input[3][5] as u64]);
+    let input_6_simd = u64x4::from_array([input[0][6] as u64, input[1][6] as u64, input[2][6] as u64, input[3][6] as u64]);
+    let input_7_simd = u64x4::from_array([input[0][7] as u64, input[1][7] as u64, input[2][7] as u64, input[3][7] as u64]);
+    let input_8_simd = u64x4::from_array([input[0][8] as u64, input[1][8] as u64, input[2][8] as u64, input[3][8] as u64]);
+    let input_9_simd = u64x4::from_array([input[0][9] as u64, input[1][9] as u64, input[2][9] as u64, input[3][9] as u64]);
+    let input_10_simd = u64x4::from_array([input[0][10] as u64, input[1][10] as u64, input[2][10] as u64, input[3][10] as u64]);
+    let input_11_simd = u64x4::from_array([input[0][11] as u64, input[1][11] as u64, input[2][11] as u64, input[3][11] as u64]);
+    let input_12_simd = u64x4::from_array([input[0][12] as u64, input[1][12] as u64, input[2][12] as u64, input[3][12] as u64]);
+    let input_13_simd = u64x4::from_array([input[0][13] as u64, input[1][13] as u64, input[2][13] as u64, input[3][13] as u64]);
+    let input_14_simd = u64x4::from_array([input[0][14] as u64, input[1][14] as u64, input[2][14] as u64, input[3][14] as u64]);
+    let input_15_simd = u64x4::from_array([input[0][15] as u64, input[1][15] as u64, input[2][15] as u64, input[3][15] as u64]);
+
+    // layer 0
+    let n_161_simd = (input_1_simd - input_9_simd);
+    let n_163_simd = (input_3_simd - input_11_simd);
+    let n_165_simd = (input_5_simd - input_13_simd);
+    let n_167_simd = (input_7_simd - input_15_simd);
+    // layer 1
+    let n_177_simd = (n_161_simd + n_165_simd);
+    let n_179_simd = (n_163_simd + n_167_simd);
+    // layer 2
+    let n_34_simd = (input_0_simd + input_8_simd);
+    let n_35_simd = (input_1_simd + input_9_simd);
+    let n_36_simd = (input_2_simd + input_10_simd);
+    let n_37_simd = (input_3_simd + input_11_simd);
+    let n_38_simd = (input_4_simd + input_12_simd);
+    let n_39_simd = (input_5_simd + input_13_simd);
+    let n_40_simd = (input_6_simd + input_14_simd);
+    let n_41_simd = (input_7_simd + input_15_simd);
+    let n_185_simd = (n_161_simd + n_163_simd);
+    let n_271_simd = (n_177_simd + n_179_simd);
+    // layer 3
+    let n_90_simd = (n_34_simd - n_38_simd);
+    let n_91_simd = (n_35_simd - n_39_simd);
+    let n_92_simd = (n_36_simd - n_40_simd);
+    let n_93_simd = (n_37_simd - n_41_simd);
+    let n_162_simd = (input_2_simd - input_10_simd);
+    let n_164_simd = (input_4_simd - input_12_simd);
+    let n_166_simd = (input_6_simd - input_14_simd);
+    let n_228_simd = (n_165_simd + n_167_simd);
+    let n_1885_simd = (n_271_simd * u64x4::splat(0xfffffffffff931e8u64));
+    let n_1891_simd = (n_177_simd * u64x4::splat(0xfffffffffffac4b0u64));
+    let n_1909_simd = (n_185_simd * u64x4::splat(0xfffffffffffbe968u64));
+    let n_1915_simd = (n_161_simd * u64x4::splat(0xfffffffffffcc698u64));
+    // layer 4
+    let n_50_simd = (n_34_simd + n_38_simd);
+    let n_51_simd = (n_35_simd + n_39_simd);
+    let n_52_simd = (n_36_simd + n_40_simd);
+    let n_53_simd = (n_37_simd + n_41_simd);
+    let n_98_simd = (n_90_simd + n_92_simd);
+    let n_99_simd = (n_91_simd + n_93_simd);
+    let n_160_simd = (input_0_simd - input_8_simd);
+    let n_178_simd = (n_162_simd + n_166_simd);
+    let n_227_simd = (n_164_simd + n_166_simd);
+    let n_651_simd = (n_1885_simd - n_1891_simd);
+    let n_1360_simd = (n_1909_simd - n_1915_simd);
+    let n_1897_simd = (n_179_simd * u64x4::splat(0xfffffffffffe6d38u64));
+    let n_1921_simd = (n_163_simd * u64x4::splat(0xffffffffffff22d0u64));
+    let n_1933_simd = (n_228_simd * u64x4::splat(0xfffffffffffd4880u64));
+    let n_1939_simd = (n_165_simd * u64x4::splat(0xfffffffffffdfe18u64));
+    // layer 5
+    let n_58_simd = (n_50_simd + n_52_simd);
+    let n_59_simd = (n_51_simd + n_53_simd);
+    let n_176_simd = (n_160_simd + n_164_simd);
+    let n_184_simd = (n_160_simd + n_162_simd);
+    let n_609_simd = (n_651_simd - n_1897_simd);
+    let n_1321_simd = (n_1933_simd - n_1939_simd);
+    let n_1351_simd = (n_1360_simd - n_1921_simd);
+    let n_1861_simd = (n_99_simd * u64x4::splat(0xfffffffffffe33b4u64));
+    let n_1865_simd = (n_91_simd * u64x4::splat(0xfffffffffffb7700u64));
+    let n_1903_simd = (n_178_simd * u64x4::splat(0x1c410u64));
+    let n_1927_simd = (n_162_simd * u64x4::splat(0xfffffffffffe7638u64));
+    let n_1945_simd = (n_167_simd * u64x4::splat(0xffffffffffff4a68u64));
+    let n_1976_simd = (n_178_simd * u64x4::splat(0xfffffffffffe6d38u64));
+    let n_1979_simd = (n_179_simd * u64x4::splat(0x1c410u64));
+    let n_1982_simd = (n_162_simd * u64x4::splat(0xffffffffffff22d0u64));
+    let n_1985_simd = (n_163_simd * u64x4::splat(0xfffffffffffe7638u64));
+    let n_2001_simd = (n_98_simd * u64x4::splat(0x563f0u64));
+    let n_2013_simd = (n_227_simd * u64x4::splat(0x2bf20u64));
+    // layer 6
+    let n_62_simd = (n_58_simd + n_59_simd);
+    let n_65_simd = (n_58_simd - n_59_simd);
+    let n_71_simd = (n_50_simd - n_52_simd);
+    let n_72_simd = (n_51_simd - n_53_simd);
+    let n_485_simd = (n_1861_simd - n_1865_simd);
+    let n_570_simd = (n_609_simd + n_1903_simd);
+    let n_970_simd = (n_1865_simd + n_2001_simd);
+    let n_1300_simd = (n_1321_simd - n_1945_simd);
+    let n_1330_simd = (n_1351_simd + n_1927_simd);
+    let n_1591_simd = (n_1939_simd + n_2013_simd);
+    let n_1729_simd = (n_1982_simd + n_1985_simd);
+    let n_1756_simd = (n_1976_simd + n_1979_simd);
+    let n_1857_simd = (n_90_simd * u64x4::splat(0x608f8u64));
+    let n_1869_simd = (n_93_simd * u64x4::splat(0x2bcb4u64));
+    let n_1951_simd = (n_166_simd * u64x4::splat(0x34dd8u64));
+    let n_1957_simd = (n_164_simd * u64x4::splat(0xffffffffffff7148u64));
+    let n_1961_simd = (n_90_simd * u64x4::splat(0xfffffffffffb7700u64));
+    let n_1963_simd = (n_91_simd * u64x4::splat(0x608f8u64));
+    let n_1970_simd = (n_160_simd * u64x4::splat(0xfffffffffffcc698u64));
+    let n_1973_simd = (n_161_simd * u64x4::splat(0x8b18u64));
+    let n_1988_simd = (n_166_simd * u64x4::splat(0xffffffffffff4a68u64));
+    let n_1991_simd = (n_167_simd * u64x4::splat(0x34dd8u64));
+    let n_1994_simd = (n_164_simd * u64x4::splat(0xfffffffffffdfe18u64));
+    let n_1997_simd = (n_165_simd * u64x4::splat(0xffffffffffff7148u64));
+    let n_2007_simd = (n_184_simd * u64x4::splat(0xffffffffffff0150u64));
+    let n_2015_simd = (n_98_simd * u64x4::splat(0xfffffffffffe33b4u64));
+    let n_2017_simd = (n_99_simd * u64x4::splat(0x563f0u64));
+    let n_2020_simd = (n_184_simd * u64x4::splat(0xfffffffffffbe968u64));
+    let n_2023_simd = (n_185_simd * u64x4::splat(0xffffffffffff0150u64));
+    let n_2026_simd = (n_227_simd * u64x4::splat(0xfffffffffffd4880u64));
+    let n_2029_simd = (n_228_simd * u64x4::splat(0x2bf20u64));
+    let n_2035_simd = (n_176_simd * u64x4::splat(0xfffffffffffffc60u64));
+    // layer 7
+    let n_64_simd = (n_62_simd * u64x4::splat(0x801d5u64));
+    let n_67_simd = (n_65_simd * u64x4::splat(0xcccbu64));
+    let n_454_simd = (n_485_simd - n_1869_simd);
+    let n_504_simd = (n_570_simd - n_1330_simd);
+    let n_801_simd = (n_1756_simd - n_1729_simd);
+    let n_937_simd = (n_970_simd - n_1857_simd);
+    let n_988_simd = (n_1897_simd - n_1921_simd);
+    let n_1116_simd = (n_1961_simd + n_1963_simd);
+    let n_1140_simd = (n_2015_simd + n_2017_simd);
+    let n_1276_simd = (n_1300_simd + n_1951_simd);
+    let n_1285_simd = (n_1330_simd + n_2035_simd);
+    let n_1558_simd = (n_1591_simd - n_1957_simd);
+    let n_1615_simd = (n_1915_simd + n_2007_simd);
+    let n_1705_simd = (n_1988_simd + n_1991_simd);
+    let n_1741_simd = (n_1994_simd + n_1997_simd);
+    let n_1768_simd = (n_1970_simd + n_1973_simd);
+    let n_1774_simd = (n_2026_simd + n_2029_simd);
+    let n_1792_simd = (n_2020_simd + n_2023_simd);
+    let n_1851_simd = (n_71_simd * u64x4::splat(0xffffffffffff9af0u64));
+    let n_1853_simd = (n_72_simd * u64x4::splat(0xd29eu64));
+    let n_1873_simd = (n_92_simd * u64x4::splat(0xffffffffffff5af8u64));
+    let n_1879_simd = (n_160_simd * u64x4::splat(0x8b18u64));
+    let n_1958_simd = (n_71_simd * u64x4::splat(0xd29eu64));
+    let n_1959_simd = (n_72_simd * u64x4::splat(0xffffffffffff9af0u64));
+    let n_1965_simd = (n_92_simd * u64x4::splat(0x2bcb4u64));
+    let n_1967_simd = (n_93_simd * u64x4::splat(0xffffffffffff5af8u64));
+    // layer 8
+    let n_69_simd = (n_64_simd + n_67_simd);
+    let n_70_simd = (n_64_simd - n_67_simd);
+    let n_397_simd = (n_1851_simd - n_1853_simd);
+    let n_428_simd = (n_454_simd + n_1873_simd);
+    let n_473_simd = (n_504_simd - n_1276_simd);
+    let n_702_simd = (n_1958_simd + n_1959_simd);
+    let n_769_simd = (n_801_simd - n_1705_simd);
+    let n_912_simd = (n_937_simd - n_1873_simd);
+    let n_955_simd = (n_988_simd - n_1945_simd);
+    let n_1092_simd = (n_1140_simd - n_1116_simd);
+    let n_1096_simd = (n_1965_simd + n_1967_simd);
+    let n_1261_simd = (n_1285_simd - n_1879_simd);
+    let n_1525_simd = (n_1558_simd - n_1951_simd);
+    let n_1582_simd = (n_1615_simd - n_1879_simd);
+    let n_1699_simd = (n_1774_simd - n_1741_simd);
+    let n_1723_simd = (n_1792_simd - n_1768_simd);
+    // layer 9
+    let n_86_simd = (n_69_simd + n_397_simd);
+    let n_87_simd = (n_69_simd - n_397_simd);
+    let n_88_simd = (n_70_simd + n_702_simd);
+    let n_89_simd = (n_70_simd - n_702_simd);
+    let n_403_simd = (n_1857_simd - n_428_simd);
+    let n_444_simd = (n_473_simd + n_1957_simd);
+    let n_708_simd = (n_1116_simd - n_1096_simd);
+    let n_742_simd = (n_769_simd + n_1741_simd);
+    let n_897_simd = (n_912_simd - n_1869_simd);
+    let n_931_simd = (n_955_simd + n_1525_simd);
+    let n_1077_simd = (n_1092_simd - n_1096_simd);
+    let n_1246_simd = (n_1261_simd - n_1957_simd);
+    let n_1549_simd = (n_1582_simd - n_1927_simd);
+    let n_1675_simd = (n_1699_simd - n_1705_simd);
+    let n_1690_simd = (n_1723_simd - n_1729_simd);
+    // layer 10
+    let n_152_simd = (n_86_simd + n_403_simd);
+    let n_153_simd = (n_86_simd - n_403_simd);
+    let n_154_simd = (n_88_simd + n_708_simd);
+    let n_156_simd = (n_87_simd + n_897_simd);
+    let n_158_simd = (n_89_simd + n_1077_simd);
+    let n_412_simd = (n_1879_simd - n_444_simd);
+    let n_717_simd = (n_1768_simd - n_742_simd);
+    let n_906_simd = (n_1549_simd - n_931_simd);
+    let n_1086_simd = (n_1690_simd - n_1675_simd);
+    let n_1237_simd = (n_1246_simd - n_1276_simd);
+    // output
+    [
+        (n_152_simd + n_412_simd),
+        (n_154_simd + n_717_simd),
+        (n_156_simd + n_906_simd),
+        (n_158_simd + n_1086_simd),
+        (n_153_simd + n_1237_simd),
+    ]
+}
+
+// ===== SIMD VERSION (x8 lanes) =====
+
+#[allow(unused_parens)]
+#[rustfmt::skip]
+pub fn generated_last_simd_x8(input: &[[u32; 16]; 8]) -> [u64x8; 5] {
+    // Load all inputs into SIMD registers
+    let input_0_simd = u64x8::from_array([input[0][0] as u64, input[1][0] as u64, input[2][0] as u64, input[3][0] as u64, input[4][0] as u64, input[5][0] as u64, input[6][0] as u64, input[7][0] as u64]);
+    let input_1_simd = u64x8::from_array([input[0][1] as u64, input[1][1] as u64, input[2][1] as u64, input[3][1] as u64, input[4][1] as u64, input[5][1] as u64, input[6][1] as u64, input[7][1] as u64]);
+    let input_2_simd = u64x8::from_array([input[0][2] as u64, input[1][2] as u64, input[2][2] as u64, input[3][2] as u64, input[4][2] as u64, input[5][2] as u64, input[6][2] as u64, input[7][2] as u64]);
+    let input_3_simd = u64x8::from_array([input[0][3] as u64, input[1][3] as u64, input[2][3] as u64, input[3][3] as u64, input[4][3] as u64, input[5][3] as u64, input[6][3] as u64, input[7][3] as u64]);
+    let input_4_simd = u64x8::from_array([input[0][4] as u64, input[1][4] as u64, input[2][4] as u64, input[3][4] as u64, input[4][4] as u64, input[5][4] as u64, input[6][4] as u64, input[7][4] as u64]);
+    let input_5_simd = u64x8::from_array([input[0][5] as u64, input[1][5] as u64, input[2][5] as u64, input[3][5] as u64, input[4][5] as u64, input[5][5] as u64, input[6][5] as u64, input[7][5] as u64]);
+    let input_6_simd = u64x8::from_array([input[0][6] as u64, input[1][6] as u64, input[2][6] as u64, input[3][6] as u64, input[4][6] as u64, input[5][6] as u64, input[6][6] as u64, input[7][6] as u64]);
+    let input_7_simd = u64x8::from_array([input[0][7] as u64, input[1][7] as u64, input[2][7] as u64, input[3][7] as u64, input[4][7] as u64, input[5][7] as u64, input[6][7] as u64, input[7][7] as u64]);
+    let input_8_simd = u64x8::from_array([input[0][8] as u64, input[1][8] as u64, input[2][8] as u64, input[3][8] as u64, input[4][8] as u64, input[5][8] as u64, input[6][8] as u64, input[7][8] as u64]);
+    let input_9_simd = u64x8::from_array([input[0][9] as u64, input[1][9] as u64, input[2][9] as u64, input[3][9] as u64, input[4][9] as u64, input[5][9] as u64, input[6][9] as u64, input[7][9] as u64]);
+    let input_10_simd = u64x8::from_array([input[0][10] as u64, input[1][10] as u64, input[2][10] as u64, input[3][10] as u64, input[4][10] as u64, input[5][10] as u64, input[6][10] as u64, input[7][10] as u64]);
+    let input_11_simd = u64x8::from_array([input[0][11] as u64, input[1][11] as u64, input[2][11] as u64, input[3][11] as u64, input[4][11] as u64, input[5][11] as u64, input[6][11] as u64, input[7][11] as u64]);
+    let input_12_simd = u64x8::from_array([input[0][12] as u64, input[1][12] as u64, input[2][12] as u64, input[3][12] as u64, input[4][12] as u64, input[5][12] as u64, input[6][12] as u64, input[7][12] as u64]);
+    let input_13_simd = u64x8::from_array([input[0][13] as u64, input[1][13] as u64, input[2][13] as u64, input[3][13] as u64, input[4][13] as u64, input[5][13] as u64, input[6][13] as u64, input[7][13] as u64]);
+    let input_14_simd = u64x8::from_array([input[0][14] as u64, input[1][14] as u64, input[2][14] as u64, input[3][14] as u64, input[4][14] as u64, input[5][14] as u64, input[6][14] as u64, input[7][14] as u64]);
+    let input_15_simd = u64x8::from_array([input[0][15] as u64, input[1][15] as u64, input[2][15] as u64, input[3][15] as u64, input[4][15] as u64, input[5][15] as u64, input[6][15] as u64, input[7][15] as u64]);
+
+    // layer 0
+    let n_161_simd = (input_1_simd - input_9_simd);
+    let n_163_simd = (input_3_simd - input_11_simd);
+    let n_165_simd = (input_5_simd - input_13_simd);
+    let n_167_simd = (input_7_simd - input_15_simd);
+    // layer 1
+    let n_177_simd = (n_161_simd + n_165_simd);
+    let n_179_simd = (n_163_simd + n_167_simd);
+    // layer 2
+    let n_34_simd = (input_0_simd + input_8_simd);
+    let n_35_simd = (input_1_simd + input_9_simd);
+    let n_36_simd = (input_2_simd + input_10_simd);
+    let n_37_simd = (input_3_simd + input_11_simd);
+    let n_38_simd = (input_4_simd + input_12_simd);
+    let n_39_simd = (input_5_simd + input_13_simd);
+    let n_40_simd = (input_6_simd + input_14_simd);
+    let n_41_simd = (input_7_simd + input_15_simd);
+    let n_185_simd = (n_161_simd + n_163_simd);
+    let n_271_simd = (n_177_simd + n_179_simd);
+    // layer 3
+    let n_90_simd = (n_34_simd - n_38_simd);
+    let n_91_simd = (n_35_simd - n_39_simd);
+    let n_92_simd = (n_36_simd - n_40_simd);
+    let n_93_simd = (n_37_simd - n_41_simd);
+    let n_162_simd = (input_2_simd - input_10_simd);
+    let n_164_simd = (input_4_simd - input_12_simd);
+    let n_166_simd = (input_6_simd - input_14_simd);
+    let n_228_simd = (n_165_simd + n_167_simd);
+    let n_1885_simd = (n_271_simd * u64x8::splat(0xfffffffffff931e8u64));
+    let n_1891_simd = (n_177_simd * u64x8::splat(0xfffffffffffac4b0u64));
+    let n_1909_simd = (n_185_simd * u64x8::splat(0xfffffffffffbe968u64));
+    let n_1915_simd = (n_161_simd * u64x8::splat(0xfffffffffffcc698u64));
+    // layer 4
+    let n_50_simd = (n_34_simd + n_38_simd);
+    let n_51_simd = (n_35_simd + n_39_simd);
+    let n_52_simd = (n_36_simd + n_40_simd);
+    let n_53_simd = (n_37_simd + n_41_simd);
+    let n_98_simd = (n_90_simd + n_92_simd);
+    let n_99_simd = (n_91_simd + n_93_simd);
+    let n_160_simd = (input_0_simd - input_8_simd);
+    let n_178_simd = (n_162_simd + n_166_simd);
+    let n_227_simd = (n_164_simd + n_166_simd);
+    let n_651_simd = (n_1885_simd - n_1891_simd);
+    let n_1360_simd = (n_1909_simd - n_1915_simd);
+    let n_1897_simd = (n_179_simd * u64x8::splat(0xfffffffffffe6d38u64));
+    let n_1921_simd = (n_163_simd * u64x8::splat(0xffffffffffff22d0u64));
+    let n_1933_simd = (n_228_simd * u64x8::splat(0xfffffffffffd4880u64));
+    let n_1939_simd = (n_165_simd * u64x8::splat(0xfffffffffffdfe18u64));
+    // layer 5
+    let n_58_simd = (n_50_simd + n_52_simd);
+    let n_59_simd = (n_51_simd + n_53_simd);
+    let n_176_simd = (n_160_simd + n_164_simd);
+    let n_184_simd = (n_160_simd + n_162_simd);
+    let n_609_simd = (n_651_simd - n_1897_simd);
+    let n_1321_simd = (n_1933_simd - n_1939_simd);
+    let n_1351_simd = (n_1360_simd - n_1921_simd);
+    let n_1861_simd = (n_99_simd * u64x8::splat(0xfffffffffffe33b4u64));
+    let n_1865_simd = (n_91_simd * u64x8::splat(0xfffffffffffb7700u64));
+    let n_1903_simd = (n_178_simd * u64x8::splat(0x1c410u64));
+    let n_1927_simd = (n_162_simd * u64x8::splat(0xfffffffffffe7638u64));
+    let n_1945_simd = (n_167_simd * u64x8::splat(0xffffffffffff4a68u64));
+    let n_1976_simd = (n_178_simd * u64x8::splat(0xfffffffffffe6d38u64));
+    let n_1979_simd = (n_179_simd * u64x8::splat(0x1c410u64));
+    let n_1982_simd = (n_162_simd * u64x8::splat(0xffffffffffff22d0u64));
+    let n_1985_simd = (n_163_simd * u64x8::splat(0xfffffffffffe7638u64));
+    let n_2001_simd = (n_98_simd * u64x8::splat(0x563f0u64));
+    let n_2013_simd = (n_227_simd * u64x8::splat(0x2bf20u64));
+    // layer 6
+    let n_62_simd = (n_58_simd + n_59_simd);
+    let n_65_simd = (n_58_simd - n_59_simd);
+    let n_71_simd = (n_50_simd - n_52_simd);
+    let n_72_simd = (n_51_simd - n_53_simd);
+    let n_485_simd = (n_1861_simd - n_1865_simd);
+    let n_570_simd = (n_609_simd + n_1903_simd);
+    let n_970_simd = (n_1865_simd + n_2001_simd);
+    let n_1300_simd = (n_1321_simd - n_1945_simd);
+    let n_1330_simd = (n_1351_simd + n_1927_simd);
+    let n_1591_simd = (n_1939_simd + n_2013_simd);
+    let n_1729_simd = (n_1982_simd + n_1985_simd);
+    let n_1756_simd = (n_1976_simd + n_1979_simd);
+    let n_1857_simd = (n_90_simd * u64x8::splat(0x608f8u64));
+    let n_1869_simd = (n_93_simd * u64x8::splat(0x2bcb4u64));
+    let n_1951_simd = (n_166_simd * u64x8::splat(0x34dd8u64));
+    let n_1957_simd = (n_164_simd * u64x8::splat(0xffffffffffff7148u64));
+    let n_1961_simd = (n_90_simd * u64x8::splat(0xfffffffffffb7700u64));
+    let n_1963_simd = (n_91_simd * u64x8::splat(0x608f8u64));
+    let n_1970_simd = (n_160_simd * u64x8::splat(0xfffffffffffcc698u64));
+    let n_1973_simd = (n_161_simd * u64x8::splat(0x8b18u64));
+    let n_1988_simd = (n_166_simd * u64x8::splat(0xffffffffffff4a68u64));
+    let n_1991_simd = (n_167_simd * u64x8::splat(0x34dd8u64));
+    let n_1994_simd = (n_164_simd * u64x8::splat(0xfffffffffffdfe18u64));
+    let n_1997_simd = (n_165_simd * u64x8::splat(0xffffffffffff7148u64));
+    let n_2007_simd = (n_184_simd * u64x8::splat(0xffffffffffff0150u64));
+    let n_2015_simd = (n_98_simd * u64x8::splat(0xfffffffffffe33b4u64));
+    let n_2017_simd = (n_99_simd * u64x8::splat(0x563f0u64));
+    let n_2020_simd = (n_184_simd * u64x8::splat(0xfffffffffffbe968u64));
+    let n_2023_simd = (n_185_simd * u64x8::splat(0xffffffffffff0150u64));
+    let n_2026_simd = (n_227_simd * u64x8::splat(0xfffffffffffd4880u64));
+    let n_2029_simd = (n_228_simd * u64x8::splat(0x2bf20u64));
+    let n_2035_simd = (n_176_simd * u64x8::splat(0xfffffffffffffc60u64));
+    // layer 7
+    let n_64_simd = (n_62_simd * u64x8::splat(0x801d5u64));
+    let n_67_simd = (n_65_simd * u64x8::splat(0xcccbu64));
+    let n_454_simd = (n_485_simd - n_1869_simd);
+    let n_504_simd = (n_570_simd - n_1330_simd);
+    let n_801_simd = (n_1756_simd - n_1729_simd);
+    let n_937_simd = (n_970_simd - n_1857_simd);
+    let n_988_simd = (n_1897_simd - n_1921_simd);
+    let n_1116_simd = (n_1961_simd + n_1963_simd);
+    let n_1140_simd = (n_2015_simd + n_2017_simd);
+    let n_1276_simd = (n_1300_simd + n_1951_simd);
+    let n_1285_simd = (n_1330_simd + n_2035_simd);
+    let n_1558_simd = (n_1591_simd - n_1957_simd);
+    let n_1615_simd = (n_1915_simd + n_2007_simd);
+    let n_1705_simd = (n_1988_simd + n_1991_simd);
+    let n_1741_simd = (n_1994_simd + n_1997_simd);
+    let n_1768_simd = (n_1970_simd + n_1973_simd);
+    let n_1774_simd = (n_2026_simd + n_2029_simd);
+    let n_1792_simd = (n_2020_simd + n_2023_simd);
+    let n_1851_simd = (n_71_simd * u64x8::splat(0xffffffffffff9af0u64));
+    let n_1853_simd = (n_72_simd * u64x8::splat(0xd29eu64));
+    let n_1873_simd = (n_92_simd * u64x8::splat(0xffffffffffff5af8u64));
+    let n_1879_simd = (n_160_simd * u64x8::splat(0x8b18u64));
+    let n_1958_simd = (n_71_simd * u64x8::splat(0xd29eu64));
+    let n_1959_simd = (n_72_simd * u64x8::splat(0xffffffffffff9af0u64));
+    let n_1965_simd = (n_92_simd * u64x8::splat(0x2bcb4u64));
+    let n_1967_simd = (n_93_simd * u64x8::splat(0xffffffffffff5af8u64));
+    // layer 8
+    let n_69_simd = (n_64_simd + n_67_simd);
+    let n_70_simd = (n_64_simd - n_67_simd);
+    let n_397_simd = (n_1851_simd - n_1853_simd);
+    let n_428_simd = (n_454_simd + n_1873_simd);
+    let n_473_simd = (n_504_simd - n_1276_simd);
+    let n_702_simd = (n_1958_simd + n_1959_simd);
+    let n_769_simd = (n_801_simd - n_1705_simd);
+    let n_912_simd = (n_937_simd - n_1873_simd);
+    let n_955_simd = (n_988_simd - n_1945_simd);
+    let n_1092_simd = (n_1140_simd - n_1116_simd);
+    let n_1096_simd = (n_1965_simd + n_1967_simd);
+    let n_1261_simd = (n_1285_simd - n_1879_simd);
+    let n_1525_simd = (n_1558_simd - n_1951_simd);
+    let n_1582_simd = (n_1615_simd - n_1879_simd);
+    let n_1699_simd = (n_1774_simd - n_1741_simd);
+    let n_1723_simd = (n_1792_simd - n_1768_simd);
+    // layer 9
+    let n_86_simd = (n_69_simd + n_397_simd);
+    let n_87_simd = (n_69_simd - n_397_simd);
+    let n_88_simd = (n_70_simd + n_702_simd);
+    let n_89_simd = (n_70_simd - n_702_simd);
+    let n_403_simd = (n_1857_simd - n_428_simd);
+    let n_444_simd = (n_473_simd + n_1957_simd);
+    let n_708_simd = (n_1116_simd - n_1096_simd);
+    let n_742_simd = (n_769_simd + n_1741_simd);
+    let n_897_simd = (n_912_simd - n_1869_simd);
+    let n_931_simd = (n_955_simd + n_1525_simd);
+    let n_1077_simd = (n_1092_simd - n_1096_simd);
+    let n_1246_simd = (n_1261_simd - n_1957_simd);
+    let n_1549_simd = (n_1582_simd - n_1927_simd);
+    let n_1675_simd = (n_1699_simd - n_1705_simd);
+    let n_1690_simd = (n_1723_simd - n_1729_simd);
+    // layer 10
+    let n_152_simd = (n_86_simd + n_403_simd);
+    let n_153_simd = (n_86_simd - n_403_simd);
+    let n_154_simd = (n_88_simd + n_708_simd);
+    let n_156_simd = (n_87_simd + n_897_simd);
+    let n_158_simd = (n_89_simd + n_1077_simd);
+    let n_412_simd = (n_1879_simd - n_444_simd);
+    let n_717_simd = (n_1768_simd - n_742_simd);
+    let n_906_simd = (n_1549_simd - n_931_simd);
+    let n_1086_simd = (n_1690_simd - n_1675_simd);
+    let n_1237_simd = (n_1246_simd - n_1276_simd);
+    // output
+    [
+        (n_152_simd + n_412_simd),
+        (n_154_simd + n_717_simd),
+        (n_156_simd + n_906_simd),
+        (n_158_simd + n_1086_simd),
+        (n_153_simd + n_1237_simd),
     ]
 }

@@ -2,6 +2,9 @@
 pub mod avx512;
 mod mds_generated;
 pub mod scalar;
+pub mod simd;
+pub mod simd_x2;
+pub mod simd_x8;
 pub mod test_cases;
 
 use crate::base::*;
@@ -171,8 +174,8 @@ pub const MELT_ONE_POW_7: Melt = {
 
 pub fn permute(sponge: &mut [Melt; 16]) {
     #[cfg(target_arch = "x86_64")]
-    if avx512::cpu_supported() {
-        unsafe { avx512::permute(sponge) }
+    {
+        simd::permute(sponge);
         return;
     }
 
@@ -181,19 +184,19 @@ pub fn permute(sponge: &mut [Melt; 16]) {
 
 pub fn permute_intermediate(sponge: &mut [Melt; 16]) {
     #[cfg(target_arch = "x86_64")]
-    if avx512::cpu_supported() {
-        unsafe { avx512::permute_intermediate(sponge) }
+    {
+        simd::permute_intermediate(sponge);
         return;
     }
 
-    scalar::permute_intermediate(sponge)
+    scalar::permute_intermediate(sponge);
 }
 
 #[inline(always)]
 pub fn permute_last(sponge: [Melt; 16]) -> [Melt; 5] {
     #[cfg(target_arch = "x86_64")]
-    if avx512::cpu_supported() {
-        return unsafe { avx512::permute_last(sponge) };
+    {
+        return simd::permute_last(sponge);
     }
 
     scalar::permute_last(sponge)
@@ -202,8 +205,8 @@ pub fn permute_last(sponge: [Melt; 16]) -> [Melt; 5] {
 #[inline(always)]
 pub fn permute_fixed(input: &[Melt; 10]) -> [Melt; 5] {
     #[cfg(target_arch = "x86_64")]
-    if avx512::cpu_supported() {
-        return unsafe { avx512::permute_fixed(input) };
+    {
+        return simd::permute_fixed(input);
     }
 
     scalar::permute_fixed(input)
@@ -212,32 +215,30 @@ pub fn permute_fixed(input: &[Melt; 10]) -> [Melt; 5] {
 #[inline(always)]
 pub fn permute_fixed_x2(input: &[Melt; 10], other_input: &[Melt; 10]) -> ([Melt; 5], [Melt; 5]) {
     #[cfg(target_arch = "x86_64")]
-    if avx512::cpu_supported() {
-        return unsafe { avx512::permute_fixed_x2(input, other_input) };
+    {
+        return simd_x2::permute_fixed_x2(input, other_input);
     }
 
-    (
-        scalar::permute_fixed(input),
-        scalar::permute_fixed(other_input),
-    )
+    (scalar::permute_fixed(input), scalar::permute_fixed(input))
 }
 
 #[inline(always)]
 pub fn permute_intermediate_x2(input: &mut [Melt; 16], other_input: &mut [Melt; 16]) {
     #[cfg(target_arch = "x86_64")]
-    if avx512::cpu_supported() {
-        return unsafe { avx512::permute_intermediate_x2(input, other_input) };
+    {
+        simd_x2::permute_intermediate_x2(input, other_input);
+        return;
     }
 
     scalar::permute_intermediate(input);
-    scalar::permute_intermediate(other_input);
+    scalar::permute_intermediate(input);
 }
 
 #[inline(always)]
 pub fn permute_last_x2(input: [Melt; 16], other_input: [Melt; 16]) -> ([Melt; 5], [Melt; 5]) {
     #[cfg(target_arch = "x86_64")]
-    if avx512::cpu_supported() {
-        return unsafe { avx512::permute_last_x2(input, other_input) };
+    {
+        return simd_x2::permute_last_x2(input, other_input);
     }
 
     (
@@ -290,6 +291,114 @@ mod tests {
             let avx512_result = unsafe { avx512::permute_fixed(input) };
 
             assert_eq!(scalar_result, avx512_result);
+        }
+    }
+}
+
+mod test_simd {
+    use super::*;
+    use crate::tip5::test_cases::{
+        get_fixed_instance, get_fixed_instances_x2, get_fixed_instances_x8, get_instance,
+        get_instances_x2, get_instances_x8, INSTANCES,
+    };
+
+    #[test]
+    fn test_permute_fixed() {
+        for index in 0..INSTANCES.len() {
+            let input = get_fixed_instance(index);
+
+            let simd = simd::permute_fixed(&input);
+            assert_eq!(simd, scalar::permute_fixed(&input));
+        }
+    }
+
+    #[test]
+    fn test_permute_intermediate() {
+        for index in 0..INSTANCES.len() {
+            let mut simd_input = get_instance(index);
+            simd::permute_intermediate(&mut simd_input);
+
+            let mut scalar_input = get_instance(index);
+            scalar::permute_intermediate(&mut scalar_input);
+
+            assert_eq!(simd_input, scalar_input);
+        }
+    }
+
+    #[test]
+    fn test_permute_fixed_x2() {
+        for index in 0..INSTANCES.len() {
+            let (a, b) = get_fixed_instances_x2(index);
+
+            let (simd_a, simd_b) = simd_x2::permute_fixed_x2(&a, &b);
+            assert_eq!(simd_a, scalar::permute_fixed(&a));
+            assert_eq!(simd_b, scalar::permute_fixed(&b));
+        }
+    }
+
+    #[test]
+    fn test_permute_fixed_x8() {
+        for index in 0..INSTANCES.len() {
+            let input = get_fixed_instances_x8(index);
+
+            let simd_result = simd_x8::permute_fixed_x8(input);
+
+            for (i, input) in input.iter().enumerate() {
+                let scalar_result = scalar::permute_fixed(input);
+                assert_eq!(simd_result[i], scalar_result);
+            }
+        }
+    }
+
+    #[test]
+    fn test_permute_intermediate_x2() {
+        for index in 0..INSTANCES.len() {
+            let (mut a, mut b) = get_instances_x2(index);
+            simd_x2::permute_intermediate_x2(&mut a, &mut b);
+
+            let (mut scalar_a, mut scalar_b) = get_instances_x2(index);
+            scalar::permute_intermediate(&mut scalar_a);
+            scalar::permute_intermediate(&mut scalar_b);
+
+            assert_eq!(a, scalar_a);
+            assert_eq!(b, scalar_b);
+        }
+    }
+
+    #[test]
+    fn test_permute_intermediate_x8() {
+        for index in 0..INSTANCES.len() {
+            let mut simd = get_instances_x8(index);
+            simd_x8::permute_intermediate_x8(&mut simd);
+
+            for (i, scalar) in get_instances_x8(index).iter_mut().enumerate() {
+                scalar::permute_intermediate(scalar);
+                assert_eq!(simd[i], *scalar);
+            }
+        }
+    }
+
+    #[test]
+    fn test_permute_last_x2() {
+        for index in 0..INSTANCES.len() {
+            let (a, b) = get_instances_x2(index);
+
+            let (simd_a, simd_b) = simd_x2::permute_last_x2(a, b);
+            assert_eq!(simd_a, scalar::permute_last(a));
+            assert_eq!(simd_b, scalar::permute_last(b));
+        }
+    }
+
+    #[test]
+    fn test_permute_last_x8() {
+        for index in 0..INSTANCES.len() {
+            let input = get_instances_x8(index);
+
+            let result = simd_x8::permute_last_x8(input);
+
+            for (index, input) in input.into_iter().enumerate() {
+                assert_eq!(result[index], scalar::permute_last(input));
+            }
         }
     }
 }

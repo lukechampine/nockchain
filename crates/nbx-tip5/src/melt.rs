@@ -1,6 +1,5 @@
 use std::ops::{Add, AddAssign, Div, Mul, MulAssign, Neg, Sub};
 
-use nockvm::noun::Noun;
 use noun_serde::{NounDecode, NounEncode};
 use num_traits::Pow;
 
