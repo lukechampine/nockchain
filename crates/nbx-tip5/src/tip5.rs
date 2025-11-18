@@ -219,7 +219,10 @@ pub fn permute_fixed_x2(input: &[Melt; 10], other_input: &[Melt; 10]) -> ([Melt;
         return simd_x2::permute_fixed_x2(input, other_input);
     }
 
-    (scalar::permute_fixed(input), scalar::permute_fixed(input))
+    (
+        scalar::permute_fixed(input),
+        scalar::permute_fixed(other_input),
+    )
 }
 
 #[inline(always)]
@@ -231,7 +234,7 @@ pub fn permute_intermediate_x2(input: &mut [Melt; 16], other_input: &mut [Melt; 
     }
 
     scalar::permute_intermediate(input);
-    scalar::permute_intermediate(input);
+    scalar::permute_intermediate(other_input);
 }
 
 #[inline(always)]
