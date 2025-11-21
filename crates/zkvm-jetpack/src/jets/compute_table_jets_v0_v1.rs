@@ -1,4 +1,4 @@
-use nockapp::Noun;
+use nockvm::noun::Noun;
 use nockvm::interpreter::Context;
 use nockvm::jets::util::{slot, BAIL_FAIL};
 use nockvm::jets::JetErr;

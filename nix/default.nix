@@ -79,29 +79,47 @@ let
     doCheck = false;
   };
 
-  nockchain-base = profile: extraArgs: craneLib.buildPackage (
-  individualCrateArgs // {
-    pname = "nockchain";
-    CARGO_PROFILE = profile;
-    cargoExtraArgs = "-p nockchain --features nockchain/jemalloc,nbx-miner/miner-save-attempts ${extraArgs}";
-    nativeBuildInputs = [ hoonc.hoonc localPkgs.protobuf_29 ];
-    preBuild = "mkdir -p assets && cp ${jam-pkg.dumb-jam.out} './assets/dumb.jam' && cp ${jam-pkg.miner-jam.out} './assets/miner.jam'";
+  jammed-base = extras: jams: craneLib.buildPackage (
+    let
+      jamCmds = lib.concatStringsSep "\n" (lib.mapAttrsToList (n: jam: "cp ${jam.out} './assets/${n}.jam'") jams);
+    in
+    individualCrateArgs // extras // {
+    preBuild = if jams != {} then ''
+      mkdir -p assets
+      ${jamCmds}
+    '' else null;
   });
 
-  wallet-base = craneLib.buildPackage (
-  individualCrateArgs // {
+  nockchain-base = profile: extraArgs: jammed-base {
+    CARGO_PROFILE = profile;
+    pname = "nockchain";
+    cargoExtraArgs = "-p nockchain --features nockchain/jemalloc,nbx-miner/miner-save-attempts ${extraArgs}";
+    nativeBuildInputs = [ localPkgs.protobuf_29 ];
+  } { dumb = jam-pkg.dumb-jam; miner = jam-pkg.miner-jam; };
+
+  wallet-base = jammed-base {
     pname = "nockchain-wallet";
     cargoExtraArgs = "-p nockchain-wallet";
-    nativeBuildInputs = [ hoonc.hoonc localPkgs.protobuf_29 ];
-    preBuild = "mkdir -p assets && cp ${jam-pkg.wallet-jam.out} './assets/wal.jam'";
-  });
+    nativeBuildInputs = [ localPkgs.protobuf_29 ];
+  } { wal = jam-pkg.wallet-jam; };
 
-  metrics-exporter-base = craneLib.buildPackage (
-  individualCrateArgs // {
+  metrics-exporter-base = jammed-base {
     pname = "nockchain-metrics-exporter";
     cargoExtraArgs = "-p nockchain-metrics-exporter";
     nativeBuildInputs = [ localPkgs.protobuf_29 ];
-  });
+  } {};
+
+  nockchain-explorer-tui-base = jammed-base {
+    pname = "nockchain-explorer-tui";
+    cargoExtraArgs = "-p nockchain-explorer-tui";
+    nativeBuildInputs = [ localPkgs.protobuf_29 ];
+  } {};
+
+  nockchain-peek-base = jammed-base {
+    pname = "nockchain-peek";
+    cargoExtraArgs = "-p nockchain-peek";
+    nativeBuildInputs = [ localPkgs.protobuf_29 ];
+  } { peek = jam-pkg.peek-jam; };
 
   nbx-miner-base = profile: extraArgs: ica: craneLib.buildPackage (
   ica // {
@@ -317,6 +335,8 @@ in
   hoonc = hoonc.hoonc;
   nockchain = nockchain "";
   nockchain-wallet = wallet-base;
+  nockchain-explorer-tui = nockchain-explorer-tui-base;
+  nockchain-peek = nockchain-peek-base;
   nockchain-metrics-exporter = metrics-exporter-base;
   nockchain-jamfiles = jam-pkg;
 

@@ -121,7 +121,6 @@
     ==
   ::
   ++  compute-size-without-txs
-    ~/  %compute-size-without-txs
     |=  pag=form
     ^-  size
     ;:  add
@@ -573,18 +572,10 @@
   ++  sign
     |=  [sen=form sk=schnorr-seckey]
     ^+  sen
-    =/  pk=schnorr-pubkey
-      %-  ch-scal:affine:curve:cheetah
-      :*  (t8-to-atom:belt-schnorr:cheetah sk)
-          a-gen:curve:cheetah
-      ==
-    =/  sig=schnorr-signature
-      %+  sign:affine:belt-schnorr:cheetah
-        sk
-      (sig-hash sen)
-    %_  sen
-      signature  (~(put z-by signature.sen) pk sig)
+    %=  sen
+      signature  (sign:signature:v0 signature.sen sk (sig-hash sen))
     ==
+  ::
   ::  batch verification helpers
   ++  signatures
     |=  sen=form
@@ -672,25 +663,14 @@
     |=  sen=form
     ^-  (list [schnorr-pubkey ^hash schnorr-signature])
     (signatures:pkh-signature pkh.witness.sen (sig-hash sen))
+  ::
   ::  +sign: add a single signature to the witness
   ++  sign
     |=  [sen=form sk=schnorr-seckey]
     ^+  sen
-    ::  we must derive the pubkey from the seckey
-    =/  pk=schnorr-pubkey
-      %-  ch-scal:affine:curve:cheetah
-      :*  (t8-to-atom:belt-schnorr:cheetah sk)
-          a-gen:curve:cheetah
-      ==
-    =/  sog=schnorr-signature
-      %+  sign:affine:belt-schnorr:cheetah
-        sk
-      (sig-hash sen)
-    =.  witness.sen
-      %_  witness.sen
-        pkh  (~(put z-by pkh.witness.sen) (hash:schnorr-pubkey pk) [pk sog])
-      ==
-    sen
+    %=  sen
+      witness  (sign:witness witness.sen sk (sig-hash sen))
+    ==
   ::
   ::  +verify: verify the witness and each seed has correct parent-hash
   ++  verify
@@ -863,7 +843,6 @@
       [%.y ~]
     ==
   ++  validate
-    ~/  %validate
     |=  =form
     ^-  ?
     ?:  =(form *^form)  %.n
@@ -1170,6 +1149,22 @@
         ::  timelock is dynamic
         tim=~
     ==
+  ::
+  ++  sign
+    |=  [=form sk=schnorr-seckey sig-hash=^hash]
+    ^-  ^form
+    ::  we must derive the pubkey from the seckey
+    =/  pk=schnorr-pubkey
+      %-  ch-scal:affine:curve:cheetah
+      :*  (t8-to-atom:belt-schnorr:cheetah sk)
+          a-gen:curve:cheetah
+      ==
+    =/  sog=schnorr-signature
+      (sign:affine:belt-schnorr:cheetah sk sig-hash)
+    %_  form
+      pkh  (~(put z-by pkh.form) (hash:schnorr-pubkey pk) [pk sog])
+    ==
+  ::
   ++  based
     |=  =form
     ^-  ?
@@ -1394,7 +1389,7 @@
     ^-  hashable:tip5
     |^
     :+  hash+(hash:spend-condition spend-condition.form)
-      leaf+axis
+      hash+(from-b58:^hash '6mhCSwJQDvbkbiPAUNjetJtVoo1VLtEhmEYoU4hmdGd6ep1F6ayaV4A')
     (hashable-merk-proof merk-proof.form)
     ::
     ++  hashable-merk-proof
@@ -1418,6 +1413,9 @@
   ++  check
     |=  [=form parent-firstname=^hash]
     ^-  ?
+    ?.  =(1 axis.form)
+      ~>  %slog.[0 'axis must be 1 until a protocol upgrade that properly commits to lmp in witness']
+      %.n
     =/  spend-firstname
       (hash-hashable:tip5 [leaf+& hash+root.merk-proof.form])
     ?.  =(spend-firstname parent-firstname)

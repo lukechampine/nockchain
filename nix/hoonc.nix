@@ -6,6 +6,8 @@ let
     cp ${../Cargo.lock} $out/Cargo.lock
     cp -a ${../crates/nockapp} $out/crates/nockapp
     cp -a ${../crates/nockvm} $out/crates/nockvm
+    cp -a ${../crates/noun-serde} $out/crates/noun-serde
+    cp -a ${../crates/noun-serde-derive} $out/crates/noun-serde-derive
     cp -a ${../crates/hoonc} $out/crates/hoonc
   '';
 

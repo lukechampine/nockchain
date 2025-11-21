@@ -8,6 +8,8 @@ members = [
   "crates/nockvm/rust/murmur3",
   "crates/nockvm/rust/nockvm_macros",
   "crates/nockvm/rust/nockvm",
+  "crates/noun-serde",
+  "crates/noun-serde-derive",
 ]
 
 exclude = ["excluded_crates/mds-codegen"]
@@ -38,6 +40,12 @@ path = "crates/nockvm/rust/nockvm_crypto"
 
 [workspace.dependencies.nockvm_macros]
 path = "crates/nockvm/rust/nockvm_macros"
+
+[workspace.dependencies.noun-serde]
+path = "crates/noun-serde"
+
+[workspace.dependencies.noun-serde-derive]
+path = "crates/noun-serde-derive"
 
 [workspace.dependencies]
 aes = { version = "0.8.3", default-features = false }
