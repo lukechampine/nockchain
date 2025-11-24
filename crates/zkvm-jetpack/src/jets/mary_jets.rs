@@ -141,23 +141,21 @@ pub fn fet_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
 pub fn transpose_bpolys_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let sam = slot(subject, 6)?;
     let bpolys = MarySlice::try_from(sam).expect("cannot convert bpolys arg");
-    transpose_bpolys(context, bpolys)
+    transpose_bpolys(&mut context.stack, bpolys)
 }
 
-fn transpose_bpolys(context: &mut Context, bpolys: MarySlice) -> Result<Noun, JetErr> {
+pub fn transpose_bpolys(stack: &mut NockStack, bpolys: MarySlice) -> Result<Noun, JetErr> {
     let offset = 1;
 
     let (res, mut res_poly): (IndirectAtom, MarySliceMut) = new_handle_mut_mary(
-        &mut context.stack,
+        stack,
         bpolys.len as usize * offset,
         bpolys.step as usize / offset,
     );
 
     mary_transpose(bpolys, offset, &mut res_poly);
 
-    let res_cell = finalize_mary(
-        &mut context.stack, res_poly.step as usize, res_poly.len as usize, res,
-    );
+    let res_cell = finalize_mary(stack, res_poly.step as usize, res_poly.len as usize, res);
 
     Ok(res_cell)
 }
@@ -359,7 +357,7 @@ pub fn snag_as_digest_jet(context: &mut Context, subject: Noun) -> Result<Noun, 
     snag_as_digest(stack, m_noun, i)
 }
 
-fn snag_as_digest(stack: &mut NockStack, m_noun: Noun, i: usize) -> Result<Noun, JetErr> {
+pub fn snag_as_digest(stack: &mut NockStack, m_noun: Noun, i: usize) -> Result<Noun, JetErr> {
     let buf = snag_one(stack, m_noun, i)?.as_atom()?;
 
     let mut digest = [0u64; DIGEST_LENGTH];

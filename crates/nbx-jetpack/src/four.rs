@@ -30,7 +30,7 @@ fn digest_noun(stack: &mut NockStack, v: NounDigest) -> Noun {
     T(stack, &v)
 }
 
-fn digest(n: Noun) -> core::result::Result<NounDigest, JetErr> {
+pub fn digest(n: Noun) -> core::result::Result<NounDigest, JetErr> {
     Ok(n.uncell()?
         .map(|v| v.as_atom().unwrap().as_u64().unwrap())
         .map(Melt::from_u64))
@@ -217,7 +217,7 @@ impl ProofData {
         engine.ensure_stages(1);
         let a = engine.push_noun(1, D(self.discrim())).unwrap();
 
-        fn as_mary<T: ElementEx>(s: &[T]) -> MarySlice {
+        fn as_mary<T: ElementEx>(s: &'_ [T]) -> MarySlice<'_> {
             MarySlice {
                 len: s.len() as _,
                 step: T::len() as _,
@@ -388,6 +388,15 @@ pub struct Proof {
 }
 
 impl Proof {
+    pub fn new() -> Self {
+        Self {
+            version: 2,
+            objects: Vec::new(),
+            hashes: Vec::new(),
+            read_index: 0,
+        }
+    }
+
     pub fn push(&mut self, obj: ProofData) {
         // ~/  %push
         // |=  dat=proof-data

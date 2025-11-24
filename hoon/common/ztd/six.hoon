@@ -83,24 +83,20 @@
           init-domain-len
         last-codeword-len
       ::
-      =-  [fri-indices stream]
-      %^  zip-roll  (range num-rounds)  codewords
-      |=  [[round=@ data=codeword-data] indices=_fri-indices stream=_stream]
-      =/  len  len.array:(~(change-step ave codeword.data) 3)
-      =-  [(flop new-indices) stream]
-      %+  roll  indices
-      |=  [idx=@ new-indices=(list @) stream=_stream]
+      =/  roll-res
+        %+  roll  codewords
+        |=  [data=codeword-data indices=_fri-indices stream=_stream]
+        =/  idx-mod  (div len.array:(~(change-step ave codeword.data) 3) folding-deg)
+        %+  roll  indices
+        |=  [idx=@ new-indices=(list @) stream=_stream]
+        =/  coset-idx  (mod idx idx-mod)
+        =/  merk  (need merk.data)
+        =/  axis  (index-to-axis depth.merk coset-idx)
+        =/  leaf=fpoly  (~(snag-as-fpoly ave codeword.data) coset-idx)
+        =/  opening=merk-proof:merkle  (build-merk-proof:merkle heap.merk axis)
+        [(snoc new-indices coset-idx) (~(push proof-stream stream) [%m-path leaf path.opening])]
       ::
-      =/  coset-idx  (mod idx (div len folding-deg))
-      =/  merk  (need merk.data)
-      =/  axis  (index-to-axis depth.merk coset-idx)
-      ::  Compute merkle opening to idx in codeword and send to the verifier
-      =/  leaf=fpoly
-        (~(snag-as-fpoly ave codeword.data) coset-idx)
-      =/  opening=merk-proof:merkle
-        (build-merk-proof:merkle heap.merk axis)
-      :-  [coset-idx new-indices]
-      (~(push proof-stream stream) [%m-path leaf path.opening])
+      [fri-indices stream.roll-res]
     ::
     ++  commit
       ~/  %prove-commit

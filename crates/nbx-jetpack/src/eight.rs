@@ -512,7 +512,7 @@ pub fn compute_composition_poly(stack: &mut NockStack, sam: Noun) -> Result {
 }
 
 #[tracing::instrument(skip_all)]
-fn process_composition_constraints<'a>(
+pub fn process_composition_constraints<'a>(
     mut all_comps: impl Iterator<Item = &'a [Melt]>,
     comp_cnts: impl Iterator<Item = usize>,
     constraints: &ProcessedDeg,
@@ -588,7 +588,7 @@ fn process_composition_constraints<'a>(
 type ProcessedDeg = Vec<(Vec<u64>, Noun)>;
 
 #[tracing::instrument(skip_all)]
-fn degree_processing(
+pub fn degree_processing(
     stack: &mut NockStack,
     heights: &[u64],
     constraint_map: Option<HoonMap>,

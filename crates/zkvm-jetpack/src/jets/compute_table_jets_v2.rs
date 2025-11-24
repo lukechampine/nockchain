@@ -1,8 +1,11 @@
+use nockchain_math::noun_ext::NounMathExt;
 use nockvm::interpreter::Context;
 use nockvm::jets::util::{slot, BAIL_EXIT, BAIL_FAIL};
 use nockvm::jets::JetErr;
+use nockvm::mem::NockStack;
 use nockvm::noun::{Atom, IndirectAtom, Noun, D, T};
 use nockvm_macros::tas;
+use noun_serde::NounEncode;
 use tracing::debug;
 
 use crate::form::belt::*;
@@ -11,10 +14,14 @@ use crate::form::gen_trace::{build_tree_data, TreeData};
 use crate::form::handle::{finalize_mary, new_handle_mut_mary};
 use crate::form::mary::*;
 use crate::form::structs::HoonList;
+use crate::jets::bp_jets::init_bpoly_bridge;
 use crate::jets::table_utils::*;
 
 pub fn compute_v2_mega_extend_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
-    let sam = slot(subject, 6)?;
+    compute_v2_mega_extend_sam(&mut context.stack, slot(subject, 6)?)
+}
+
+pub fn compute_v2_mega_extend_sam(stack: &mut NockStack, sam: Noun) -> Result<Noun, JetErr> {
     let table_mary = slot(sam, 2)?;
     let all_chals = slot(sam, 6)?;
     let _fock_ret = slot(sam, 7)?;
@@ -30,9 +37,8 @@ pub fn compute_v2_mega_extend_jet(context: &mut Context, subject: Noun) -> Resul
         return Err(BAIL_FAIL);
     };
 
-    let (res, mut res_mary): (IndirectAtom, MarySliceMut) = new_handle_mut_mary(
-        &mut context.stack, NUM_MEGA_EXT_COLS as usize, table.len as usize,
-    );
+    let (res, mut res_mary): (IndirectAtom, MarySliceMut) =
+        new_handle_mut_mary(stack, NUM_MEGA_EXT_COLS as usize, table.len as usize);
 
     let mut state: StateData = StateData::new();
 
@@ -249,11 +255,9 @@ pub fn compute_v2_mega_extend_jet(context: &mut Context, subject: Noun) -> Resul
         write_mega_ext_row_data(&mut res_mary, &Row(i as usize), &state);
     }
 
-    let res_cell = finalize_mary(
-        &mut context.stack, NUM_MEGA_EXT_COLS as usize, table.len as usize, res,
-    );
-    let header = header(context);
-    Ok(T(&mut context.stack, &[header, res_cell]))
+    let res_cell = finalize_mary(stack, NUM_MEGA_EXT_COLS as usize, table.len as usize, res);
+    let header = header_sam(stack);
+    Ok(T(stack, &[header, res_cell]))
 }
 
 fn compute_sfcons_inv(
@@ -497,7 +501,10 @@ fn compress_ion(ion: &Ion, a: &Felt, b: &Felt, c: &Felt) -> Felt {
 }
 
 pub fn compute_v2_extend_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
-    let sam = slot(subject, 6)?;
+    compute_v2_extend_sam(&mut context.stack, slot(subject, 6)?)
+}
+
+pub fn compute_v2_extend_sam(nock_stack: &mut NockStack, sam: Noun) -> Result<Noun, JetErr> {
     let table_mary = slot(sam, 2)?;
     let chals_rd1 = slot(sam, 6)?;
     let fock_ret = slot(sam, 7)?;
@@ -511,9 +518,8 @@ pub fn compute_v2_extend_jet(context: &mut Context, subject: Noun) -> Result<Nou
         return Err(BAIL_FAIL);
     };
 
-    let (res, mut res_mary): (IndirectAtom, MarySliceMut) = new_handle_mut_mary(
-        &mut context.stack, NUM_EXT_COLS as usize, table.len as usize,
-    );
+    let (res, mut res_mary): (IndirectAtom, MarySliceMut) =
+        new_handle_mut_mary(nock_stack, NUM_EXT_COLS as usize, table.len as usize);
 
     let stack: Vec<TreeData> = build_compute_queue(queue, &chals.alf)?;
     let mut stack_idx: usize = 0;
@@ -656,11 +662,37 @@ pub fn compute_v2_extend_jet(context: &mut Context, subject: Noun) -> Result<Nou
         row_idx += 1;
     }
 
-    let res_cell = finalize_mary(
-        &mut context.stack, NUM_EXT_COLS as usize, table.len as usize, res,
-    );
-    let header = header(context);
-    Ok(T(&mut context.stack, &[header, res_cell]))
+    let res_cell = finalize_mary(nock_stack, NUM_EXT_COLS as usize, table.len as usize, res);
+    let header = header_sam(nock_stack);
+    Ok(T(nock_stack, &[header, res_cell]))
+}
+
+pub fn compute_v2_terminal_sam(stack: &mut NockStack, sam: Noun) -> Result<Noun, JetErr> {
+    let [_, mary] = sam.uncell()?;
+    let Ok(mary) = MarySlice::try_from(mary) else {
+        debug!("cannot convert mary arg to mary");
+        return Err(BAIL_FAIL);
+    };
+    let first_row = get_row(&mary, 0);
+    let last_row = get_row(&mary, mary.len - 1);
+
+    let poly = [
+        grab_pelt(first_row, S_SIZE_IDX),
+        grab_pelt(first_row, S_LEAF_IDX),
+        grab_pelt(first_row, S_DYCK_IDX),
+        grab_pelt(first_row, F_SIZE_IDX),
+        grab_pelt(first_row, F_LEAF_IDX),
+        grab_pelt(first_row, F_DYCK_IDX),
+        grab_pelt(first_row, E_SIZE_IDX),
+        grab_pelt(first_row, E_LEAF_IDX),
+        grab_pelt(first_row, E_DYCK_IDX),
+        grab_pelt(last_row, DECODE_MSET_IDX),
+        grab_pelt(last_row, OP0_MSET_IDX),
+    ]
+    .map(|f| f.0)
+    .concat()
+    .to_noun(stack);
+    init_bpoly_bridge(stack, poly)
 }
 
 fn compute_fcons_inv(row: &ExtRowData) -> Felt {
@@ -851,10 +883,10 @@ fn build_compute_queue(list: Noun, alf: &Felt) -> Result<Vec<TreeData>, JetErr> 
     Ok(res)
 }
 
-fn header(context: &mut Context) -> Noun {
-    let prime: Noun = Atom::new(&mut context.stack, PRIME).as_noun();
-    let header: Noun = T(
-        &mut context.stack,
+fn header_sam(stack: &mut NockStack) -> Noun {
+    let prime: Noun = Atom::new(stack, PRIME).as_noun();
+    T(
+        stack,
         &[
             D(TABLE_NAME),
             prime,
@@ -864,8 +896,7 @@ fn header(context: &mut Context) -> Noun {
             D(NUM_BASIC_COLS + NUM_EXT_COLS + NUM_MEGA_EXT_COLS),
             D(1), // num-randomizers
         ],
-    );
-    header
+    )
 }
 
 fn mega_idx(idx: usize) -> usize {

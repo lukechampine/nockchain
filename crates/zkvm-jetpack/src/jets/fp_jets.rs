@@ -1,6 +1,7 @@
 use nockvm::interpreter::Context;
 use nockvm::jets::util::{slot, BAIL_FAIL};
 use nockvm::jets::Result;
+use nockvm::mem::NockStack;
 use nockvm::noun::{Cell, IndirectAtom, Noun, D};
 use tracing::debug;
 
@@ -11,8 +12,7 @@ use crate::form::noun_ext::{AtomMathExt, NounMathExt};
 use crate::form::poly::FPolySlice;
 use crate::form::structs::HoonList;
 
-pub fn fp_coseword_jet(context: &mut Context, subject: Noun) -> Result {
-    let sam = slot(subject, 6)?;
+pub fn coseword_sam(stack: &mut NockStack, sam: Noun) -> Result {
     let p = slot(sam, 2)?;
     let offset = slot(sam, 6)?;
     let order = slot(sam, 7)?;
@@ -28,21 +28,23 @@ pub fn fp_coseword_jet(context: &mut Context, subject: Noun) -> Result {
     let returned_fpoly = fp_coseword(p_poly.0, offset_felt, order_32, &root);
 
     let (res, res_poly): (IndirectAtom, &mut [Felt]) =
-        new_handle_mut_slice(&mut context.stack, Some(returned_fpoly.len() as usize));
+        new_handle_mut_slice(stack, Some(returned_fpoly.len() as usize));
     res_poly.copy_from_slice(&returned_fpoly[..]);
-    let res_cell = finalize_poly(&mut context.stack, Some(res_poly.len()), res);
+    let res_cell = finalize_poly(stack, Some(res_poly.len()), res);
 
     Ok(res_cell)
 }
 
-pub fn init_fpoly_jet(context: &mut Context, subject: Noun) -> Result {
-    let poly = slot(subject, 6)?;
+pub fn fp_coseword_jet(context: &mut Context, subject: Noun) -> Result {
+    coseword_sam(&mut context.stack, slot(subject, 6)?)
+}
 
+pub fn init_fpoly_bridge(stack: &mut NockStack, poly: Noun) -> Result {
     let list_felt = HoonList::try_from(poly)?.into_iter();
     let count = list_felt.count();
 
     let (res, res_poly): (IndirectAtom, &mut [Felt]) =
-        new_handle_mut_slice(&mut context.stack, Some(count as usize));
+        new_handle_mut_slice(stack, Some(count as usize));
     for (i, felt_noun) in list_felt.enumerate() {
         let Ok(felt) = felt_noun.as_felt() else {
             debug!("list element not a felt");
@@ -51,9 +53,13 @@ pub fn init_fpoly_jet(context: &mut Context, subject: Noun) -> Result {
         res_poly[i] = *felt;
     }
 
-    let res_cell = finalize_poly(&mut context.stack, Some(res_poly.len()), res);
+    let res_cell = finalize_poly(stack, Some(res_poly.len()), res);
 
     Ok(res_cell)
+}
+
+pub fn init_fpoly_jet(context: &mut Context, subject: Noun) -> Result {
+    init_fpoly_bridge(&mut context.stack, slot(subject, 6)?)
 }
 pub fn fpeval_jet(context: &mut Context, subject: Noun) -> Result {
     let sam = slot(subject, 6)?;

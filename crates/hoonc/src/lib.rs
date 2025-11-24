@@ -244,12 +244,10 @@ async fn initialize_hoonc_inner<J: Jammer + Send + 'static>(
         && boot_cli.state_jam.is_none()
         && (boot_cli.new || !has_existing_checkpoint);
 
-    let mut prewarm_state_file: Option<NamedTempFile> = None;
     if should_use_prewarm {
         let mut tmp = NamedTempFile::new()?;
         tmp.write_all(PREWARM_STATE_JAM)?;
         boot_cli.state_jam = Some(tmp.path().to_string_lossy().into_owned());
-        prewarm_state_file = Some(tmp);
     }
     let mut nockapp =
         boot::setup::<J>(KERNEL_JAM, boot_cli.clone(), &[], "hoonc", Some(data_dir)).await?;

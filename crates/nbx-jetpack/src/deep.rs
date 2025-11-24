@@ -185,14 +185,14 @@ impl DivisorBatch {
 #[derive(Clone)]
 pub struct DeepEngine<'a> {
     divisor_batches: Vec<DivisorBatch>,
-    weights: FPolySlice<'a>,
+    _weights: FPolySlice<'a>,
 }
 
 impl<'a> DeepEngine<'a> {
-    pub fn new(weights: FPolySlice<'a>) -> Self {
+    pub fn new(_weights: FPolySlice<'a>) -> Self {
         Self {
             divisor_batches: vec![],
-            weights,
+            _weights,
         }
     }
 
