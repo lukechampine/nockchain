@@ -135,11 +135,7 @@
     ::
     =/  num-tables  (lent tables)
     =/  table-names  (turn tables |=(t=table-dat name.p.t))
-    =/  heights=(list @)
-      %+  turn  tables
-      |=  t=table-dat
-      =/  len  len.array.p.p.t
-      ?:(=(len 0) 0 (bex (xeb (dec len))))
+    =/  heights=(list @)  (table-heights tables)
     ::~&  heights+heights
     ::
     =.  proof  (~(push proof-stream proof) [%heights heights])
@@ -656,5 +652,14 @@
     |=  t=table-dat
     ^-  table-mary
     (mega-extend:q.t p.t chals return)
+  ::
+  ++  table-heights
+    ~/  %table-heights
+    |=  tables=(list table-dat)
+    ^-  (list @)
+    %+  turn  tables
+    |=  t=table-dat
+    =/  len  len.array.p.p.t
+    ?:(=(len 0) 0 (bex (xeb (dec len))))
   --
 --

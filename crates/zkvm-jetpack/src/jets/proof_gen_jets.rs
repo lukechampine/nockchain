@@ -6,7 +6,7 @@ use nockvm::jets::util::{slot, BAIL_FAIL};
 use nockvm::jets::JetErr;
 use nockvm::noun::{IndirectAtom, Noun, D};
 use nockvm_macros::tas;
-use noun_serde::NounDecode;
+use noun_serde::{NounDecode, NounEncode};
 use tracing::debug;
 
 use crate::form::belt::Belt;

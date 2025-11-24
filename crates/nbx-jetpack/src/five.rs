@@ -135,6 +135,16 @@ pub fn pstack_push_all(context: &mut Context, subject: Noun) -> Result {
     poly_stack_push_all_raw::<Felt>(context, subject)
 }
 
+pub fn proof_stream_push(context: &mut Context, subject: Noun) -> Result {
+    use crate::four::{Proof, ProofData};
+
+    let door = slot(subject, 7)?;
+    let mut proof = Proof::try_from(slot(door, 6)?)?;
+    let proof_data = ProofData::try_from(slot(subject, 6)?)?;
+    proof.push(proof_data);
+    Ok(proof.to_noun(&mut context.stack))
+}
+
 // ++  pop
 //   ::    [a b c x] => [a b c]
 //   ~/  %pop

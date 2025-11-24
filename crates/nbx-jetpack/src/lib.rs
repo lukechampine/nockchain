@@ -13,6 +13,7 @@ mod five;
 mod four;
 mod hoon;
 mod one;
+mod prover;
 mod prover_compute;
 mod prover_memory;
 mod seven;
@@ -38,6 +39,7 @@ use five::*;
 use hoon::*;
 pub use one::snag_as_poly_mary;
 use one::*;
+use prover::*;
 use prover_compute::build as compute_build;
 use prover_memory::{build_v0_v1 as memory_build_v0_v1, build_v2 as memory_build_v2, *};
 use six::*;
@@ -235,6 +237,9 @@ sam_jet! {
     bp_intercosate_jet => bp_intercosate_sam,
     bp_shift_by_unity_jet => bp_shift_by_unity_sam,
     sort_jet => list_sort 'raw,
+
+    table_heights_jet => table_heights,
+    proof_stream_push_jet => proof_stream_push 'raw,
 }
 
 const ENC_KEY: u32 = obfstr::random!(u32, "key");
@@ -768,26 +773,47 @@ pub const NBX_FOUR_JETS: &[HotEntry] = &[/*(
     absorb_proof_objects_jet,
 )*/];
 
-pub const NBX_FIVE_JETS: &[HotEntry] = &[(
-    &[
-        K_138,
-        jet_str!(b"one"),
-        jet_str!(b"two"),
-        jet_str!(b"tri"),
-        jet_str!(b"qua"),
-        jet_str!(b"pen"),
-        jet_str!(b"zeke"),
-        jet_str!(b"ext-field"),
-        jet_str!(b"misc-lib"),
-        jet_str!(b"proof-lib"),
-        jet_str!(b"utils"),
-        jet_str!(b"constraint-util"),
-        jet_str!(b"pstack"),
-        jet_str!(b"push-all"),
-    ],
-    1,
-    pstack_push_all_jet,
-)];
+pub const NBX_FIVE_JETS: &[HotEntry] = &[
+    (
+        &[
+            K_138,
+            jet_str!(b"one"),
+            jet_str!(b"two"),
+            jet_str!(b"tri"),
+            jet_str!(b"qua"),
+            jet_str!(b"pen"),
+            jet_str!(b"zeke"),
+            jet_str!(b"ext-field"),
+            jet_str!(b"misc-lib"),
+            jet_str!(b"proof-lib"),
+            jet_str!(b"utils"),
+            jet_str!(b"constraint-util"),
+            jet_str!(b"pstack"),
+            jet_str!(b"push-all"),
+        ],
+        1,
+        pstack_push_all_jet,
+    ),
+    (
+        &[
+            K_138,
+            jet_str!(b"one"),
+            jet_str!(b"two"),
+            jet_str!(b"tri"),
+            jet_str!(b"qua"),
+            jet_str!(b"pen"),
+            jet_str!(b"zeke"),
+            jet_str!(b"ext-field"),
+            jet_str!(b"misc-lib"),
+            jet_str!(b"proof-lib"),
+            jet_str!(b"utils"),
+            jet_str!(b"proof-stream"),
+            jet_str!(b"push"),
+        ],
+        1,
+        proof_stream_push_jet,
+    ),
+];
 
 pub const NBX_SIX_JETS: &[HotEntry] = &[
     /*(
@@ -1094,6 +1120,33 @@ pub const NBX_HOON_JETS: &[HotEntry] = &[(
     sort_jet,
 )];
 
+pub const NBX_PROVER_JETS: &[HotEntry] = &[(
+    &[
+        K_138,
+        jet_str!(b"one"),
+        jet_str!(b"two"),
+        jet_str!(b"tri"),
+        jet_str!(b"qua"),
+        jet_str!(b"pen"),
+        jet_str!(b"zeke"),
+        jet_str!(b"ext-field"),
+        jet_str!(b"misc-lib"),
+        jet_str!(b"proof-lib"),
+        jet_str!(b"utils"),
+        jet_str!(b"fri"),
+        jet_str!(b"table-lib"),
+        jet_str!(b"stark-core"),
+        jet_str!(b"fock-core"),
+        jet_str!(b"pow"),
+        jet_str!(b"stark-engine"),
+        jet_str!(b"stark-prover"),
+        jet_str!(b"prove-door"),
+        jet_str!(b"table-heights"),
+    ],
+    1,
+    table_heights_jet,
+)];
+
 #[rustfmt::skip]
 pub fn nbx_jets() -> impl Iterator<Item = HotEntry> {
     [
@@ -1109,6 +1162,7 @@ pub fn nbx_jets() -> impl Iterator<Item = HotEntry> {
         NBX_MEMORY_V2_JETS,
         NBX_COMPUTE_V2_JETS,
         NBX_HOON_JETS,
+        NBX_PROVER_JETS,
         //NBX_ZOON_JETS,
     ]
     .map(|v| v.iter().copied())
