@@ -217,7 +217,7 @@ impl ProofData {
         engine.ensure_stages(1);
         let a = engine.push_noun(1, D(self.discrim())).unwrap();
 
-        fn as_mary<T: ElementEx>(s: &[T]) -> MarySlice {
+        fn as_mary<T: ElementEx>(s: &'_ [T]) -> MarySlice<'_> {
             MarySlice {
                 len: s.len() as _,
                 step: T::len() as _,

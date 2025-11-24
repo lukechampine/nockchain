@@ -234,7 +234,7 @@ impl ReduceChunkSlice<'_> {
         let fix = self
             .ops_fixed
             .last()
-            .map(|v| (v.source as usize + 2 * DIGEST_LENGTH));
+            .map(|v| v.source as usize + 2 * DIGEST_LENGTH);
         var.zip(fix)
             .map(|(a, b)| core::cmp::max(a, b))
             .or(var)
@@ -277,7 +277,7 @@ impl ReduceChunkSlice<'_> {
 
         let ops_variable = self
             .ops_variable
-            .binary_search_by_key(&inp_at, |e| ((e.inner.source + e.len) as usize))
+            .binary_search_by_key(&inp_at, |e| (e.inner.source + e.len) as usize)
             // We want _the next_ element to split at
             .map(|v| v + 1)
             .unwrap_or_else(|v| v);

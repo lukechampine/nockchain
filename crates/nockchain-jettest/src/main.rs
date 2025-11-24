@@ -1,5 +1,4 @@
 use core::iter::once;
-use std::hint::spin_loop;
 use std::path::Path;
 use std::time::Instant;
 
@@ -9,10 +8,9 @@ use flume::Receiver;
 use futures::stream::iter;
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
-use nbx_jetpack::engine::Engine;
 #[cfg(feature = "gpu")]
 use nbx_jetpack::gpu;
-use nbx_jetpack::{bpoly_to_fpoly, nbx_jets, new_fpoly, snag_as_poly_mary};
+use nbx_jetpack::nbx_jets;
 use nockapp::kernel::boot::{self, Cli};
 use nockapp::kernel::form::SerfThread;
 use nockapp::noun::slab::NounSlab;
@@ -405,7 +403,7 @@ async fn main() -> Result<()> {
     for _ in 0..rayon::current_num_threads() {
         rayon::spawn(|| loop {
             rayon::yield_now();
-            spin_loop();
+            std::hint::spin_loop();
         });
     }
 
