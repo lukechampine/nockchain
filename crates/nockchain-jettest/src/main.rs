@@ -23,6 +23,8 @@ use nockapp::NounExt;
 use nockvm::jets::hot::{HotEntry, URBIT_HOT_STATE};
 use nockvm::mem::NockStack;
 use nockvm::mug::mug;
+use nockvm::noun::{D, T};
+use nockvm_macros::tas;
 use zkvm_jetpack::hot::produce_prover_hot_state;
 
 pub enum MiningWire {
@@ -61,6 +63,7 @@ unsafe impl Sync for SendSlab {}
 #[derive(Subcommand, Debug, Clone)]
 pub enum Mode {
     Test(Test),
+    GenerateProof(GenerateProof),
     #[cfg(feature = "gpu")]
     #[command(subcommand)]
     GpuTest(GpuTest),
@@ -194,6 +197,12 @@ impl GpuTest {
 }
 
 #[derive(Parser, Debug, Clone)]
+pub struct GenerateProof {
+    #[arg(long, default_value = "8", help = "pow-len used in the prover input")]
+    pow_len: u64,
+}
+
+#[derive(Parser, Debug, Clone)]
 pub struct Test {
     #[arg(short, long)]
     src_event: String,
@@ -320,6 +329,49 @@ impl Test {
     }
 }
 
+impl GenerateProof {
+    async fn run(self, cli: Cli) -> Result<()> {
+        let Self { pow_len } = self;
+
+        let exp_hash = match pow_len {
+            8 => (74351, 1616099586),
+            16 => (86860, 232615266),
+            64 => (115235, 1111470563),
+            _ => panic!("unhandled pow_len: {pow_len}"),
+        };
+
+        let candidate = {
+            let mut slab = NounSlab::new();
+            let header = T(&mut slab, &[1, 2, 3, 4, 5].map(D));
+            let nonce = T(&mut slab, &[6, 7, 8, 9, 10].map(D));
+            // Very permissive target so the proof-of-work check always succeeds.
+            let mut target = [u32::MAX as u64; 14];
+            target[0] = tas!(b"bn");
+            target[13] = 0;
+            let target = T(&mut slab, &target.map(D));
+            let cause = T(&mut slab, &[D(2), header, nonce, target, D(pow_len)]);
+            slab.set_root(cause);
+            slab
+        };
+
+        let mut jetted_hot = Vec::new();
+        jetted_hot.extend(nbx_jets());
+        jetted_hot.extend(URBIT_HOT_STATE);
+        jetted_hot.extend(produce_prover_hot_state());
+
+        let t0 = tokio::time::Instant::now();
+        let jet_effect = on_kernel(candidate, jetted_hot, cli).await?;
+        let elapsed = t0.elapsed();
+        let jet_hash = hash_slab(&jet_effect);
+
+        if jet_hash != exp_hash {
+            anyhow::bail!("generate-proof test FAILED: {jet_hash:?} != {exp_hash:?}");
+        }
+        println!("OK (pow_len = {pow_len}) in {:.02}s", elapsed.as_secs_f64());
+        Ok(())
+    }
+}
+
 /// Command line arguments
 #[derive(Parser, Debug, Clone)]
 #[command(name = "jojo")]
@@ -411,6 +463,7 @@ async fn main() -> Result<()> {
 
     match cli.mode {
         Mode::Test(p) => p.run(cli.nockapp_cli).await,
+        Mode::GenerateProof(p) => p.run(cli.nockapp_cli).await,
         #[cfg(feature = "gpu")]
         Mode::GpuTest(p) => p.run(cli.nockapp_cli).await,
     }

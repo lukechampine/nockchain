@@ -2,6 +2,7 @@ use array_concat::concat_arrays;
 use either::Either;
 use nockchain_math::belt::PRIME;
 use nockchain_math::handle::{finalize_mary, new_handle_mut_mary};
+use nockchain_math::mary::MarySlice;
 use nockchain_math::noun_ext::NounMathExt;
 use nockchain_math::structs::HoonList;
 use nockvm::jets::util::BAIL_FAIL;
@@ -10,6 +11,8 @@ use nockvm::mem::NockStack;
 use nockvm::noun::*;
 use nockvm_macros::tas;
 use zkvm_jetpack::form::mary::Mary;
+
+use crate::seven::height_mary;
 
 // ++  num-randomizers  1
 const NUM_RANDOMIZERS: u64 = 1;
@@ -145,6 +148,29 @@ pub fn build(stack: &mut NockStack, ret: Noun) -> Result {
     let (ma, ma_handle) = new_handle_mut_mary(stack, ret.step as _, ret.len as _);
     ma_handle.dat.copy_from_slice(&ret.dat);
     let ma = finalize_mary(stack, ret.step as _, ret.len as _, ma);
+
+    Ok(T(stack, &[header, ma]))
+}
+
+pub fn pad(stack: &mut NockStack, sam: Noun) -> Result {
+    let [header, p] = sam.uncell()?;
+    let Ok(p) = MarySlice::try_from(p) else {
+        return Err(BAIL_FAIL);
+    };
+    let height = height_mary(p);
+    let mut rows = Mary {
+        step: p.step,
+        len: p.len,
+        dat: p.dat.to_vec(),
+    };
+    for _ in 0..(height - rows.len) {
+        rows.dat.push(1);
+        rows.dat.extend_from_slice(&[0; 10]);
+        rows.len += 1;
+    }
+    let (ret_ma, h_ma) = new_handle_mut_mary(stack, rows.step as _, rows.len as _);
+    h_ma.dat.copy_from_slice(&rows.dat);
+    let ma = finalize_mary(stack, rows.step as _, rows.len as _, ret_ma);
 
     Ok(T(stack, &[header, ma]))
 }

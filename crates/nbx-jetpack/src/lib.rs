@@ -13,6 +13,7 @@ mod five;
 mod four;
 mod hoon;
 mod one;
+mod prover;
 mod prover_compute;
 mod prover_memory;
 mod seven;
@@ -38,6 +39,7 @@ use five::*;
 use hoon::*;
 pub use one::snag_as_poly_mary;
 use one::*;
+use prover::*;
 use prover_compute::build as compute_build;
 use prover_memory::{build_v0_v1 as memory_build_v0_v1, build_v2 as memory_build_v2, *};
 use six::*;
@@ -217,8 +219,7 @@ sam_jet! {
     precompute_ntts_jet => precompute_ntts,
     turn_coseword_jet => turn_coseword,
     pad_jet => pad,
-    prove_fri_door_jet => prove_fri_door 'raw 'jam 'create_jam_dir,
-    prove_commit_jet => prove_commit 'raw,// 'jam 'create_jam_dir,
+    prove_fri_door_jet => prove_fri_door 'raw 'log,
     //absorb_proof_objects_jet => absorb_proof_objects //'jam 'create_jam_dir,
     zby_key_jet => zby_key 'raw,
     tog_belts_jet => tog_belts 'raw,
@@ -235,6 +236,8 @@ sam_jet! {
     bp_intercosate_jet => bp_intercosate_sam,
     bp_shift_by_unity_jet => bp_shift_by_unity_sam,
     sort_jet => list_sort 'raw,
+
+    generate_proof_jet => generate_proof 'raw 'log,
 }
 
 const ENC_KEY: u32 = obfstr::random!(u32, "key");
@@ -789,48 +792,26 @@ pub const NBX_FIVE_JETS: &[HotEntry] = &[(
     pstack_push_all_jet,
 )];
 
-pub const NBX_SIX_JETS: &[HotEntry] = &[
-    /*(
-        &[
-            K_138,
-            jet_str!(b"one"),
-            jet_str!(b"two"),
-            jet_str!(b"tri"),
-            jet_str!(b"qua"),
-            jet_str!(b"pen"),
-            jet_str!(b"zeke"),
-            jet_str!(b"ext-field"),
-            jet_str!(b"misc-lib"),
-            jet_str!(b"proof-lib"),
-            jet_str!(b"utils"),
-            jet_str!(b"fri"),
-            jet_str!(b"fri-door"),
-            jet_str!(b"prove"),
-        ],
-        1,
-        prove_fri_door_jet,
-    ),*/
-    (
-        &[
-            K_138,
-            jet_str!(b"one"),
-            jet_str!(b"two"),
-            jet_str!(b"tri"),
-            jet_str!(b"qua"),
-            jet_str!(b"pen"),
-            jet_str!(b"zeke"),
-            jet_str!(b"ext-field"),
-            jet_str!(b"misc-lib"),
-            jet_str!(b"proof-lib"),
-            jet_str!(b"utils"),
-            jet_str!(b"fri"),
-            jet_str!(b"fri-door"),
-            jet_str!(b"prove-commit"),
-        ],
-        1,
-        prove_commit_jet,
-    ),
-];
+pub const NBX_SIX_JETS: &[HotEntry] = &[(
+    &[
+        K_138,
+        jet_str!(b"one"),
+        jet_str!(b"two"),
+        jet_str!(b"tri"),
+        jet_str!(b"qua"),
+        jet_str!(b"pen"),
+        jet_str!(b"zeke"),
+        jet_str!(b"ext-field"),
+        jet_str!(b"misc-lib"),
+        jet_str!(b"proof-lib"),
+        jet_str!(b"utils"),
+        jet_str!(b"fri"),
+        jet_str!(b"fri-door"),
+        jet_str!(b"prove"),
+    ],
+    1,
+    prove_fri_door_jet,
+)];
 
 pub const NBX_EIGHT_JETS: &[HotEntry] = &[
     (
@@ -1094,6 +1075,33 @@ pub const NBX_HOON_JETS: &[HotEntry] = &[(
     sort_jet,
 )];
 
+pub const NBX_PROVER_JETS: &[HotEntry] = &[(
+    &[
+        K_138,
+        jet_str!(b"one"),
+        jet_str!(b"two"),
+        jet_str!(b"tri"),
+        jet_str!(b"qua"),
+        jet_str!(b"pen"),
+        jet_str!(b"zeke"),
+        jet_str!(b"ext-field"),
+        jet_str!(b"misc-lib"),
+        jet_str!(b"proof-lib"),
+        jet_str!(b"utils"),
+        jet_str!(b"fri"),
+        jet_str!(b"table-lib"),
+        jet_str!(b"stark-core"),
+        jet_str!(b"fock-core"),
+        jet_str!(b"pow"),
+        jet_str!(b"stark-engine"),
+        jet_str!(b"stark-prover"),
+        jet_str!(b"prove-door"),
+        jet_str!(b"generate-proof"),
+    ],
+    1,
+    generate_proof_jet,
+)];
+
 #[rustfmt::skip]
 pub fn nbx_jets() -> impl Iterator<Item = HotEntry> {
     [
@@ -1109,6 +1117,7 @@ pub fn nbx_jets() -> impl Iterator<Item = HotEntry> {
         NBX_MEMORY_V2_JETS,
         NBX_COMPUTE_V2_JETS,
         NBX_HOON_JETS,
+        NBX_PROVER_JETS,
         //NBX_ZOON_JETS,
     ]
     .map(|v| v.iter().copied())

@@ -362,6 +362,10 @@ impl Tip5Tog {
         output
     }
 
+    pub fn belt(&mut self) -> Belt {
+        self.belts(1)[0]
+    }
+
     pub fn felts(&mut self, n: usize) -> Vec<Felt> {
         let belts = self.belts(n * 3);
         let belts_ptr = belts.as_ptr();
@@ -371,6 +375,26 @@ impl Tip5Tog {
     pub fn felt(&mut self) -> Felt {
         let belts = self.belts(3);
         Felt(belts.try_into().unwrap())
+    }
+
+    pub fn index(&mut self, size: usize) -> usize {
+        (self.belt().0 % (size as u64)) as usize
+    }
+
+    pub fn indices(&mut self, n: usize, size: usize, reduced_size: usize) -> Vec<usize> {
+        assert!(n <= reduced_size);
+        let mut indices = vec![];
+        let mut reduced_indices = vec![];
+        while indices.len() < n {
+            let index = self.index(size);
+            let reduced_index = index % reduced_size;
+            if reduced_indices.contains(&reduced_index) || indices.contains(&index) {
+                continue;
+            }
+            indices.push(index);
+            reduced_indices.push(reduced_index);
+        }
+        indices
     }
 }
 
@@ -659,4 +683,20 @@ fn snag_as_digest(stack: &mut NockStack, m: Noun, i: usize) -> Result {
     let cin = cut(stack, 6, 4, 1, buf)?.as_noun();
 
     Ok(T(stack, &[uno, dos, tre, qua, cin]))
+}
+
+pub fn build_merk_proof(stack: &mut NockStack, m: Noun, axis: u64) -> Result {
+    if axis == 0 {
+        return Err(BAIL_FAIL);
+    }
+    fn rec(stack: &mut NockStack, merk_heap: Noun, axis: u64) -> Result {
+        if axis == 0 {
+            return Ok(D(0));
+        }
+        let sibling = if axis % 2 == 1 { axis + 1 } else { axis - 1 };
+        let sibling_digest = snag_as_digest(stack, merk_heap, sibling as usize)?;
+        let rest = rec(stack, merk_heap, (axis - 1) / 2)?;
+        Ok(T(stack, &[sibling_digest, rest]))
+    }
+    rec(stack, m, axis - 1)
 }

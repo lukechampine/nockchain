@@ -12,13 +12,15 @@ use nockvm::jets::util::BAIL_FAIL;
 use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
 use nockvm::noun::{Atom, Noun, Slots, D, T};
+use noun_serde::NounEncode;
 use num_traits::Pow;
 use zkvm_jetpack::form::mary::Mary;
 use zkvm_jetpack::form::poly::Poly;
 
 use super::four::{absorb_proof_objects_impl, Proof, ProofData};
 use super::one::*;
-use super::three::{build_merk_heap_impl, MerkHeap};
+use super::three::{build_merk_heap_impl, build_merk_proof, MerkHeap};
+use crate::four::ProofPath;
 
 // $:  offset=belt
 //     omega=belt
@@ -28,7 +30,7 @@ use super::three::{build_merk_heap_impl, MerkHeap};
 //     folding-deg=@
 // ==
 #[derive(Clone, Copy)]
-struct FriInput {
+pub struct FriInput {
     offset: Belt,
     omega: Belt,
     init_domain_len: u64,
@@ -38,6 +40,19 @@ struct FriInput {
 }
 
 impl FriInput {
+    pub fn new(max_height: u64) -> Self {
+        let expansion_fac = 1 << 6;
+        let init_domain_len = max_height.next_power_of_two() * expansion_fac;
+        Self {
+            offset: Belt(7),
+            omega: Belt(init_domain_len).ordered_root().unwrap(),
+            init_domain_len,
+            expansion_fac,
+            num_spot_checks: 50 / 6,
+            folding_deg: 8,
+        }
+    }
+
     const fn num_rounds(self) -> u64 {
         // ^-  @
         // =/  len  init-domain-len
@@ -89,145 +104,16 @@ pub fn prove_fri_door(context: &mut Context, subj: Noun) -> Result {
     let fri = FriInput::try_from(fri)?;
 
     let sam = subj.slot(6)?;
-    // ~/  %prove
-    // |=  [codeword=fpoly stream=proof]
     let [codeword, stream] = sam.uncell()?;
-    let codeword = FPolySlice::try_from(codeword) else {
-        return Err(BAIL_FAIL);
-    };
-    // ^-  [fri-indices=(list @) stream=proof]
-    // |^
-    // ::  commit phase
-    // =^  codewords=(list codeword-data)  stream
-    //   (commit codeword stream)
-    // ::
-    // ::  query phase
-    // (query codewords stream)
-    // ::
-    // ::
-    // +$  codeword-data  [codeword=mary merk=(unit [depth=@ heap=merk-heap])]
-    // ::
-    // ++  query
-    //   |=  [codewords=(list codeword-data) stream=proof]
-    //   ^-  [fri-indices=(list @) stream=proof]
-    //   ::
-    //   ::  Get random indices from the verifier to spot-check the folding
-    //   =/  rng  ~(prover-fiat-shamir proof-stream stream)
-    //   =^  fri-indices=(list @)  rng
-    //     %-  indices:rng
-    //     :+  num-spot-checks
-    //       init-domain-len
-    //     last-codeword-len
-    //   ::
-    //   =-  [fri-indices stream]
-    //   %^  zip-roll  (range num-rounds)  codewords
-    //   |=  [[round=@ data=codeword-data] indices=_fri-indices stream=_stream]
-    //   =/  len  len.array:(~(change-step ave codeword.data) 3)
-    //   =-  [(flop new-indices) stream]
-    //   %+  roll  indices
-    //   |=  [idx=@ new-indices=(list @) stream=_stream]
-    //   ::
-    //   =/  coset-idx  (mod idx (div len folding-deg))
-    //   =/  merk  (need merk.data)
-    //   =/  axis  (index-to-axis depth.merk coset-idx)
-    //   ::  Compute merkle opening to idx in codeword and send to the verifier
-    //   =/  leaf=fpoly
-    //     (~(snag-as-fpoly ave codeword.data) coset-idx)
-    //   =/  opening=merk-proof:merkle
-    //     (build-merk-proof:merkle heap.merk axis)
-    //   :-  [coset-idx new-indices]
-    //   (~(push proof-stream stream) [%m-path leaf path.opening])
-    // ::
-    // ++  commit
-    //   |=  [codeword=fpoly stream=proof]
-    //   ^-  [codewords=(list codeword-data) stream=proof]
-    //   =-  [(flop codewords) stream]
-    //   %+  roll  (range +(num-rounds))
-    //   |=  [round=@ codeword=_codeword codewords=(list codeword-data) omega=_(lift omega) round-offset=_(lift offset) stream=_stream]
-    //   ?:  =(round num-rounds)
-    //     ::  If it's the last round, send the raw codeword to the verifier instead
-    //     ::  of a merkle tree
-    //       :*   zero-fpoly
-    //            codewords
-    //            (fpow omega folding-deg)
-    //            (fpow round-offset folding-deg)
-    //            (~(push proof-stream stream) [%codeword codeword])
-    //       ==
-    //   ::
-    //   =/  num  (div len.codeword folding-deg)
-    //   ::
-    //   ::  sort codeword into cosets
-    //   =/  cosets=mary
-    //     %-  zing-fpolys
-    //     %+  turn  (range num)
-    //     |=  k=@
-    //     %-  init-fpoly
-    //     %+  turn  (range folding-deg)
-    //     |=  i=@
-    //     =/  idx  (add (mul i num) k)
-    //     (~(snag fop codeword) idx)
-    //   ::
-    //   ::  send codeword (as cosets) to verifier
-    //   =/  merk=(pair @ merk-heap:merkle)
-    //     (build-merk-heap:merkle cosets)
-    //   =.  stream
-    //     (~(push proof-stream stream) [%m-root h.q.merk])
-    //   ::
-    //   ::  get challenge from verifier
-    //   =/  rng  ~(prover-fiat-shamir proof-stream stream)
-    //   =^  alpha=felt  rng  $:felt:rng
-    //   ::
-    //   ::  compute new codeword
-    //   =/  new-codeword=fpoly
-    //     %-  init-fpoly
-    //     %+  turn  (range len.array.cosets)
-    //     |=  i=@
-    //     =/  coset=fpoly  (~(snag-as-fpoly ave cosets) i)
-    //     =/  eval-point=felt  (fdiv alpha (fmul round-offset (fpow omega i)))
-    //     ::=/  eval-point=felt  (fdiv alpha (fpow omega i))
-    //     (fpeval (fp-ifft coset) eval-point)
-    //   ::
-    //   :*  new-codeword
-    //       [[cosets (some merk)] codewords]
-    //       (fpow omega folding-deg)
-    //       (fpow round-offset folding-deg)
-    //       stream
-    //   ==
-    // --
-    //todo!()
-    Err(BAIL_FAIL)
-}
+    let codeword = FPolySlice::try_from(codeword)?;
+    let stream = Proof::try_from(stream)?;
 
-// ++  query
-//   |=  [codewords=(list codeword-data) stream=proof]
-//   ^-  [fri-indices=(list @) stream=proof]
-//   ::
-//   ::  Get random indices from the verifier to spot-check the folding
-//   =/  rng  ~(prover-fiat-shamir proof-stream stream)
-//   =^  fri-indices=(list @)  rng
-//     %-  indices:rng
-//     :+  num-spot-checks
-//       init-domain-len
-//     last-codeword-len
-//   ::
-//   =-  [fri-indices stream]
-//   %^  zip-roll  (range num-rounds)  codewords
-//   |=  [[round=@ data=codeword-data] indices=_fri-indices stream=_stream]
-//   =/  len  len.array:(~(change-step ave codeword.data) 3)
-//   =-  [(flop new-indices) stream]
-//   %+  roll  indices
-//   |=  [idx=@ new-indices=(list @) stream=_stream]
-//   ::
-//   =/  coset-idx  (mod idx (div len folding-deg))
-//   =/  merk  (need merk.data)
-//   =/  axis  (index-to-axis depth.merk coset-idx)
-//   ::  Compute merkle opening to idx in codeword and send to the verifier
-//   =/  leaf=fpoly
-//     (~(snag-as-fpoly ave codeword.data) coset-idx)
-//   =/  opening=merk-proof:merkle
-//     (build-merk-proof:merkle heap.merk axis)
-//   :-  [coset-idx new-indices]
-//   (~(push proof-stream stream) [%m-path leaf path.opening])
+    let (codewords, stream) = prove_commit_impl(fri, codeword, stream)?;
+    let (fri_indices, stream) = prove_query_impl(stack, fri, codewords, stream)?;
+    let fri_indices = fri_indices.to_noun(stack);
+    let stream = stream.to_noun(stack);
+    Ok(T(stack, &[fri_indices, stream]))
+}
 
 // +$  codeword-data  [codeword=mary merk=(unit [depth=@ heap=merk-heap])]
 pub struct CodewordData {
@@ -235,47 +121,39 @@ pub struct CodewordData {
     merk: Option<(usize, MerkHeap)>,
 }
 
-impl CodewordData {
-    pub fn to_noun(self, stack: &mut NockStack) -> Noun {
-        let (ret, ma) = new_handle_mut_mary(stack, self.codeword.step as _, self.codeword.len as _);
-        ma.dat.copy_from_slice(&self.codeword.dat);
-        let ma = finalize_mary(stack, self.codeword.step as _, self.codeword.len as _, ret);
-        let merk = if let Some((depth, heap)) = self.merk {
-            let depth = Atom::new(stack, depth as _).as_noun();
-            let heap = heap.to_noun(stack);
-            T(stack, &[D(0), depth, heap])
-        } else {
-            D(0)
-        };
-        T(stack, &[ma, merk])
+pub fn prove_query_impl(
+    stack: &mut NockStack,
+    fri: FriInput,
+    codewords: Vec<CodewordData>,
+    mut stream: Proof,
+) -> core::result::Result<(Vec<usize>, Proof), JetErr> {
+    let last_codeword_len = fri.init_domain_len / (fri.folding_deg.pow(fri.num_rounds() as u32));
+
+    let fri_indices = absorb_proof_objects_impl(&stream.objects, &stream.hashes).indices(
+        fri.num_spot_checks as usize, fri.init_domain_len as usize, last_codeword_len as usize,
+    );
+
+    let mut round_indices = fri_indices.clone();
+    for data in &codewords {
+        let len = ((data.codeword.step as usize * data.codeword.len as usize) / 3);
+        let idx_mod = len / fri.folding_deg as usize;
+        for idx in &mut round_indices {
+            *idx %= idx_mod;
+            let merk = data.merk.as_ref().ok_or(BAIL_FAIL)?;
+            let axis = (1 << (merk.0 - 1)) + *idx;
+            let leaf = snag_as_poly_mary(data.codeword.as_slice(), *idx as usize);
+            let mpath = {
+                // TODO: cleaner if we have build_merk_proof_impl that returns Vec<[Melt; 5]>
+                let leaf = PolyVec::<Felt>(leaf.0.to_vec()).to_noun(stack);
+                let m = merk.1.m.to_noun(stack);
+                let opening = build_merk_proof(stack, m, axis as u64)?;
+                ProofPath::try_from(T(stack, &[leaf, opening]))?
+            };
+            stream.push(ProofData::MPath(mpath));
+        }
     }
-}
 
-// ::
-pub fn prove_commit(context: &mut Context, subj: Noun) -> Result {
-    let stack = &mut context.stack;
-
-    let parent_core = subj.slot(7)?;
-    let fri = parent_core.slot(6)?;
-    let fri = FriInput::try_from(fri)?;
-
-    let sam = subj.slot(6)?;
-    // |=  [codeword=fpoly stream=proof]
-    let [codeword, stream] = sam.uncell()?;
-    let codeword = FPolySlice::try_from(codeword)?;
-    let stream = Proof::try_from(stream)?;
-
-    // ^-  [codewords=(list codeword-data) stream=proof]
-    let (codewords, stream) = prove_commit_impl(fri, codeword, stream)?;
-    let codewords = codewords
-        .into_iter()
-        .map(|v| v.to_noun(stack))
-        .chain(once(D(0)))
-        .collect::<Vec<_>>();
-    let codewords = T(stack, &codewords);
-    let stream = stream.to_noun(stack);
-
-    Ok(T(stack, &[codewords, stream]))
+    Ok((fri_indices, stream))
 }
 
 pub fn prove_commit_impl(
