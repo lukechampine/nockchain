@@ -211,16 +211,11 @@ pub fn zero_extend(context: &mut Context, subject: Noun) -> Result {
     Ok(T(&mut context.stack, &[D(step), D(len + n), out.as_noun()]))
 }
 
-pub fn weld_step(context: &mut Context, subject: Noun) -> Result {
-    let parent_core = slot(subject, 7)?;
-    let ma = slot(parent_core, 6)?;
+pub fn weld_marys_step(stack: &mut NockStack, ma: Noun, na: Noun) -> Result {
     let Ok(ma) = MarySlice::try_from(ma) else {
         return Err(BAIL_FAIL);
     };
 
-    // ~/  %weld-step
-    // |=  na=mary
-    let na = slot(subject, 6)?;
     let Ok(na) = MarySlice::try_from(na) else {
         return Err(BAIL_FAIL);
     };
@@ -235,7 +230,7 @@ pub fn weld_step(context: &mut Context, subject: Noun) -> Result {
     //     len.array.ma
     //   (lsh [6 (mul (add step.ma step.na) len.array.ma)] 1)
     let mu_step = ma.step + na.step;
-    let (ret, mu) = new_handle_mut_mary(&mut context.stack, mu_step as usize, ma.len as usize);
+    let (ret, mu) = new_handle_mut_mary(stack, mu_step as usize, ma.len as usize);
     // |=  [i=@ mu=_mu]
     for (mu, (ma, na)) in mu.dat.chunks_exact_mut(mu_step as _).zip(
         ma.dat
@@ -256,9 +251,14 @@ pub fn weld_step(context: &mut Context, subject: Noun) -> Result {
         n.copy_from_slice(na);
     }
 
-    Ok(finalize_mary(
-        &mut context.stack, mu_step as usize, ma.len as usize, ret,
-    ))
+    Ok(finalize_mary(stack, mu_step as usize, ma.len as usize, ret))
+}
+
+pub fn weld_step(context: &mut Context, subject: Noun) -> Result {
+    let parent_core = slot(subject, 7)?;
+    let ma = slot(parent_core, 6)?;
+    let na = slot(subject, 6)?;
+    weld_marys_step(&mut context.stack, ma, na)
 }
 
 pub fn bpcan(mut p: BPolyVec) -> BPolyVec {
