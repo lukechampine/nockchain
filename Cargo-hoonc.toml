@@ -228,4 +228,4 @@ log = { git = "https://github.com/h33p/tracing-stripped" }
 tracing = { git = "https://github.com/h33p/tracing-stripped" }
 tracing-core = { git = "https://github.com/tokio-rs/tracing", rev = "tracing-0.1.41" }
 tracing-subscriber = { git = "https://github.com/tokio-rs/tracing", rev = "tracing-0.1.41" }
-rayon-core = { git = "https://github.com/ricohageman/rayon.git", rev = "6105cea31c87c6954442d312dc3a4d592b04d0e9" }
+rayon-core = { git = "https://github.com/nockbox/rayon.git", rev = "6105cea31c87c6954442d312dc3a4d592b04d0e9" }

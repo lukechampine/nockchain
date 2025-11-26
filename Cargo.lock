@@ -6181,7 +6181,7 @@ dependencies = [
 [[package]]
 name = "rayon-core"
 version = "1.13.0"
-source = "git+https://github.com/ricohageman/rayon.git?rev=6105cea31c87c6954442d312dc3a4d592b04d0e9#6105cea31c87c6954442d312dc3a4d592b04d0e9"
+source = "git+https://github.com/nockbox/rayon.git?rev=6105cea31c87c6954442d312dc3a4d592b04d0e9#6105cea31c87c6954442d312dc3a4d592b04d0e9"
 dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
