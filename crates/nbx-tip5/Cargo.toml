@@ -13,6 +13,9 @@ noun-serde.workspace = true
 [dev-dependencies]
 criterion = "0.7.0"
 
+[features]
+karatsuba = []
+
 [[bench]]
 name = "tip5"
 harness = false
