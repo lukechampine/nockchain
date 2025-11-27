@@ -126,7 +126,7 @@ let
     inherit (craneLib.crateNameFromCargoToml { src = ../crates/nbx-miner; }) version;
     pname = "nbx-miner";
     CARGO_PROFILE = profile;
-    cargoExtraArgs = (ica.cargoExtraArgs or "") + " -p nbx-miner --bin nbx-miner --features nbx-miner/jemalloc,nbx-miner/client,nbx-miner/jwt-auth-client ${extraArgs}";
+    cargoExtraArgs = (ica.cargoExtraArgs or "") + " -p nbx-miner --bin nbx-miner --features nbx-miner/full-optimize,nbx-miner/jemalloc,nbx-miner/client,nbx-miner/jwt-auth-client ${extraArgs}";
     nativeBuildInputs = [ hoonc.hoonc ];
     preBuild = "mkdir -p assets && cp ${jam-pkg.miner-jam.out} './assets/miner.jam'";
   });
