@@ -172,30 +172,6 @@
                                                                     =.  proof  (~(push proof-stream proof) terms+terminals)
     ::
     ::
-    =/  constraint-counts=(list @)
-      %+  turn  (range num-tables)
-      |=  i=@
-      =/  cs  (~(got by count-map.pre) i)
-      ;:  add
-          boundary.cs
-          row.cs
-          transition.cs
-          terminal.cs
-      ==
-
-    =/  extra-constraint-counts=(list @)
-      %+  turn  (range num-tables)
-      |=  i=@
-      =/  cs  (~(got by count-map.pre) i)
-      ;:  add
-          boundary.cs
-          row.cs
-          transition.cs
-          terminal.cs
-          extra.cs
-      ==
-
-    ::
     ::  The constraints take variables for a full row plus the following row. So to evaluate them
     ::  the trace polys are not enough. We need to compose each trace poly with f(X)=g*X to create
     ::  polys that will give the value of the following row. Then we weld these second-row polys
@@ -259,17 +235,14 @@
     ::
     ::  compute extra composition poly
                                                                     =/  [omicrons-bpoly=bpoly omicrons-fpoly=fpoly]  (make-omicrons tables)
-
-    =/  extra-composition-weights=(map @ bpoly)  (make-composition-weights proof extra-constraint-counts)
-  
                                                                     =/  extra-composition-poly=bpoly
-                                                                      %-  compute-composition-poly
-                                                                      :*  omicrons-bpoly
+                                                                      %-  make-composition-poly
+                                                                      :*  proof
+                                                                          omicrons-bpoly
                                                                           heights
                                                                           tworow-trace-polys-eval
                                                                           constraint-map.pre
                                                                           count-map.pre
-                                                                          extra-composition-weights
                                                                           augmented-chals
                                                                           dyn-list
                                                                           %.y
@@ -292,32 +265,20 @@
     ::
                                                                     =.  proof  (~(push proof-stream proof) [%evals extra-trace-evaluations])
                                                                     =.  proof  (~(push proof-stream proof) [%m-root h.q.merk-heap.mega-ext])
-   
-    ::
-    ::  compute the Composition Polynomial
-    ::  This polynomial composes the trace polynomials with the constraints, takes quotients
-    ::  over the rows where the constraint should be zero, adjusts the degree so they all
-    ::  have the same maximal degree, and combines them into one big random linear combination.
-    ::
-    ::  compute weights used in linear combination of composition polynomial
-    ::
-    =/  composition-weights=(map @ bpoly)  (make-composition-weights proof constraint-counts)
-
-    ::
-                                                                        =/  composition-poly=bpoly
-                                                                          %-  compute-composition-poly
-                                                                          :*  omicrons-bpoly
-                                                                              heights
-                                                                              tworow-trace-polys-eval
-                                                                              constraint-map.pre
-                                                                              count-map.pre
-                                                                              composition-weights
-                                                                              augmented-chals
-                                                                              dyn-list
-                                                                              %.n
-                                                                          ==
-                                                                        =/  num-composition-pieces  (get-max-constraint-degree cd.pre)
-                                                                        =/  composition-pieces=(list bpoly)  (bp-decompose composition-poly num-composition-pieces)
+                                                                    =/  composition-poly=bpoly
+                                                                      %-  make-composition-poly
+                                                                      :*  proof
+                                                                          omicrons-bpoly
+                                                                          heights
+                                                                          tworow-trace-polys-eval
+                                                                          constraint-map.pre
+                                                                          count-map.pre
+                                                                          augmented-chals
+                                                                          dyn-list
+                                                                          %.n
+                                                                      ==
+                                                                    =/  num-composition-pieces  (get-max-constraint-degree cd.pre)
+                                                                    =/  composition-pieces=(list bpoly)  (bp-decompose composition-poly num-composition-pieces)
     ::
     ::  turn composition pieces into codewords
     ::~&  %computing-composition-codewords
@@ -548,13 +509,6 @@
     =^  felt-list  rng  (felts:rng rng-max)
     (init-fpoly felt-list)
   ::
-  ++  make-comp-weights
-    ~/  %make-comp-weights
-    |=  [=proof num-constraints=@]
-    =/  rng  ~(prover-fiat-shamir proof-stream proof)
-    =^  belt-list  rng  (belts:rng (mul 2 num-constraints))
-    (init-bpoly belt-list)
-  ::
   ++  make-omicrons
     ~/  %make-omicrons
     |=  tables=(list table-dat)
@@ -565,18 +519,56 @@
       ~(omicron quot t)
     [(init-bpoly os) (init-fpoly (turn os lift))]
   ::
-  ++  make-composition-weights
-    ~/  %make-composition-weights
-    |=  [=proof constraint-counts=(list @)]
-    =/  num-tables  (lent constraint-counts)
-    =/  num-constraints=@  (sum constraint-counts)
-    =/  comp-weights  (make-comp-weights proof num-constraints)
-    %-  ~(gas by *(map @ bpoly))
-    =-  -<
-    %+  roll  (range num-tables)
-    |=  [i=@ acc=(list [@ bpoly]) num=@]
-    =/  num-constraints  (snag i constraint-counts)
-    :_  (add num (mul 2 num-constraints))
-    [[i (~(swag bop comp-weights) num (mul 2 num-constraints))] acc]
+  ++  make-composition-poly
+    ~/  %make-composition-poly
+    |=  $:  =proof
+            omicrons-bpoly=bpoly
+            heights=(list @)
+            tworow-trace-polys-eval=(list bpoly)
+            constraint-map=(map @ constraints)
+            count-map=(map @ constraint-counts)
+            augmented-chals=bpoly
+            dyn-list=(list bpoly)
+            is-extra=?
+        ==
+    ^-  bpoly
+    =/  num-tables=@  (lent heights)
+    =/  constraint-counts=(list @)
+      %+  turn  (range num-tables)
+      |=  i=@
+      =/  cs  (~(got by count-map) i)
+      =/  c
+        ;:  add
+            boundary.cs
+            row.cs
+            transition.cs
+            terminal.cs
+        ==
+      =?  c  is-extra  (add c extra.cs)
+      c
+    =/  composition-weights
+      =/  num-constraints=@  (sum constraint-counts)
+      =/  comp-weights
+        =/  rng  ~(prover-fiat-shamir proof-stream proof)
+        =^  belt-list  rng  (belts:rng (mul 2 num-constraints))
+        (init-bpoly belt-list)
+      %-  ~(gas by *(map @ bpoly))
+      =-  -<
+      %+  roll  (range num-tables)
+      |=  [i=@ acc=(list [@ bpoly]) num=@]
+      =/  num-constraints  (snag i constraint-counts)
+      :_  (add num (mul 2 num-constraints))
+      [[i (~(swag bop comp-weights) num (mul 2 num-constraints))] acc]
+    %-  compute-composition-poly
+    :*  omicrons-bpoly
+        heights
+        tworow-trace-polys-eval
+        constraint-map
+        count-map
+        composition-weights
+        augmented-chals
+        dyn-list
+        is-extra
+    ==
   --
 --

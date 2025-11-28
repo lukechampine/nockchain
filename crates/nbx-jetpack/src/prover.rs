@@ -1,19 +1,30 @@
+use nbx_tip5::base::{binv, bneg};
+use nbx_tip5::melt::Melt;
 use nockchain_math::belt::Belt;
 use nockchain_math::felt::Felt;
+use nockchain_math::handle::{finalize_poly, new_handle_mut_slice};
 use nockchain_math::mary::MarySlice;
 use nockchain_math::noun_ext::NounMathExt;
-use nockchain_math::structs::{HoonList, HoonMapIter};
+use nockchain_math::poly::{BPolySlice, *};
+use nockchain_math::poly_ext::*;
+use nockchain_math::structs::{HoonList, HoonMap, HoonMapIter};
 use nockvm::jets::util::{slot, BAIL_FAIL};
 use nockvm::jets::Result;
 use nockvm::mem::NockStack;
-use nockvm::noun::{Noun, D, T};
+use nockvm::noun::{IndirectAtom, Noun, D, T};
 use noun_serde::NounEncode;
+use zkvm_jetpack::form::poly::Poly;
 use zkvm_jetpack::jets::bp_jets::init_bpoly_bridge;
 use zkvm_jetpack::jets::fp_jets::init_fpoly_bridge;
 
+use super::substitute::SubstituteEngine;
+use super::two::*;
+use crate::eight::{degree_processing, process_composition_constraints};
+use crate::engine::Engine;
 use crate::four::{absorb_proof_objects_impl, Proof};
 use crate::one::weld_marys_step;
 use crate::seven::height_mary;
+use crate::utils::xeb;
 
 pub fn table_heights(stack: &mut NockStack, tables: Noun) -> Result {
     let tables = HoonList::try_from(tables)?;
@@ -100,8 +111,8 @@ pub fn weld_table_marys(stack: &mut NockStack, sample: Noun) -> Result {
     Ok(welded_tables.to_noun(stack))
 }
 
-pub fn make_deep_weights(stack: &mut NockStack, subject: Noun) -> Result {
-    let [proof, tables, max_constraint_degree] = subject.uncell()?;
+pub fn make_deep_weights(stack: &mut NockStack, sample: Noun) -> Result {
+    let [proof, tables, max_constraint_degree] = sample.uncell()?;
     let proof = Proof::try_from(proof)?;
     let tables = HoonList::try_from(tables)?;
     let max_constraint_degree = max_constraint_degree.as_atom()?.as_u64()?;
@@ -119,18 +130,6 @@ pub fn make_deep_weights(stack: &mut NockStack, subject: Noun) -> Result {
         .felts((total_cols * 4 + max_constraint_degree) as usize)
         .to_noun(stack);
     init_fpoly_bridge(stack, felts)
-}
-
-pub fn make_comp_weights(stack: &mut NockStack, subject: Noun) -> Result {
-    let [proof, num_constraints] = subject.uncell()?;
-    let proof = Proof::try_from(proof)?;
-    let num_constraints = num_constraints.as_atom()?.as_u64()?;
-
-    let belts = absorb_proof_objects_impl(&proof.objects, &proof.hashes)
-        .belts((2 * num_constraints) as usize)
-        .to_noun(stack);
-
-    init_bpoly_bridge(stack, belts)
 }
 
 pub fn make_omicrons(stack: &mut NockStack, tables: Noun) -> Result {
@@ -172,4 +171,227 @@ pub fn get_max_constraint_degree(_stack: &mut NockStack, sample: Noun) -> Result
     }
 
     Ok(D(max_degree))
+}
+
+pub fn make_composition_poly(stack: &mut NockStack, sample: Noun) -> Result {
+    let [proof, omicrons, heights, tworow_trace_polys, constraint_map, count_map, challenges, dyn_list, is_extra] =
+        sample.uncell()?;
+
+    let proof = Proof::try_from(proof)?;
+    let omicrons = BPolySlice::try_from(omicrons)?;
+    let heights = HoonList::try_from(heights)?
+        .map(|v| v.as_atom().unwrap().as_u64().unwrap())
+        .collect::<Vec<_>>();
+    let tworow_trace_polys = HoonList::try_from(tworow_trace_polys)?
+        .map(|v| BPolySlice::try_from(v).unwrap())
+        .collect::<Vec<_>>();
+    let constraint_map = HoonMap::try_from(constraint_map).ok();
+    let count_map = HoonMap::try_from(count_map)?;
+    let challenges = BPolySlice::try_from(challenges)?;
+    let dyn_list = HoonList::try_from(dyn_list)?
+        .map(|v| BPolySlice::try_from(v).unwrap())
+        .collect::<Vec<_>>();
+    let is_extra = is_extra.as_direct()?.data() == 0;
+
+    let weights_vec: Vec<Noun> = {
+        let num_tables = heights.len();
+        let mut num_constraints = 0usize;
+        let mut counts = Vec::with_capacity(num_tables);
+        for i in 0..num_tables {
+            let total = count_map
+                .get(stack, D(i as _))
+                .ok_or(BAIL_FAIL)?
+                .uncell::<5>()?
+                .iter()
+                .take(if is_extra { 5 } else { 4 })
+                .map(|v| v.as_atom().unwrap().as_u64().unwrap())
+                .sum::<u64>() as usize;
+            counts.push(total);
+            num_constraints += total;
+        }
+        let all_weights =
+            absorb_proof_objects_impl(&proof.objects, &proof.hashes).belts(2 * num_constraints);
+
+        let mut result = vec![];
+        let mut offset = 0usize;
+        for count in counts {
+            let slice_len = 2 * count;
+            let (res_atom, res_poly): (IndirectAtom, &mut [Belt]) =
+                new_handle_mut_slice(stack, Some(slice_len));
+            res_poly.copy_from_slice(&all_weights[offset..offset + slice_len]);
+            result.push(finalize_poly(stack, Some(slice_len), res_atom));
+            offset += slice_len;
+        }
+        result
+    };
+
+    // copied from eight::compute_composition_poly
+
+    type Elem = Melt;
+
+    // =/  max-height=@
+    //   %-  bex  %-  xeb  %-  dec
+    //   (roll heights max)
+    let Some(&max_height) = heights.iter().max() else {
+        return Err(BAIL_FAIL);
+    };
+    let max_height = 1 << xeb((max_height as usize) - 1);
+
+    // =/  dp  (degree-processing heights constraint-map is-extra)
+    let (fri_deg_bound, constraint_w_deg_map) =
+        degree_processing(stack, &heights, constraint_map, is_extra)?;
+    //let dp = HoonMap::try_from(dp).ok();
+
+    // |^
+    // =/  boundary-zerofier  (init-bpoly ~[(bneg 1) 1])          ::  f(X)=X-1
+    let boundary_zerofier = [Elem::from_u64(bneg(1)), Elem::one()];
+    let boundary_zerofier = PolySlice(&boundary_zerofier);
+    let mut boundary_acc: Option<Vec<_>> = None;
+
+    // Substitution moved out from process_degree_constraints to have everything done in one go.
+    let mut engine = SubstituteEngine::new(max_height);
+    let mut comp_cnts = Vec::with_capacity(1024);
+    let tworow_trace_polys = tworow_trace_polys
+        .iter()
+        .map(|v| PolyVec(v.0.to_vec()))
+        .map(<PolyVec<Elem>>::from)
+        .collect::<Vec<_>>();
+    for i in 0..omicrons.len() {
+        crate::codefuscate! {
+            // =/  trace  (snag i tworow-trace-polys)
+            let trace = &tworow_trace_polys[i];
+            let trace = <_ as Into<PolySlice<Elem>>>::into(trace);
+            // =/  constraints  (~(got by constraint-w-deg-map.dp) i)
+            let constraints2 = constraint_w_deg_map.get(&(i as u64)).unwrap();
+            // =/  dyns  (snag i dyn-list)
+            let dyns = dyn_list[i];
+
+            for constraints in constraints2 {
+                for (_, mp) in constraints.iter() {
+                    // =/  comps=(list bpoly)
+                    //   (mp-substitute-ultra mp trace max-height chal-map dyns)
+                    comp_cnts.push(mp_substitute_ultra_impl(
+                        &mut engine, 0, *mp, trace, challenges, dyns,
+                    )?);
+                }
+            }
+        }
+    }
+
+    let (all_comps, poly_len) = engine.reduce();
+    let mut all_comps = all_comps.iter().flat_map(|m| m.chunks(poly_len));
+    let mut comp_cnts = comp_cnts.into_iter();
+
+    // ::
+    // %+  roll  (range len.omicrons)
+    // |=  [i=@ acc=_zero-bpoly]
+    let mut acc = PolyVec(vec![Elem::zero(); poly_len]);
+    for i in 0..omicrons.len() {
+        crate::codefuscate! {
+        // =/  height=@  (snag i heights)
+        let height = heights[i];
+        // =/  omicron  (~(snag bop omicrons) i)
+        let omicron = omicrons.0[i];
+        // =/  last-row  (init-bpoly ~[(bneg (binv omicron)) 1])      ::  f(X)=X-g^{-1}
+        let last_row = [Elem::from_u64(bneg(binv(omicron.0))), Elem::one()];
+        let last_row = PolySlice(&last_row);
+        // =/  weights  (~(got by weights-map) i)
+        let weights = BPolySlice::try_from(weights_vec[i])?;
+        // =/  counts  (~(got by count_map) i)
+        let counts = count_map.get(stack, D(i as _)).ok_or(BAIL_FAIL)?;
+        let counts = counts
+            .uncell::<5>()?
+            .map(|v| v.as_atom().unwrap().as_u64().unwrap());
+        // =/  constraints  (~(got by constraint-w-deg-map.dp) i)
+        let constraints2 = constraint_w_deg_map.get(&(i as u64)).unwrap();
+        // ::
+        // =/  row-zerofier                                           ::  f(X) = (X^N-1)
+        //   (bpsub (bppow id-bpoly height) one-bpoly)
+        let row_zerofier = ppow(&[Elem::zero(), Elem::one()], height as _);
+        let row_zerofier = psub_(&row_zerofier, &[Elem::one()]);
+        let row_zerofier = PolySlice(&row_zerofier);
+        let mut row_acc = Option::<Vec<_>>::None;
+
+        // ::  note: the transition zerofier = row-zerofier/last-row
+        // ::  here, we are computing composition-constraints/transition-zerofier
+        let transition_zerofier = pdiv(row_zerofier.0, last_row.0);
+        let transition_zerofier = PolySlice(&transition_zerofier);
+
+        let dividends =
+            [boundary_zerofier, row_zerofier, transition_zerofier, last_row, row_zerofier];
+
+        let mut weights = weights.0;
+        for (o, ((constraints, count), dividend)) in constraints2
+            .iter()
+            .zip(counts.into_iter())
+            .zip(dividends)
+            .enumerate()
+        {
+            //   ?.  is-extra  zero-bpoly
+            if o == dividends.len() - 1 && !is_extra {
+                continue;
+            }
+
+            // NOTE: not in order here, and different iterations have diff parameters
+            // (~(scag bop weights) (mul 2 boundary.counts))
+            let (cur_weights, next_weights) = weights.split_at(2 * (count as usize));
+            weights = next_weights;
+            // %-  process-composition-constraints
+            // :*  boundary.constraints
+            //     trace
+            //     (~(scag bop weights) (mul 2 boundary.counts))
+            //     dyns
+            // ==
+            let processed_constraints = process_composition_constraints(
+                &mut all_comps,
+                &mut comp_cnts,
+                constraints,
+                PolySlice(cur_weights),
+                fri_deg_bound,
+            )?;
+
+            // %-  bpdiv
+            // :_  boundary-zerofier
+            // ;:  bpadd
+            //   acc
+
+            match o {
+                0 => match boundary_acc.as_mut() {
+                    Some(acc) => padd_in_place(acc, &processed_constraints.0),
+                    None => boundary_acc = Some(processed_constraints.0),
+                },
+                1 => match row_acc.as_mut() {
+                    Some(acc) => padd_in_place(acc, &processed_constraints.0),
+                    None => row_acc = Some(processed_constraints.0),
+                },
+                4 => match row_acc.as_mut() {
+                    Some(acc) => padd_in_place(acc, &processed_constraints.0),
+                    None => row_acc = Some(processed_constraints.0),
+                },
+                _ => {
+                    let dividend = PolyVec(dividend.0.to_vec());
+                    let result = pdiv(&processed_constraints.0, &dividend.0);
+                    padd_in_place(&mut acc.0, &result);
+                }
+            }
+        }
+
+        if let Some(row_acc) = row_acc {
+            let row_result = pdiv(&row_acc, row_zerofier.0);
+            padd_in_place(&mut acc.0, &row_result);
+        } }
+    }
+
+    if let Some(boundary_acc) = boundary_acc {
+        let row_result = pdiv(&boundary_acc, boundary_zerofier.0);
+        padd_in_place(&mut acc.0, &row_result);
+    }
+
+    let acc: BPolyVec = acc.into();
+
+    let (ret, handle) = new_handle_mut_slice(stack, Some(acc.len()));
+    handle.copy_from_slice(&acc.0);
+    let ret = finalize_poly(stack, Some(acc.len()), ret);
+
+    Ok(ret)
 }

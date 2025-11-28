@@ -363,12 +363,9 @@ impl GenerateProof {
         let jet_hash = hash_slab(&jet_effect);
 
         if jet_hash != exp_hash {
-            anyhow::bail!("generate-proof test failed: {jet_hash:?} != {exp_hash:?}");
+            anyhow::bail!("generate-proof test FAILED: {jet_hash:?} != {exp_hash:?}");
         }
-        println!(
-            "generate-proof test passed (pow_len = {pow_len}): {jet_hash:?} in {:.02}s",
-            elapsed.as_secs_f64()
-        );
+        println!("OK (pow_len = {pow_len}) in {:.02}s", elapsed.as_secs_f64());
         Ok(())
     }
 }
