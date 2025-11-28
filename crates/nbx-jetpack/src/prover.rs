@@ -1,14 +1,19 @@
+use nockchain_math::belt::Belt;
+use nockchain_math::felt::Felt;
+use nockchain_math::mary::MarySlice;
 use nockchain_math::noun_ext::NounMathExt;
-use nockchain_math::structs::HoonList;
-use nockvm::jets::util::slot;
+use nockchain_math::structs::{HoonList, HoonMapIter};
+use nockvm::jets::util::{slot, BAIL_FAIL};
 use nockvm::jets::Result;
 use nockvm::mem::NockStack;
 use nockvm::noun::{Noun, D, T};
 use noun_serde::NounEncode;
-use zkvm_jetpack::jets::fp_jets::init_fpoly;
+use zkvm_jetpack::jets::bp_jets::init_bpoly_bridge;
+use zkvm_jetpack::jets::fp_jets::init_fpoly_bridge;
 
 use crate::four::{absorb_proof_objects_impl, Proof};
 use crate::one::weld_marys_step;
+use crate::seven::height_mary;
 
 pub fn table_heights(stack: &mut NockStack, tables: Noun) -> Result {
     let tables = HoonList::try_from(tables)?;
@@ -113,5 +118,58 @@ pub fn make_deep_weights(stack: &mut NockStack, subject: Noun) -> Result {
     let felts = absorb_proof_objects_impl(&proof.objects, &proof.hashes)
         .felts((total_cols * 4 + max_constraint_degree) as usize)
         .to_noun(stack);
-    init_fpoly(stack, felts)
+    init_fpoly_bridge(stack, felts)
+}
+
+pub fn make_comp_weights(stack: &mut NockStack, subject: Noun) -> Result {
+    let [proof, num_constraints] = subject.uncell()?;
+    let proof = Proof::try_from(proof)?;
+    let num_constraints = num_constraints.as_atom()?.as_u64()?;
+
+    let belts = absorb_proof_objects_impl(&proof.objects, &proof.hashes)
+        .belts((2 * num_constraints) as usize)
+        .to_noun(stack);
+
+    init_bpoly_bridge(stack, belts)
+}
+
+pub fn make_omicrons(stack: &mut NockStack, tables: Noun) -> Result {
+    let tables = HoonList::try_from(tables)?;
+    let mut omicrons = Vec::with_capacity(tables.count());
+    let mut lifted_omicrons = Vec::with_capacity(tables.count());
+    for t in tables {
+        let table_mary = t.as_cell()?.head();
+        let mary = MarySlice::try_from(table_mary.as_cell()?.tail()).map_err(|_| BAIL_FAIL)?;
+        let omicron_belt = Belt(height_mary(mary) as u64).ordered_root()?;
+        omicrons.push(omicron_belt.to_noun(stack));
+        lifted_omicrons.push(Felt::lift(omicron_belt).to_noun(stack));
+    }
+
+    let omicrons = omicrons.to_noun(stack);
+    let lifted_omicrons = lifted_omicrons.to_noun(stack);
+    let bpolys = init_bpoly_bridge(stack, omicrons)?;
+    let fpolys = init_fpoly_bridge(stack, lifted_omicrons)?;
+    Ok(T(stack, &[bpolys, fpolys]))
+}
+
+pub fn get_max_constraint_degree(_stack: &mut NockStack, sample: Noun) -> Result {
+    let map_iter = HoonMapIter::from(sample);
+
+    let mut max_degree = 0u64;
+    for entry in map_iter {
+        let [_, value] = entry.uncell()?;
+        let [boundary, row, transition, terminal, _extra] = value.uncell()?;
+        let boundary = boundary.as_atom()?.as_u64()?;
+        let row = row.as_atom()?.as_u64()?;
+        let transition = transition.as_atom()?.as_u64()?;
+        let terminal = terminal.as_atom()?.as_u64()?;
+
+        max_degree = max_degree
+            .max(boundary)
+            .max(row)
+            .max(transition)
+            .max(terminal);
+    }
+
+    Ok(D(max_degree))
 }

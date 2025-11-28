@@ -331,6 +331,13 @@ impl GenerateProof {
     async fn run(self, cli: Cli) -> Result<()> {
         let Self { pow_len } = self;
 
+        let exp_hash = match pow_len {
+            8 => (74351, 1616099586),
+            16 => (86860, 232615266),
+            64 => (115235, 1111470563),
+            _ => panic!("unhandled pow_len: {pow_len}"),
+        };
+
         let candidate = {
             let mut slab = NounSlab::new();
             let header = T(&mut slab, &[1, 2, 3, 4, 5].map(D));
@@ -355,11 +362,11 @@ impl GenerateProof {
         let elapsed = t0.elapsed();
         let jet_hash = hash_slab(&jet_effect);
 
-        if jet_hash != (74351, 1616099586) {
-            anyhow::bail!("generate-proof test failed: {jet_hash:?} != (74351, 1616099586)");
+        if jet_hash != exp_hash {
+            anyhow::bail!("generate-proof test failed: {jet_hash:?} != {exp_hash:?}");
         }
         println!(
-            "generate-proof test passed: {jet_hash:?} in {:.02}s",
+            "generate-proof test passed (pow_len = {pow_len}): {jet_hash:?} in {:.02}s",
             elapsed.as_secs_f64()
         );
         Ok(())

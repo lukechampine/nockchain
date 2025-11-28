@@ -36,7 +36,7 @@ pub fn fp_coseword_jet(context: &mut Context, subject: Noun) -> Result {
     Ok(res_cell)
 }
 
-pub fn init_fpoly(stack: &mut NockStack, poly: Noun) -> Result {
+pub fn init_fpoly_bridge(stack: &mut NockStack, poly: Noun) -> Result {
     let list_felt = HoonList::try_from(poly)?.into_iter();
     let count = list_felt.count();
 
@@ -56,8 +56,7 @@ pub fn init_fpoly(stack: &mut NockStack, poly: Noun) -> Result {
 }
 
 pub fn init_fpoly_jet(context: &mut Context, subject: Noun) -> Result {
-    let poly = slot(subject, 6)?;
-    init_fpoly(&mut context.stack, poly)
+    init_fpoly_bridge(&mut context.stack, slot(subject, 6)?)
 }
 pub fn fpeval_jet(context: &mut Context, subject: Noun) -> Result {
     let sam = slot(subject, 6)?;

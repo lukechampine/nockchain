@@ -150,14 +150,8 @@
                                                                     =/  chals-rd2  (make-chals proof num-chals-rd2:chal)
                                                                     =/  challenges  (weld chals-rd1 chals-rd2)
     ::
-    ::  build mega-extension columns
-    =/  table-mega-exts=(list table-mary)
-      (build-mega-extend tables challenges return)
-    ::~&  %tables-built
-    ::
-    ::  augment challenges with derived challenges
-    =/  augmented-chals=bpoly
-      (augment-challenges:chal challenges s f)
+    =/  table-mega-exts=(list table-mary)  (build-mega-extend tables challenges return)
+    =/  augmented-chals=bpoly  (augment-challenges:chal challenges s f)
     ::
                                                                     =.  tables  (weld-table-marys tables table-mega-exts)
                                                                     =/  [mega-ext-marys=(list mary) width=@]  (mega-ext-mary table-mega-exts)
@@ -176,22 +170,31 @@
       (~(weld bop acc) (snag i dyn-list))
     ::  send terminals to verifier
                                                                     =.  proof  (~(push proof-stream proof) terms+terminals)
-    ::  reseed the rng
-    =/  rng  ~(prover-fiat-shamir proof-stream proof)
     ::
     ::
-    =/  num-extra-constraints=@
-      %+  roll  (range num-tables)
-      |=  [i=@ acc=@]
+    =/  constraint-counts=(list @)
+      %+  turn  (range num-tables)
+      |=  i=@
       =/  cs  (~(got by count-map.pre) i)
       ;:  add
-        acc
-        boundary.cs
-        row.cs
-        transition.cs
-        terminal.cs
-        extra.cs
+          boundary.cs
+          row.cs
+          transition.cs
+          terminal.cs
       ==
+
+    =/  extra-constraint-counts=(list @)
+      %+  turn  (range num-tables)
+      |=  i=@
+      =/  cs  (~(got by count-map.pre) i)
+      ;:  add
+          boundary.cs
+          row.cs
+          transition.cs
+          terminal.cs
+          extra.cs
+      ==
+
     ::
     ::  The constraints take variables for a full row plus the following row. So to evaluate them
     ::  the trace polys are not enough. We need to compose each trace poly with f(X)=g*X to create
@@ -255,32 +258,10 @@
     ::
     ::
     ::  compute extra composition poly
-    =/  omicrons-belt
-      %+  turn  tables
-      |=  [t=table-mary *]
-      ~(omicron quot t)
-    =/  omicrons-bpoly=bpoly  (init-bpoly omicrons-belt)
-    =/  omicrons-fpoly=fpoly
-      (init-fpoly (turn omicrons-belt lift))
-    =^  extra-comp-weights=bpoly  rng
-      =^  belt-list  rng  (belts:rng (mul 2 num-extra-constraints))
-      [(init-bpoly belt-list) rng]
-    =/  extra-composition-weights=(map @ bpoly)
-      %-  ~(gas by *(map @ bpoly))
-      =-  -<
-      %+  roll  (range num-tables)
-      |=  [i=@ acc=(list [@ bpoly]) num=@]
-      =/  cs  (~(got by count-map.pre) i)
-      =/  num-extra-constraints=@
-        ;:  add
-            boundary.cs
-            row.cs
-            transition.cs
-            terminal.cs
-            extra.cs
-        ==
-      :_  (add num (mul 2 num-extra-constraints))
-      [[i (~(swag bop extra-comp-weights) num (mul 2 num-extra-constraints))] acc]
+                                                                    =/  [omicrons-bpoly=bpoly omicrons-fpoly=fpoly]  (make-omicrons tables)
+
+    =/  extra-composition-weights=(map @ bpoly)  (make-composition-weights proof extra-constraint-counts)
+  
                                                                     =/  extra-composition-poly=bpoly
                                                                       %-  compute-composition-poly
                                                                       :*  omicrons-bpoly
@@ -294,8 +275,8 @@
                                                                           %.y
                                                                       ==
                                                                     =.  proof  (~(push proof-stream proof) [%poly extra-composition-poly])
-    =.  rng  ~(prover-fiat-shamir proof-stream proof)
-    =^  extra-comp-eval-point  rng  $:felt:rng
+                                                                    =/  rng  ~(prover-fiat-shamir proof-stream proof)
+                                                                    =^  extra-comp-eval-point  rng  $:felt:rng
     ::
     ::  compute extra trace evals
     ::~&  %evaluating-trace-at-new-comp-eval-point
@@ -310,11 +291,8 @@
       (bpeval-lift b extra-comp-eval-point)
     ::
                                                                     =.  proof  (~(push proof-stream proof) [%evals extra-trace-evaluations])
-    ::
-    ::  send mega extension columns to verifier
                                                                     =.  proof  (~(push proof-stream proof) [%m-root h.q.merk-heap.mega-ext])
-    ::  reseed the rng
-    =/  rng  ~(prover-fiat-shamir proof-stream proof)
+   
     ::
     ::  compute the Composition Polynomial
     ::  This polynomial composes the trace polynomials with the constraints, takes quotients
@@ -322,38 +300,10 @@
     ::  have the same maximal degree, and combines them into one big random linear combination.
     ::
     ::  compute weights used in linear combination of composition polynomial
-    =/  num-constraints=@
-      %+  roll  (range num-tables)
-      |=  [i=@ acc=@]
-      =/  cs  (~(got by count-map.pre) i)
-      ;:  add
-        acc
-        boundary.cs
-        row.cs
-        transition.cs
-        terminal.cs
-      ==
-    =^  comp-weights=bpoly  rng
-      =^  belt-list  rng  (belts:rng (mul 2 num-constraints))
-      [(init-bpoly belt-list) rng]
     ::
-    =/  composition-weights=(map @ bpoly)
-      %-  ~(gas by *(map @ bpoly))
-      =-  -<
-      %+  roll  (range num-tables)
-      |=  [i=@ acc=(list [@ bpoly]) num=@]
-      =/  cs  (~(got by count-map.pre) i)
-      =/  num-constraints=@
-        ;:  add
-            boundary.cs
-            row.cs
-            transition.cs
-            terminal.cs
-        ==
-      :_  (add num (mul 2 num-constraints))
-      [[i (~(swag bop comp-weights) num (mul 2 num-constraints))] acc]
+    =/  composition-weights=(map @ bpoly)  (make-composition-weights proof constraint-counts)
+
     ::
-    ::~&  %computing-composition-poly
                                                                         =/  composition-poly=bpoly
                                                                           %-  compute-composition-poly
                                                                           :*  omicrons-bpoly
@@ -366,15 +316,8 @@
                                                                               dyn-list
                                                                               %.n
                                                                           ==
-    ::
-    ::  decompose composition polynomial into one polynomial for each degree of the
-    ::  constraints. If the max degree of the constraints is D, then this will produce
-    ::  D polynomials each of degree table-height.
-    ::~&  %decomposing-composition-poly
-    =/  num-composition-pieces  (get-max-constraint-degree cd.pre)
-    ::
-    =/  composition-pieces=(list bpoly)
-      (bp-decompose composition-poly num-composition-pieces)
+                                                                        =/  num-composition-pieces  (get-max-constraint-degree cd.pre)
+                                                                        =/  composition-pieces=(list bpoly)  (bp-decompose composition-poly num-composition-pieces)
     ::
     ::  turn composition pieces into codewords
     ::~&  %computing-composition-codewords
@@ -604,5 +547,36 @@
     =/  rng-max  (add (mul 4 total-cols) max-constraint-degree)
     =^  felt-list  rng  (felts:rng rng-max)
     (init-fpoly felt-list)
+  ::
+  ++  make-comp-weights
+    ~/  %make-comp-weights
+    |=  [=proof num-constraints=@]
+    =/  rng  ~(prover-fiat-shamir proof-stream proof)
+    =^  belt-list  rng  (belts:rng (mul 2 num-constraints))
+    (init-bpoly belt-list)
+  ::
+  ++  make-omicrons
+    ~/  %make-omicrons
+    |=  tables=(list table-dat)
+    ^-  [bpoly fpoly]
+    =/  os
+      %+  turn  tables
+      |=  [t=table-mary *]
+      ~(omicron quot t)
+    [(init-bpoly os) (init-fpoly (turn os lift))]
+  ::
+  ++  make-composition-weights
+    ~/  %make-composition-weights
+    |=  [=proof constraint-counts=(list @)]
+    =/  num-tables  (lent constraint-counts)
+    =/  num-constraints=@  (sum constraint-counts)
+    =/  comp-weights  (make-comp-weights proof num-constraints)
+    %-  ~(gas by *(map @ bpoly))
+    =-  -<
+    %+  roll  (range num-tables)
+    |=  [i=@ acc=(list [@ bpoly]) num=@]
+    =/  num-constraints  (snag i constraint-counts)
+    :_  (add num (mul 2 num-constraints))
+    [[i (~(swag bop comp-weights) num (mul 2 num-constraints))] acc]
   --
 --
