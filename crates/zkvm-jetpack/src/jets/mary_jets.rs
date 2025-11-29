@@ -359,7 +359,7 @@ pub fn snag_as_digest_jet(context: &mut Context, subject: Noun) -> Result<Noun, 
     snag_as_digest(stack, m_noun, i)
 }
 
-fn snag_as_digest(stack: &mut NockStack, m_noun: Noun, i: usize) -> Result<Noun, JetErr> {
+pub fn snag_as_digest(stack: &mut NockStack, m_noun: Noun, i: usize) -> Result<Noun, JetErr> {
     let buf = snag_one(stack, m_noun, i)?.as_atom()?;
 
     let mut digest = [0u64; DIGEST_LENGTH];

@@ -250,19 +250,7 @@
                                                                     =.  proof  (~(push proof-stream proof) [%poly extra-composition-poly])
                                                                     =/  rng  ~(prover-fiat-shamir proof-stream proof)
                                                                     =^  extra-comp-eval-point  rng  $:felt:rng
-    ::
-    ::  compute extra trace evals
-    ::~&  %evaluating-trace-at-new-comp-eval-point
-    =/  extra-trace-evaluations=fpoly
-      %-  init-fpoly
-      %-  zing
-      %+  turn  tworow-trace-polys
-      |=  polys=mary
-      %+  turn  (range len.array.polys)
-      |=  i=@
-      =/  b=bpoly  (~(snag-as-bpoly ave polys) i)
-      (bpeval-lift b extra-comp-eval-point)
-    ::
+                                                                    =/  extra-trace-evaluations=fpoly  (make-trace-evals tworow-trace-polys extra-comp-eval-point)
                                                                     =.  proof  (~(push proof-stream proof) [%evals extra-trace-evaluations])
                                                                     =.  proof  (~(push proof-stream proof) [%m-root h.q.merk-heap.mega-ext])
                                                                     =/  composition-poly=bpoly
@@ -281,7 +269,6 @@
                                                                     =/  composition-pieces=(list bpoly)  (bp-decompose composition-poly num-composition-pieces)
     ::
     ::  turn composition pieces into codewords
-    ::~&  %computing-composition-codewords
     =/  composition-codewords=mary
       %-  zing-bpolys
       %+  turn  composition-pieces
@@ -289,8 +276,8 @@
       (bp-coseword poly g fri-domain-len)
     =/  composition-codeword-array=mary
       (transpose-bpolys composition-codewords)
-                                                          =/  composition-merk=(pair @ merk-heap:merkle)  (bp-build-merk-heap:merkle composition-codeword-array)
-                                                          =.  proof  (~(push proof-stream proof) [%comp-m h.q.composition-merk num-composition-pieces])
+                                                                    =/  composition-merk  (bp-build-merk-heap:merkle composition-codeword-array)
+                                                                    =.  proof  (~(push proof-stream proof) [%comp-m h.q.composition-merk num-composition-pieces])
     ::
     ::
     ::
@@ -313,15 +300,7 @@
     ::
     ::  trace-evaluations: list of evaluations of interpolated column polys and
     ::  shifted column polys at deep point, grouped in order by tables
-    =/  trace-evaluations=fpoly
-      %-  init-fpoly
-      %-  zing
-      %+  turn  tworow-trace-polys
-      |=  polys=mary
-      %+  turn  (range len.array.polys)
-      |=  i=@
-      =/  b=bpoly  (~(snag-as-bpoly ave polys) i)
-      (bpeval-lift b deep-challenge)
+                                                                    =/  trace-evaluations=fpoly  (make-trace-evals tworow-trace-polys deep-challenge)
     ::
     ::~&  %evaluating-pieces-at-deep-challenge
     =/  composition-pieces-fpoly  (turn composition-pieces bpoly-to-fpoly)
@@ -331,75 +310,25 @@
       %+  turn  composition-pieces-fpoly
       |=(poly=fpoly (fpeval poly c))
     ::
-                                                          =.  proof  (~(push proof-stream proof) [%evals trace-evaluations])
-                                                          =.  proof  (~(push proof-stream proof) [%evals composition-piece-evaluations])
-                                                          =/  deep-weights=fpoly  (make-deep-weights proof tables max-constraint-degree)
-    =/  all-evals  (~(weld fop trace-evaluations) extra-trace-evaluations)
-    ::~&  %computing-deep-poly
-    =/  deep-poly=fpoly
-      %-  compute-deep
-      :*  trace-polys
-          all-evals
-          composition-pieces-fpoly
-          composition-piece-evaluations
-          deep-weights
-          omicrons-fpoly
-          deep-challenge
-          extra-comp-eval-point
-      ==
-    ::
-    ::  create DEEP codeword and push to proof
-    ::~&  %computing-deep-codeword
-    =/  deep-codeword=fpoly
-      (coseword deep-poly (lift g) fri-domain-len)
-    ::
-    =^  fri-indices=(list @)  proof
-      (prove:fri:clc deep-codeword proof)
-    ::
-    ::
-    ::~&  %opening-codewords
-    =.  proof
-      %^  zip-roll  (range num-spot-checks)  fri-indices
-      |=  [[i=@ idx=@] proof=_proof]
-      ::
-      ::  base trace codewords
-      =/  elem=mary
-        (~(change-step ave (~(snag-as-mary ave codewords.base) idx)) 1)
-      =/  axis  (index-to-axis:merkle p.merk-heap.base idx)
-      =/  opening=merk-proof:merkle
-        (build-merk-proof:merkle q.merk-heap.base axis)
-                                                            =.  proof
-                                                            %-  ~(push proof-stream proof)
-                                                               m-pathbf+[(tail elem) path.opening]
-      ::
-      ::  ext trace codewords
-      =.  elem
-        (~(change-step ave (~(snag-as-mary ave codewords.ext) idx)) 1)
-      =.  axis  (index-to-axis:merkle p.merk-heap.ext idx)
-      =.  opening
-        (build-merk-proof:merkle q.merk-heap.ext axis)
-                                                            =.  proof
-                                                            %-  ~(push proof-stream proof)
-                                                               m-pathbf+[(tail elem) path.opening]
-      ::
-      ::  mega-ext trace codewords
-      =.  elem
-        (~(change-step ave (~(snag-as-mary ave codewords.mega-ext) idx)) 1)
-      =.  axis  (index-to-axis:merkle p.merk-heap.mega-ext idx)
-      =.  opening
-        (build-merk-proof:merkle q.merk-heap.mega-ext axis)
-                                                            =.  proof
-                                                            %-  ~(push proof-stream proof)
-                                                              m-pathbf+[(tail elem) path.opening]
-      ::
-      ::  piece codewords
-      =.  elem
-        (~(change-step ave (~(snag-as-mary ave composition-codeword-array) idx)) 1)
-      =.  axis  (index-to-axis:merkle p.composition-merk idx)
-      =.  opening  (build-merk-proof:merkle q.composition-merk axis)
-
-                                                            %-  ~(push proof-stream proof)
-                                                            m-pathbf+[(tail elem) path.opening]
+                                                                    =.  proof  (~(push proof-stream proof) [%evals trace-evaluations])
+                                                                    =.  proof  (~(push proof-stream proof) [%evals composition-piece-evaluations])
+                                                                    =/  deep-weights=fpoly  (make-deep-weights proof tables max-constraint-degree)
+                                                                    =/  all-evals  (~(weld fop trace-evaluations) extra-trace-evaluations)
+                                                                    =/  deep-poly=fpoly
+                                                                      %-  compute-deep
+                                                                      :*  trace-polys
+                                                                          all-evals
+                                                                          composition-pieces-fpoly
+                                                                          composition-piece-evaluations
+                                                                          deep-weights
+                                                                          omicrons-fpoly
+                                                                          deep-challenge
+                                                                          extra-comp-eval-point
+                                                                      ==
+                                                                    =/  deep-codeword=fpoly  (coseword deep-poly (lift g) fri-domain-len)
+    =^  fri-indices  proof  (prove:fri:clc deep-codeword proof)
+                                                                    =/  composition-commitments  [~ composition-codeword-array composition-merk]
+                                                                    =.  proof  (add-commitments proof fri-indices ~[base ext mega-ext composition-commitments])
     ::
     ::~&  %finished-proof
     ?-  version
@@ -570,5 +499,33 @@
         dyn-list
         is-extra
     ==
+  ::
+  ++  make-trace-evals
+    ~/  %make-trace-evals
+    |=  [tworow-trace-polys=(list mary) eval-point=felt]
+    ^-  fpoly
+    %-  init-fpoly
+    %-  zing
+    %+  turn  tworow-trace-polys
+    |=  polys=mary
+    %+  turn  (range len.array.polys)
+    |=  i=@
+    =/  b=bpoly  (~(snag-as-bpoly ave polys) i)
+    (bpeval-lift b eval-point)
+  ::
+  ++  add-commitments
+    ~/  %add-commitments
+    |=  [=proof fri-indices=(list @) commitments=(list codeword-commitments)]
+    ^+  proof
+    %+  roll  fri-indices
+    |=  [idx=@ proof=_proof]
+    |-
+    ?~  commitments
+      proof
+    =,  i.commitments
+    =/  elem  (~(change-step ave (~(snag-as-mary ave codewords) idx)) 1)
+    =/  axis  (index-to-axis:merkle p.merk-heap idx)
+    =/  opening  (build-merk-proof:merkle q.merk-heap axis)
+    $(commitments t.commitments, proof (~(push proof-stream proof) m-pathbf+[(tail elem) path.opening]))
   --
 --

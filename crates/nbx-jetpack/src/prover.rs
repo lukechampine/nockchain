@@ -12,18 +12,23 @@ use nockvm::jets::util::{slot, BAIL_FAIL};
 use nockvm::jets::Result;
 use nockvm::mem::NockStack;
 use nockvm::noun::{IndirectAtom, Noun, D, T};
+use nockvm_macros::tas;
 use noun_serde::NounEncode;
 use zkvm_jetpack::form::poly::Poly;
 use zkvm_jetpack::jets::bp_jets::init_bpoly_bridge;
 use zkvm_jetpack::jets::fp_jets::init_fpoly_bridge;
+use zkvm_jetpack::jets::mary_jets::{
+    change_step, snag_as_bpoly, snag_as_digest, snag_as_digest_jet, snag_one, snag_one_fields,
+};
 
 use super::substitute::SubstituteEngine;
 use super::two::*;
 use crate::eight::{degree_processing, process_composition_constraints};
 use crate::engine::Engine;
-use crate::four::{absorb_proof_objects_impl, Proof};
+use crate::four::{absorb_proof_objects_impl, Proof, ProofData};
 use crate::one::weld_marys_step;
 use crate::seven::height_mary;
+use crate::snag_as_poly_mary;
 use crate::utils::xeb;
 
 pub fn table_heights(stack: &mut NockStack, tables: Noun) -> Result {
@@ -394,4 +399,76 @@ pub fn make_composition_poly(stack: &mut NockStack, sample: Noun) -> Result {
     let ret = finalize_poly(stack, Some(acc.len()), ret);
 
     Ok(ret)
+}
+
+pub fn make_trace_evals(stack: &mut NockStack, sample: Noun) -> Result {
+    let [tworow_trace_polys, eval_point] = sample.uncell()?;
+    let marys = HoonList::try_from(tworow_trace_polys)?;
+    let eval_point = eval_point.as_felt().copied()?;
+    let mut polys = vec![];
+    for mary in marys {
+        let len = MarySlice::try_from(mary.as_cell()?)
+            .map_err(|_| BAIL_FAIL)?
+            .len as usize;
+        for i in 0..len {
+            let b = BPolySlice::try_from(snag_as_bpoly(stack, mary, i)?)?;
+            polys.push(bpeval_lift(b, eval_point));
+        }
+    }
+
+    let (res, res_poly): (IndirectAtom, &mut [Felt]) =
+        new_handle_mut_slice(stack, Some(polys.len()));
+    for (i, felt) in polys.iter().enumerate() {
+        res_poly[i] = *felt;
+    }
+    Ok(finalize_poly(stack, Some(res_poly.len()), res))
+}
+
+fn build_merk_proof_impl(stack: &mut NockStack, m: Noun, axis: u64) -> Result {
+    if axis == 0 {
+        return Err(BAIL_FAIL);
+    }
+    fn rec(stack: &mut NockStack, merk_heap: Noun, axis: u64) -> Result {
+        if axis == 0 {
+            return Ok(D(0));
+        }
+        let sibling = if axis % 2 == 1 { axis + 1 } else { axis - 1 };
+        let sibling_digest = snag_as_digest(stack, merk_heap, sibling as usize)?;
+        let rest = rec(stack, merk_heap, (axis - 1) / 2)?;
+        Ok(T(stack, &[sibling_digest, rest]))
+    }
+    rec(stack, m, axis - 1)
+}
+
+pub fn build_merk_proof(stack: &mut NockStack, sample: Noun) -> Result {
+    let [merk, axis] = sample.uncell()?;
+    let [root, m] = merk.uncell()?;
+    let axis = axis.as_atom()?.as_u64()?;
+    let proof = build_merk_proof_impl(stack, m, axis)?;
+    Ok(T(stack, &[root, proof]))
+}
+
+pub fn add_commitments(stack: &mut NockStack, sample: Noun) -> Result {
+    let [proof, fri_indices, commitments] = sample.uncell()?;
+    let mut proof = Proof::try_from(proof)?;
+    let fri_indices = HoonList::try_from(fri_indices)?;
+    let commitments = HoonList::try_from(commitments)?;
+    for idx in fri_indices {
+        let idx = idx.as_atom()?.as_u64()?;
+        for c in commitments {
+            let [_, codewords, merk] = c.uncell()?;
+            let [i, merk_heap] = merk.uncell()?;
+            let [_, m] = merk_heap.uncell()?;
+            let i = i.as_atom()?.as_u64()?;
+
+            let mary = MarySlice::try_from(codewords).map_err(|_| BAIL_FAIL)?;
+            let snagged = snag_one(stack, codewords, idx as usize)?;
+            let arr = T(stack, &[D(mary.step as u64), snagged]);
+            let axis = (1 << (i - 1)) + idx;
+            let path = build_merk_proof_impl(stack, m, axis)?;
+            let proof_data = ProofData::MPathBf(T(stack, &[arr, path]).try_into()?);
+            proof.push(proof_data);
+        }
+    }
+    Ok(proof.to_noun(stack))
 }
