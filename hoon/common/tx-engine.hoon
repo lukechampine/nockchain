@@ -175,10 +175,17 @@
     --::v0
   ++  v1
     |%
+    ++  pkh-lp
+      |=  [m=@ key-hashes=(list hash)]
+      ^-  lock-primitive
+      =/  hash-set  (z-silt key-hashes)
+      ?>  (lte m ~(wyt z-in hash-set))
+      [%pkh [m hash-set]]
+    ::
     ++  simple-pkh-lp
       |=  key-hash=hash
       ^-  lock-primitive
-      [%pkh [m=1 (z-silt ~[key-hash])]]
+      (pkh-lp m=1 ~[key-hash])
     ::
     ++  simple
       |=  key-hash=hash
@@ -187,7 +194,14 @@
       =/  lock-hash  (hash:lock pkh-lock)
       (first:nname (hash:lock pkh-lock))
     ::
-    ++  coinbase-pkh-lp
+    ++  multisig
+      |=  [m=@ key-hashes=(list hash)]
+      ^-  form
+      =/  pkh-lock=spend-condition  [(pkh-lp m key-hashes)]~
+      =/  lock-hash  (hash:lock pkh-lock)
+      (first:nname (hash:lock pkh-lock))
+    ::
+    ++  coinbase-pkh-sc
       |=  key-hash=hash
       ^-  spend-condition
       :~  ^-(lock-primitive (simple-pkh-lp key-hash))
@@ -198,7 +212,7 @@
       |=  key-hash=hash
       ^-  form
       =/  coinbase-lock=spend-condition
-        (coinbase-pkh-lp key-hash)
+        (coinbase-pkh-sc key-hash)
       (first:nname (hash:lock coinbase-lock))
     --::+v1
   --::+first-name

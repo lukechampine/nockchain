@@ -298,6 +298,77 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+mod test_from_block_42841 {
+    use super::*;
+
+    const INPUT: [Melt; 16] = [
+        Melt(14955580645467476160),
+        Melt(7436940415020328830),
+        Melt(13258694720181477020),
+        Melt(12954369459152934437),
+        Melt(11842248319172705468),
+        Melt(15476409979006959996),
+        Melt(993490476257162265),
+        Melt(6763410758126275106),
+        Melt(15181021206181197070),
+        Melt(6874142119488905863),
+        Melt(4294967295),
+        Melt(4294967295),
+        Melt(4294967295),
+        Melt(4294967295),
+        Melt(4294967295),
+        Melt(4294967295),
+    ];
+    const OUTPUT: [Melt; 16] = [
+        Melt(3408933235303531906),
+        Melt(11425254957775770087),
+        Melt(6300100037498596282),
+        Melt(9483337076117165473),
+        Melt(18372289839403937620),
+        Melt(14827110930023566032),
+        Melt(16550704783470691987),
+        Melt(13392094174054947445),
+        Melt(7961102306356474134),
+        Melt(1179882267587133768),
+        Melt(654144244461546273),
+        Melt(8506269010813771442),
+        Melt(1283830586918072456),
+        Melt(16378677650581929299),
+        Melt(10330644703100122848),
+        Melt(10571358440012149398),
+    ];
+
+    #[test]
+    fn simd_permute() {
+        let mut processed = INPUT;
+        simd::permute(&mut processed);
+        assert_eq!(processed, OUTPUT);
+    }
+
+    #[test]
+    fn scalar_permute() {
+        let mut processed = INPUT;
+        scalar::permute(&mut processed);
+        assert_eq!(processed, OUTPUT);
+    }
+
+    #[test]
+    fn scalar_permute_fixed() {
+        let input = INPUT[..10].try_into().unwrap();
+        let out = scalar::permute_fixed(input);
+        assert_eq!(out, OUTPUT[..5]);
+    }
+
+    #[test]
+    fn simd_permute_fixed() {
+        let input = INPUT[..10].try_into().unwrap();
+        let out = simd::permute_fixed(input);
+        assert_eq!(out, OUTPUT[..5]);
+    }
+}
+
+#[cfg(test)]
 mod test_simd {
     use super::*;
     use crate::tip5::test_cases::{

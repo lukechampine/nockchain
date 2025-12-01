@@ -25,4 +25,5 @@ in
   miner-jam = build-jam "./apps/dumbnet/miner.hoon";
   wallet-jam = build-jam "./apps/wallet/wallet.hoon";
   verifier-jam = build-jam "./apps/verifier/verifier.hoon";
+  peek-jam = build-jam "./apps/peek/peek.hoon";
 }

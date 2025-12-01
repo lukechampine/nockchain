@@ -140,7 +140,13 @@
       [%seed p=@t]
       [%watch-key p=@t]
   ==
-+$  meta  meta-v3
+::$  meta-v4 extends meta-v3 with support for watch-only first-name locks
++$  meta-v4
+  $+  meta-v4
+  $%  meta-v3
+      [%first-name name=hash:transact lock=(unit lock:transact)]
+  ==
++$  meta  meta-v4
 ::
 ::    $keys: path indexed map for keys
 ::
@@ -176,7 +182,7 @@
 +$  keys-v1  $+(keys-axal keys-v0)
 +$  keys-v2  $+(keys-axal keys-v1)
 +$  keys-v3  $+(keys-axal (axal meta-v3))
-+$  keys-v4  $+(keys-axal keys-v3)
++$  keys-v4  $+(keys-axal (axal meta-v4))
 +$  keys  keys-v4
 ::
 ::    $transaction-tree: structured tree of transaction, input, and seed data
@@ -351,20 +357,36 @@
   ::
   +$  input-name  $~('default-input' @t)
   ::
-  +$  order  [recipient=hash:transact gift=coins:transact]
-  ::
-  ::
+++  order
+  =<  form
+  |%
+  +$  form
+    $%  [%pkh recipient=hash:transact gift=coins:transact]
+        [%multisig threshold=@ participants=(list hash:transact) gift=coins:transact]
+    ==
+  ++  gift
+    |=  =form
+    ^-  coins:transact
+    ?-    -.form
+        %pkh       gift.form
+        %multisig  gift.form
+    ==
+  --
+::
   +$  grpc-bind-cause
     $%  [%grpc-bind result=*]
     ==
   ::
   ++  key-version  ?(%0 %1)
+  ::
   +$  cause
     $%  [%keygen entropy=byts salt=byts]
         [%derive-child i=@ hardened=? label=(unit @tas)]
         [%import-keys keys=(list (pair trek *))]
         [%import-extended extended-key=@t]                ::  extended key string
-        [%import-watch-only-pubkey key=@t]                ::  imports base58-encoded pubkey
+        [%watch-address address=@t]                ::  imports base58-encoded pubkey
+        [%watch-address-multisig m=@ participants=(list @t)]
+        ::[%watch-first-name first-name=@t lock=(unit lock:transact)]
         [%export-keys ~]
         [%export-master-pubkey ~]
         [%import-master-pubkey coil=*]                    ::  base58-encoded pubkey + chain code
@@ -381,11 +403,19 @@
             names=(list [first=@t last=@t])               ::  base58-encoded name hashes
             orders=(list order)
             fee=coins:transact                            ::  fee
-            sign-key=(unit [child-index=@ud hardened=?])  ::  child key information to sign from
+            sign-keys=(unit (list [child-index=@ud hardened=?]))  ::  child key information to sign from
             refund-pkh=(unit hash:transact)               ::  refund pkh for spends over v0 notes
+            include-data=?                                ::  whether or not we should include note-data. defaults
+                                                          ::  to yes in cli. not including note-data is a power-user option because
+                                                          ::  if the lock is not a standard 1-of-1 pkh or coinbase, the wallet won't
+                                                          ::  be able to guess it, so the funds could be lost forever if the user.
+                                                          ::  doesn't keep track of the lock.
+            save-raw-tx=?                                 ::  if %.y, saves jams of the raw-tx and its hashable into a txs-debug folder
+                                                          ::  in the current working directory
         ==
         [%list-active-addresses ~]
         [%list-notes ~]
+        [%show-key-tree include-values=?]
         [%show-seed-phrase ~]
         [%show-master-zpub ~]
         [%show-master-zprv ~]
@@ -394,7 +424,16 @@
         [%update-balance-grpc balance=*]
         [%set-active-master-address address-b58=@t]
         [%list-master-addresses ~]
-        [%file %write path=@t contents=@t success=?]
+        [%file file-cause]
+        $:  %sign-multisig-tx
+            dat=transaction
+            sign-keys=(unit (list [child-index=@ud hardened=?]))
+        ==
+    ==
+  +$  file-cause
+    $%  [%write path=@t contents=@t success=?]
+        [%batch-write result=(list [path=@t contents=@t success=?])]
+        [%read contents=(unit @t)]
     ==
   ::
   ::  $seed-mask: tracks which fields of a $seed:transact have been set
@@ -428,7 +467,74 @@
   ::
   +$  preinput  [name=@t (pair input:transact input-mask)]
   ::
-  +$  transaction  [name=@t p=spends:transact]
+  +$  input-display
+    $%  [%0 p=(z-map:zo nname:transact =sig:v0:transact)]
+        [%1 p=(z-map:zo nname:transact sc=spend-condition:transact)]
+    ==
+  ::
+  +$  lock-metadata
+    $:  lock=lock:transact
+        include-data=?
+    ==
+  ::
+  +$  output-lock-map  (z-map:zo hash:transact lock-metadata)
+  ::
+  +$  transaction-display
+    $:  inputs=input-display
+        outputs=output-lock-map
+    ==
+  ::
+  +$  spend-build-state
+    $:  =spends:v1:transact
+        fee=@
+        orders=(list order)
+        display=transaction-display
+        wd=witness-data
+    ==
+  ::
+  +$  transaction-0  [name=@t p=spends:transact]
+  ::
+  ++  witness-data
+    =<  form
+    |%
+    +$  form
+      $+  witness-data
+      $%  [%0 p=(z-map:zo nname:transact signature:transact)]
+          [%1 p=(z-map:zo nname:transact witness:transact)]
+      ==
+    ++  apply
+      |=  [=form =spends:v1:transact]
+      ^-  spends:v1:transact
+      ?-  -.form
+          %0
+        %-  ~(gas z-by:zo *spends:v1:transact)
+        %+  turn  ~(tap z-by:zo spends)
+        |=  [name=nname:transact =spend:v1:transact]
+        ?>  ?=(%0 -.spend)
+        [name spend(signature (~(got z-by:zo p.form) name))]
+      ::
+          %1
+        %-  ~(gas z-by:zo *spends:v1:transact)
+        %+  turn  ~(tap z-by:zo spends)
+        |=  [name=nname:transact =spend:v1:transact]
+        ?>  ?=(%1 -.spend)
+        [name spend(witness (~(got z-by:zo p.form) name))]
+      ==
+    --
+  ::
+  +$  transaction-1
+    $:  %1
+        name=@t
+        =spends:transact
+        display=transaction-display
+        =witness-data
+    ==
+  ::
+  +$  versioned-transaction
+    $+  versioned-transaction
+    $^(transaction-0 transaction-1)
+  ::
+  +$  transaction  transaction-1
   ::
   ::
   +$  nockchain-grpc-effect
@@ -446,9 +552,9 @@
     ==
   ::
   +$  file-effect
-    $%
-      [%file %read path=@t]
-      [%file %write path=@t contents=@]
+    $%  [%file %read path=@t]
+        [%file %write path=@t contents=@]
+        [%file %batch-write files=(list [path=@t contents=@])]
     ==
   ::
   +$  grpc-effect

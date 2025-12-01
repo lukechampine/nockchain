@@ -42,6 +42,8 @@ db = ["sqlx", "serde_json", "force-preverify"]
 db-sqlite = ["sqlx?/sqlite"]
 # Enable all kind of compliance checks before allowing connections
 compliance = ["db", "reqwest"]
+# Enable full miner optimizations (e.g. tip5 karatsuba)
+full-optimize = ["nbx-jetpack/full-optimize"]
 
 [[bin]]
 name = "nbx-proxy"

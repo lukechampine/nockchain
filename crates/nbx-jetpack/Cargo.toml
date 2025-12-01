@@ -11,6 +11,7 @@ stealthy = ["tracing/stealthy", "codefuscate"]
 shader_passthrough = ["nbx-shaders/shader_passthrough"]
 validate-gpu = ["gpu"]
 codefuscate = []
+full-optimize = ["nbx-tip5/karatsuba"]
 
 [dependencies]
 nockvm.workspace = true

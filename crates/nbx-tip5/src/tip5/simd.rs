@@ -168,6 +168,26 @@ pub(crate) fn sbox_layer_fixed(input: &[Melt; 10]) -> [Melt; STATE_SIZE] {
 }
 
 #[inline(always)]
+#[cfg(not(feature = "karatsuba"))]
+const fn rcs_layer(state: &mut [Melt; 16], round_num: usize) {
+    let mut result = [Melt(0u64); 16];
+
+    const_for!(i in 0..16 => {
+        const_for!(j in 0..16 => {
+            let matrix_element = super::MDS_MATRIX_MONT[i][j];
+            let product = crate::base::montiply_ser(matrix_element.0, state[j].0);
+            result[i] = Melt(badd(result[i].0, product));
+        });
+    });
+
+    const_for!(j in 0..STATE_SIZE => {
+        let r_cons = ROUND_CONSTANTS2[round_num * 16 + j];
+        state[j] = Melt(badd(r_cons.0, result[j].0));
+    });
+}
+
+#[inline(always)]
+#[cfg(feature = "karatsuba")]
 fn rcs_layer(state: &mut [Melt; 16], round_num: usize) {
     let mut lo: [u32; STATE_SIZE] = [0; STATE_SIZE];
     let mut hi: [u32; STATE_SIZE] = [0; STATE_SIZE];

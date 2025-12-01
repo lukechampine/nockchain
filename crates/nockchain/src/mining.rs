@@ -10,12 +10,13 @@ use nockapp::nockapp::driver::{IODriverFn, NockAppHandle, PokeResult};
 use nockapp::nockapp::wire::Wire;
 use nockapp::nockapp::NockAppError;
 use nockapp::noun::slab::{slab_equality, NockJammer, NounSlab};
-use nockapp::noun::{AtomExt, NounExt};
+use nockapp::noun::AtomExt;
 use nockapp::save::SaveableCheckpoint;
 use nockapp::utils::NOCK_STACK_SIZE_TINY;
 use nockapp::{Bytes, CrownError, Noun};
 use nockchain_libp2p_io::tip5_util::tip5_hash_to_base58;
 use nockchain_types::tx_engine::common::{Hash, SchnorrPubkey};
+use nockvm::ext::NounExt;
 use nockvm::interpreter::NockCancelToken;
 use nockvm::jets::hot::HotEntry;
 use nockvm::noun::{Atom, D, NO, T, YES};
@@ -211,7 +212,7 @@ pub fn create_mining_driver(
                 share: 1,
                 m: 1,
                 // hardcoded key to satisfy pass-through for v0 pubkey mining infra
-                keys: vec!["2qwq9dQRZfpFx8BDicghpMRnYGKZsZGxxhh9m362pzpM9aeo276pR1yHZPS41y3CW3vPKxeYM8p8fzZS8GXmDGzmNNCnVNekjrSYogqfEFMqwhHh5iCjaKPaDTwhupWqiXj6".to_string()],
+                keys: vec!["2cPnE4Z9RevhTv9is9Hmc1amFubEFbUxzCV2Fxb9GxevJstV5VG92oYt6Sai3d3NjLFcsuVXSLx9hikMbD1agv9M267TVw3hV9MCpMfEnGo5LYtjJ7jPyHg8SERPjJRCWTgZ".to_string()],
             });
 
             let mining_pkh_config = if let Some(pkh) = &cfg.mining_pkh {
