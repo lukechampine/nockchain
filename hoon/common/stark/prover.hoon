@@ -165,13 +165,7 @@
     ::
                                                                     =/  terminals=bpoly  (weld-terminals dyn-list)
                                                                     =.  proof  (~(push proof-stream proof) terms+terminals)
-    ::  each mary is a list of a table's columns, interpolated to polys
-    =/  trace-polys
-      %+  turn  (zip-up polys.base (zip-up polys.ext polys.mega-ext))
-      |=  [bm=mary em=mary mem=mary]
-      ^-  mary
-      (~(weld ave bm) (~(weld ave em) mem))
-    ::
+                                                                    =/  trace-polys  (make-trace-polys polys.base polys.ext polys.mega-ext)
                                                                     =/  second-row-trace-polys=(list mary)  (make-second-row-trace-polys tables)
                                                                     =/  tworow-trace-polys=(list mary)
                                                                       %^    zip
@@ -219,42 +213,15 @@
                                                                       ==
                                                                     =/  num-composition-pieces  (get-max-constraint-degree cd.pre)
                                                                     =/  composition-pieces=(list bpoly)  (bp-decompose composition-poly num-composition-pieces)
-    ::
-    ::  turn composition pieces into codewords
-    =/  composition-codewords=mary
-      %-  zing-bpolys
-      %+  turn  composition-pieces
-      |=  poly=bpoly
-      (bp-coseword poly g fri-domain-len)
+                                                                    =/  composition-codewords=mary  (make-composition-codewords composition-pieces fri-domain-len)
                                                                     =/  composition-codeword-array=mary  (transpose-bpolys composition-codewords)
                                                                     =/  composition-merk  (bp-build-merk-heap:merkle composition-codeword-array)
                                                                     =.  proof  (~(push proof-stream proof) [%comp-m h.q.composition-merk num-composition-pieces])
-    ::
-    ::  reseed the rng
-    =.  rng  ~(prover-fiat-shamir proof-stream proof)
-    ::
-    ::  compute DEEP challenge point from extension field
-    =^  deep-challenge=felt  rng
-      =^  deep-candidate  rng  $:felt:rng
-      =/  n  fri-domain-len:clc
-      =/  exp-offset  (lift (bpow generator:stark-engine n))
-      |-
-      =/  exp-deep-can  (fpow deep-candidate n)
-      ?.  ?|(=(exp-deep-can f1) =(exp-deep-can exp-offset))
-        [deep-candidate rng]
-      =^  felt  rng  $:felt:rng
-      $(deep-candidate felt)
-    ::~&  %evaluating-trace-at-deep-challenge
-    ::
+                                                                    =/  deep-challenge=felt  (make-deep-challenge proof fri-domain-len)
                                                                     =/  trace-evaluations=fpoly  (make-trace-evals tworow-trace-polys deep-challenge)
-    ::
     ::~&  %evaluating-pieces-at-deep-challenge
     =/  composition-pieces-fpoly  (turn composition-pieces bpoly-to-fpoly)
-    =/  composition-piece-evaluations=fpoly
-      =/  c  (fpow deep-challenge num-composition-pieces)
-      %-  init-fpoly
-      %+  turn  composition-pieces-fpoly
-      |=(poly=fpoly (fpeval poly c))
+    =/  composition-piece-evaluations=fpoly  (make-composition-piece-evals deep-challenge composition-pieces-fpoly)
     ::
                                                                     =.  proof  (~(push proof-stream proof) [%evals trace-evaluations])
                                                                     =.  proof  (~(push proof-stream proof) [%evals composition-piece-evaluations])
@@ -494,5 +461,45 @@
     |=  i=@
     =/  bp=bpoly  (~(snag-as-bpoly ave polys) i)
     (bp-ifft (bp-shift-by-unity bp 1))
+  ::
+  ++  make-trace-polys
+    ~/  %make-trace-polys
+    |=  [base=(list mary) ext=(list mary) mega-ext=(list mary)]
+    ^-  (list mary)
+    %+  turn  (zip-up base (zip-up ext mega-ext))
+    |=  [bm=mary em=mary mem=mary]
+    ^-  mary
+    (~(weld ave bm) (~(weld ave em) mem))
+  ::
+  ++  make-composition-codewords
+    ~/  %make-composition-codewords
+    |=  [composition-pieces=(list bpoly) fri-domain-len=@]
+    ^-  mary
+    %-  zing-bpolys
+    %+  turn  composition-pieces
+    |=(=bpoly (bp-coseword bpoly g fri-domain-len))
+  ::
+  ++  make-deep-challenge
+    ~/  %make-deep-challenge
+    |=  [=proof n=@]
+    ^-  felt
+    =/  rng  ~(prover-fiat-shamir proof-stream proof)
+    =^  deep-candidate  rng  $:felt:rng
+    =/  exp-offset  (lift (bpow generator:stark-engine n))
+    |-
+    =/  exp-deep-can  (fpow deep-candidate n)
+    ?.  ?|(=(exp-deep-can f1) =(exp-deep-can exp-offset))
+      deep-candidate
+    =^  felt  rng  $:felt:rng
+    $(deep-candidate felt)
+  ::
+  ++  make-composition-piece-evals
+    ~/  %make-composition-piece-evals
+    |=  [deep-challenge=felt composition-pieces=(list fpoly)]
+    ^-  fpoly
+    =/  c  (fpow deep-challenge (lent composition-pieces))
+    %-  init-fpoly
+    %+  turn  composition-pieces
+    |=(=fpoly (fpeval fpoly c))
   --
 --

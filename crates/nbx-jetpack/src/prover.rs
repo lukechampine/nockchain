@@ -2,8 +2,9 @@ use core::panic;
 
 use nbx_tip5::base::{binv, bneg};
 use nbx_tip5::melt::Melt;
-use nockchain_math::belt::Belt;
-use nockchain_math::felt::Felt;
+use nockchain_math::belt::{bpow, Belt};
+use nockchain_math::bpoly::bp_coseword;
+use nockchain_math::felt::{fpow, Felt};
 use nockchain_math::handle::{
     finalize_mary, finalize_poly, new_handle_mut_mary, new_handle_mut_slice,
 };
@@ -29,7 +30,7 @@ use super::two::*;
 use crate::eight::{degree_processing, process_composition_constraints};
 use crate::engine::Engine;
 use crate::four::{absorb_proof_objects_impl, Proof, ProofData};
-use crate::one::{do_init_mary, weld_marys_step};
+use crate::one::{do_init_mary, weld_marys_step, G};
 use crate::seven::height_mary;
 use crate::snag_as_poly_mary;
 use crate::utils::xeb;
@@ -523,4 +524,113 @@ pub fn make_second_row_trace_polys(stack: &mut NockStack, sample: Noun) -> Resul
         res.push(bpolys);
     }
     Ok(res.to_noun(stack))
+}
+
+pub fn make_trace_polys(stack: &mut NockStack, sample: Noun) -> Result {
+    let [base, ext, mega_ext] = sample.uncell()?;
+    let base = HoonList::try_from(base)?;
+    let ext = HoonList::try_from(ext)?;
+    let mega_ext = HoonList::try_from(mega_ext)?;
+
+    let len_hint = base.count().min(ext.count()).min(mega_ext.count());
+    let mut res = Vec::with_capacity(len_hint);
+
+    for ((bm, em), mem) in base.zip(ext).zip(mega_ext) {
+        let bm = MarySlice::try_from(bm).map_err(|_| BAIL_FAIL)?;
+        let em = MarySlice::try_from(em).map_err(|_| BAIL_FAIL)?;
+        let mem = MarySlice::try_from(mem).map_err(|_| BAIL_FAIL)?;
+
+        if bm.step != em.step || bm.step != mem.step {
+            return Err(BAIL_FAIL);
+        }
+
+        let step = bm.step as usize;
+        let len = bm.len as usize + em.len as usize + mem.len as usize;
+        let (ret, mary) = new_handle_mut_mary(stack, step, len);
+
+        let mut offset = 0;
+        let copy_into = |dst: &mut [u64], offset: &mut usize, src: &[u64]| {
+            let end = *offset + src.len();
+            dst[*offset..end].copy_from_slice(src);
+            *offset = end;
+        };
+
+        copy_into(mary.dat, &mut offset, bm.dat);
+        copy_into(mary.dat, &mut offset, em.dat);
+        copy_into(mary.dat, &mut offset, mem.dat);
+
+        let welded = finalize_mary(stack, step, len, ret);
+        res.push(welded);
+    }
+
+    Ok(res.to_noun(stack))
+}
+
+pub fn make_composition_codewords(stack: &mut NockStack, sample: Noun) -> Result {
+    let [composition_pieces, fri_domain_len] = sample.uncell()?;
+    let composition_pieces = HoonList::try_from(composition_pieces)?;
+    let fri_domain_len = fri_domain_len.as_atom()?.as_u64()? as u32;
+
+    let root = Belt(fri_domain_len as u64)
+        .ordered_root()
+        .map_err(|_| BAIL_FAIL)?;
+
+    let step = fri_domain_len as usize;
+    let (ret, mary) = new_handle_mut_mary(stack, step, composition_pieces.count());
+    let mut offset = 0;
+
+    for piece in composition_pieces {
+        let piece = BPolySlice::try_from(piece).map_err(|_| BAIL_FAIL)?;
+
+        let codeword = bp_coseword(piece.0, &G, fri_domain_len, &root);
+        if codeword.len() != step {
+            return Err(BAIL_FAIL);
+        }
+        for (i, belt) in codeword.iter().enumerate() {
+            mary.dat[offset + i] = belt.0;
+        }
+        offset += step;
+    }
+
+    Ok(finalize_mary(stack, step, composition_pieces.count(), ret))
+}
+
+pub fn make_deep_challenge(stack: &mut NockStack, sample: Noun) -> Result {
+    let [proof_noun, n_noun] = sample.uncell()?;
+    let proof = Proof::try_from(proof_noun)?;
+    let n = n_noun.as_atom()?.as_u64()?;
+
+    let mut rng = absorb_proof_objects_impl(&proof.objects, &proof.hashes);
+    let exp_offset = Felt::lift(Belt(bpow(G.0, n)));
+
+    loop {
+        let deep_candidate = rng.felt();
+        let mut exp_deep_can = Felt::zero();
+        fpow(&deep_candidate, n, &mut exp_deep_can);
+
+        if exp_deep_can != Felt::one() && exp_deep_can != exp_offset {
+            return Ok(deep_candidate.to_noun(stack));
+        }
+    }
+}
+
+pub fn make_composition_piece_evals(stack: &mut NockStack, sample: Noun) -> Result {
+    let [deep_challenge_noun, composition_pieces] = sample.uncell()?;
+    let deep_challenge = deep_challenge_noun.as_felt().copied()?;
+    let composition_pieces = HoonList::try_from(composition_pieces)?;
+
+    let mut pieces = Vec::with_capacity(composition_pieces.count());
+    for piece in composition_pieces {
+        pieces.push(FPolySlice::try_from(piece).map_err(|_| BAIL_FAIL)?);
+    }
+
+    let mut c = Felt::zero();
+    fpow(&deep_challenge, pieces.len() as u64, &mut c);
+
+    let (ret, out): (IndirectAtom, &mut [Felt]) = new_handle_mut_slice(stack, Some(pieces.len()));
+    for (i, fp) in pieces.iter().enumerate() {
+        out[i] = peval::<Felt>(*fp, c);
+    }
+
+    Ok(finalize_poly(stack, Some(out.len()), ret))
 }
