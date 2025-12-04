@@ -8,7 +8,7 @@ use nockchain_math::felt::{fpow, Felt};
 use nockchain_math::handle::{
     finalize_mary, finalize_poly, new_handle_mut_mary, new_handle_mut_slice,
 };
-use nockchain_math::mary::{mary_weld, MarySlice};
+use nockchain_math::mary::{mary_weld, MarySlice, MarySliceMut};
 use nockchain_math::noun_ext::NounMathExt;
 use nockchain_math::poly::{BPolySlice, *};
 use nockchain_math::poly_ext::*;
@@ -16,23 +16,28 @@ use nockchain_math::structs::{HoonList, HoonMap, HoonMapIter};
 use nockvm::jets::util::{slot, BAIL_FAIL};
 use nockvm::jets::Result;
 use nockvm::mem::NockStack;
-use nockvm::noun::{IndirectAtom, Noun, D, T};
+use nockvm::noun::{IndirectAtom, Noun, D, NO, T, YES};
+use nockvm::trace;
 use noun_serde::NounEncode;
 use zkvm_jetpack::form::poly::Poly;
 use zkvm_jetpack::jets::bp_jets::init_bpoly_bridge;
-use zkvm_jetpack::jets::fp_jets::init_fpoly_bridge;
+use zkvm_jetpack::jets::fp_jets::{coseword_sam, init_fpoly_bridge};
 use zkvm_jetpack::jets::mary_jets::{
-    snag_as_bpoly, snag_as_digest, snag_as_digest_jet, snag_one, transpose_bpolys,
+    mary_weld_jet, snag_as_bpoly, snag_as_digest, snag_as_digest_jet, snag_one, transpose_bpolys,
 };
 
 use super::substitute::SubstituteEngine;
 use super::two::*;
-use crate::eight::{degree_processing, process_composition_constraints};
+use crate::eight::{
+    compute_deep, degree_processing, precompute_ntts, process_composition_constraints,
+};
 use crate::engine::Engine;
-use crate::four::{absorb_proof_objects_impl, Proof, ProofData};
-use crate::one::{do_init_mary, weld_marys_step, G};
+use crate::four::{absorb_proof_objects_impl, digest, Proof, ProofData};
+use crate::hash::NounDigest;
+use crate::one::{bp_decompose, do_init_mary, weld_marys_step, G};
 use crate::seven::height_mary;
 use crate::snag_as_poly_mary;
+use crate::three::bp_build_merk_heap;
 use crate::utils::xeb;
 
 pub fn table_heights(stack: &mut NockStack, tables: Noun) -> Result {
@@ -633,4 +638,311 @@ pub fn make_composition_piece_evals(stack: &mut NockStack, sample: Noun) -> Resu
     }
 
     Ok(finalize_poly(stack, Some(out.len()), ret))
+}
+
+pub fn make_tworow_trace_polys_eval(stack: &mut NockStack, sample: Noun) -> Result {
+    let [tworow_trace_polys, max_constraint_degree, max_height] = sample.uncell()?;
+    let tworow_trace_polys = HoonList::try_from(tworow_trace_polys)?;
+    let max_constraint_degree = max_constraint_degree.as_atom()?.as_u64()?;
+    let max_height = max_height.as_atom()?.as_u64()?;
+
+    if max_constraint_degree == 0 || max_height == 0 {
+        return Err(BAIL_FAIL);
+    }
+
+    let ntt_len = 1 << xeb((max_constraint_degree - 1) as usize);
+    let ceil_height = 1 << xeb((max_height - 1) as usize);
+
+    let mut res = Vec::with_capacity(tworow_trace_polys.count());
+    for polys in tworow_trace_polys {
+        let sam = T(stack, &[polys, D(ceil_height as u64), D(ntt_len as u64)]);
+        res.push(precompute_ntts(stack, sam)?);
+    }
+
+    Ok(res.to_noun(stack))
+}
+
+pub fn make_tworow_trace_polys(stack: &mut NockStack, sample: Noun) -> Result {
+    let [trace_polys, all_tables] = sample.uncell()?;
+    let trace_polys = HoonList::try_from(trace_polys)?;
+
+    let second_row = make_second_row_trace_polys(stack, all_tables)?;
+    let second_row_list = HoonList::try_from(second_row)?;
+
+    let len = trace_polys.count().min(second_row_list.count());
+    let mut res = Vec::with_capacity(len);
+    for (t_poly, s_poly) in trace_polys.zip(second_row_list) {
+        let t_poly = MarySlice::try_from(t_poly).map_err(|_| BAIL_FAIL)?;
+        let s_poly = MarySlice::try_from(s_poly).map_err(|_| BAIL_FAIL)?;
+
+        let ret_len = (t_poly.len + s_poly.len) as usize;
+        let (ret, mary) = new_handle_mut_mary(stack, t_poly.step as usize, ret_len);
+
+        let mut offset = 0;
+        mary.dat[offset..offset + (t_poly.len as usize * t_poly.step as usize)]
+            .copy_from_slice(t_poly.dat);
+        offset += t_poly.len as usize * t_poly.step as usize;
+        mary.dat[offset..offset + (s_poly.len as usize * s_poly.step as usize)]
+            .copy_from_slice(s_poly.dat);
+
+        res.push(finalize_mary(stack, t_poly.step as usize, ret_len, ret));
+    }
+
+    Ok(res.to_noun(stack))
+}
+
+pub fn big_chunk(stack: &mut NockStack, sample: Noun) -> Result {
+    //     |=  $:  =proof
+    //             base=codeword-commitments
+    //             ext=codeword-commitments
+    //             mega-ext=codeword-commitments
+    //             pre=preprocess-data
+    //             all-tables=(list table-dat)
+    //             heights=(list @)
+    //             augmented-chals=bpoly
+    //             dyn-list=(list bpoly)
+    //             fri-domain-len=@
+    //         ==
+    let [proof, base, ext, mega_ext, pre, all_tables, heights, augmented_chals, dyn_list, fri_domain_len] =
+        sample.uncell()?;
+    let [cd_pre, constraint_map_pre, count_map_pre] = pre.uncell()?;
+
+    //     =/  trace-polys=(list mary)  (make-trace-polys polys.base polys.ext polys.mega-ext)
+    let trace_polys = {
+        let sub_sam = T(
+            stack,
+            &[base, ext, mega_ext].map(|m| m.as_cell().unwrap().head()),
+        );
+        make_trace_polys(stack, sub_sam)?
+    };
+
+    //     =/  tworow-trace-polys=(list mary)  (make-tworow-trace-polys trace-polys all-tables)
+    let tworow_trace_polys = {
+        let sub_sam = T(stack, &[trace_polys, all_tables]);
+        make_tworow_trace_polys(stack, sub_sam)?
+    };
+
+    //     =/  max-constraint-degree  (get-max-constraint-degree cd.pre)
+    let max_constraint_degree = get_max_constraint_degree(stack, cd_pre)?;
+
+    //     =/  tworow-trace-polys-eval=(list bpoly)  (make-tworow-trace-polys-eval tworow-trace-polys max-constraint-degree (roll heights max))
+
+    let tworow_trace_polys_eval = {
+        let max_height = HoonList::try_from(heights)?
+            .map(|v| v.as_atom().unwrap().as_u64().unwrap())
+            .max()
+            .unwrap();
+        let sub_sam = T(
+            stack,
+            &[tworow_trace_polys, max_constraint_degree, D(max_height)],
+        );
+        make_tworow_trace_polys_eval(stack, sub_sam)?
+    };
+
+    //     =/  [omicrons-bpoly=bpoly omicrons-fpoly=fpoly]  (make-omicrons all-tables)
+    let [omicrons_bpoly, omicrons_fpoly] = make_omicrons(stack, all_tables)?.uncell()?;
+
+    //     =/  extra-composition-poly=bpoly
+    //       %-  make-composition-poly
+    //       :*  proof
+    //           omicrons-bpoly
+    //           heights
+    //           tworow-trace-polys-eval
+    //           constraint-map.pre
+    //           count-map.pre
+    //           augmented-chals
+    //           dyn-list
+    //           %.y
+    //       ==
+    let extra_composition_poly = {
+        let sub_sam = T(
+            stack,
+            &[
+                proof, omicrons_bpoly, heights, tworow_trace_polys_eval, constraint_map_pre,
+                count_map_pre, augmented_chals, dyn_list, YES,
+            ],
+        );
+        make_composition_poly(stack, sub_sam)?
+    };
+
+    //     =.  proof  (~(push proof-stream proof) [%poly extra-composition-poly])
+    let mut proof = Proof::try_from(proof)?;
+    proof.push(ProofData::Poly(BPolyVec::try_from(extra_composition_poly)?));
+
+    //     =/  extra-comp-eval-point=felt
+    //         =/  rng  ~(prover-fiat-shamir proof-stream proof)
+    //         =^  f  rng  $:felt:rng
+    //         f
+    let extra_comp_eval_point = {
+        let mut rng = absorb_proof_objects_impl(&proof.objects, &proof.hashes);
+        rng.felt().to_noun(stack)
+    };
+
+    //     =/  extra-trace-evaluations=fpoly  (make-trace-evals tworow-trace-polys extra-comp-eval-point)
+    let extra_trace_evaluations = {
+        let sub_sam = T(stack, &[tworow_trace_polys, extra_comp_eval_point]);
+        make_trace_evals(stack, sub_sam)?
+    };
+
+    //     =.  proof  (~(push proof-stream proof) [%evals extra-trace-evaluations])
+    proof.push(ProofData::Evals(FPolyVec::try_from(
+        extra_trace_evaluations,
+    )?));
+
+    //     =.  proof  (~(push proof-stream proof) [%m-root h.q.merk-heap.mega-ext])
+    let m_root = {
+        let [_, _, mega_ext_merk] = mega_ext.uncell()?;
+        let [_, mega_ext_merk_heap] = mega_ext_merk.uncell()?;
+        let [mega_ext_merk_root, _] = mega_ext_merk_heap.uncell()?;
+        ProofData::MRoot(digest(mega_ext_merk_root)?)
+    };
+    proof.push(m_root);
+    let proof = proof.to_noun(stack);
+
+    //     =/  composition-pieces=(list bpoly)
+    //       =/  composition-poly=bpoly
+    //         %-  make-composition-poly
+    //         :*  proof
+    //             omicrons-bpoly
+    //             heights
+    //             tworow-trace-polys-eval
+    //             constraint-map.pre
+    //             count-map.pre
+    //             augmented-chals
+    //             dyn-list
+    //             %.n
+    //         ==
+    //       (bp-decompose composition-poly max-constraint-degree)
+    let composition_pieces = {
+        let sub_sam = T(
+            stack,
+            &[
+                proof, omicrons_bpoly, heights, tworow_trace_polys_eval, constraint_map_pre,
+                count_map_pre, augmented_chals, dyn_list, NO,
+            ],
+        );
+        let composition_poly = make_composition_poly(stack, sub_sam)?;
+        let sub_sam = T(stack, &[composition_poly, max_constraint_degree]);
+        bp_decompose(stack, sub_sam)?
+    };
+
+    //     =/  composition-codeword-array=mary  (transpose-bpolys (make-composition-codewords composition-pieces fri-domain-len))
+    let composition_codeword_array = {
+        let sub_sam = T(stack, &[composition_pieces, fri_domain_len]);
+        let codewords = MarySlice::try_from(make_composition_codewords(stack, sub_sam)?)
+            .map_err(|_| BAIL_FAIL)?;
+        transpose_bpolys(stack, codewords)?
+    };
+
+    //     =/  composition-merk  (bp-build-merk-heap:merkle composition-codeword-array)
+    let composition_merk = bp_build_merk_heap(stack, composition_codeword_array)?;
+
+    //     =.  proof  (~(push proof-stream proof) [%comp-m h.q.composition-merk max-constraint-degree])
+    let comp_m = {
+        let [_, comp_heap] = composition_merk.uncell()?;
+        ProofData::CompM(
+            digest(comp_heap.as_cell()?.head())?,
+            max_constraint_degree.as_atom()?.as_u64()?,
+        )
+    };
+    let mut proof = Proof::try_from(proof)?;
+    proof.push(comp_m);
+    let proof = proof.to_noun(stack);
+
+    //     =/  deep-challenge=felt  (make-deep-challenge proof fri-domain-len)
+    let deep_challenge = {
+        let sub_sam = T(stack, &[proof, fri_domain_len]);
+        make_deep_challenge(stack, sub_sam)?
+    };
+
+    //     =/  trace-evaluations=fpoly  (make-trace-evals tworow-trace-polys deep-challenge)
+    let trace_evaluations = {
+        let sub_sam = T(stack, &[tworow_trace_polys, deep_challenge]);
+        make_trace_evals(stack, sub_sam)?
+    };
+
+    //     =/  composition-pieces-fpoly  (turn composition-pieces bpoly-to-fpoly)
+    let composition_pieces_fpoly = {
+        let composition_pieces = HoonList::try_from(composition_pieces)?;
+        let mut fpolys = Vec::with_capacity(composition_pieces.count());
+        for piece in composition_pieces {
+            fpolys.push(bpoly_to_fpoly(BPolySlice::try_from(piece)?));
+        }
+        fpolys.to_noun(stack)
+    };
+
+    //     =/  composition-piece-evaluations=fpoly  (make-composition-piece-evals deep-challenge composition-pieces-fpoly)
+    let composition_piece_evaluations = {
+        let sub_sam = T(stack, &[deep_challenge, composition_pieces_fpoly]);
+        make_composition_piece_evals(stack, sub_sam)?
+    };
+
+    //     =.  proof  (~(push proof-stream proof) [%evals trace-evaluations])
+    let mut proof = Proof::try_from(proof)?;
+    proof.push(ProofData::Evals(FPolyVec::try_from(trace_evaluations)?));
+
+    //     =.  proof  (~(push proof-stream proof) [%evals composition-piece-evaluations])
+    proof.push(ProofData::Evals(FPolyVec::try_from(
+        composition_piece_evaluations,
+    )?));
+
+    //     =/  deep-codeword=fpoly
+    //       =/  deep-poly=fpoly
+    //         %-  compute-deep
+    //         :*  trace-polys
+    //             (~(weld fop trace-evaluations) extra-trace-evaluations)
+    //             composition-pieces-fpoly
+    //             composition-piece-evaluations
+    //             (make-deep-weights proof all-tables max-constraint-degree)
+    //             omicrons-fpoly
+    //             deep-challenge
+    //             extra-comp-eval-point
+    //         ==
+    //       (coseword deep-poly (lift g) fri-domain-len)
+    let proof = proof.to_noun(stack);
+    let deep_codeword = {
+        let evals = {
+            //  (~(weld fop trace-evaluations) extra-trace-evaluations)
+            let mary1 =
+                MarySlice::try_from(T(stack, &[D(3), trace_evaluations])).map_err(|_| BAIL_FAIL)?;
+            let mary2 = MarySlice::try_from(T(stack, &[D(3), extra_trace_evaluations]))
+                .map_err(|_| BAIL_FAIL)?;
+            let res_len = (mary1.len + mary2.len) as usize;
+            let (res, res_poly): (IndirectAtom, MarySliceMut) =
+                new_handle_mut_mary(stack, 3, res_len);
+            mary_weld(mary1, mary2, res_poly);
+            let mary = finalize_mary(stack, 3, res_len, res);
+            mary.as_cell()?.tail() // strip step
+        };
+
+        let deep_weights = {
+            let sub_sam = T(stack, &[proof, all_tables, max_constraint_degree]);
+            make_deep_weights(stack, sub_sam)?
+        };
+
+        let deep_poly = {
+            let sub_sam = T(
+                stack,
+                &[
+                    trace_polys, evals, composition_pieces_fpoly, composition_piece_evaluations,
+                    deep_weights, omicrons_fpoly, deep_challenge, extra_comp_eval_point,
+                ],
+            );
+            compute_deep(stack, sub_sam)?
+        };
+
+        let lift_g = Felt::lift(G).to_noun(stack);
+        let sub_sam = T(stack, &[deep_poly, lift_g, fri_domain_len]);
+        coseword_sam(stack, sub_sam)?
+    };
+
+    //     =/  commitments  ~[base ext mega-ext [~ composition-codeword-array composition-merk]]
+    let commitments = {
+        let comp_commitment = T(stack, &[D(0), composition_codeword_array, composition_merk]);
+        vec![base, ext, mega_ext, comp_commitment].to_noun(stack)
+    };
+
+    //     [[deep-codeword commitments] proof]
+    let dcc = T(stack, &[deep_codeword, commitments]);
+    Ok(T(stack, &[dcc, proof]))
 }

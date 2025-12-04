@@ -123,127 +123,64 @@
                                                                     =.  proof  (~(push proof-stream proof) [%puzzle header nonce pow-len prod])
     ::
     ::  build tables
-    =/  tables=(list table-dat)  (build-table-dats return)
-                                                                    =/  num-tables  (lent tables)
-                                                                    =/  table-names  (turn tables |=(t=table-dat name.p.t))
-                                                                    =/  heights  (table-heights tables)
+    =/  base-tables=(list table-dat)  (build-table-dats return)
+                                                                    =/  heights  (table-heights base-tables)
                                                                     =.  proof  (~(push proof-stream proof) [%heights heights])
-    =/  clc  ~(. calc heights cd.pre)
-                                                                    =*  fri-domain-len=@  init-domain-len:fri:clc
-                                                                    =/  [base-marys=(list mary) width=@]  (bas-mary tables)
-                                                                    =/  base=codeword-commitments  (compute-codeword-commitments base-marys fri-domain-len width)
+                                                                    =/  fri-domain-len=@  ~(fri-domain-len calc heights cd.pre)
+                                                                    =/  base=codeword-commitments
+                                                                      =/  [base-marys=(list mary) width=@]  (bas-mary base-tables)
+                                                                      (compute-codeword-commitments base-marys fri-domain-len width)
                                                                     =.  proof  (~(push proof-stream proof) [%m-root h.q.merk-heap.base])
-                                                                    =/  chals-rd1  (make-chals proof num-chals-rd1:chal)
-    ::
-    ::  extension columns: list or mary? probably should be a list
+                                                                    =/  chals-rd1=(list belt)  (make-chals proof num-chals-rd1:chal)
     ::
     ::  build extension columns
     =/  table-exts=(list table-mary)
-      %+  turn  tables
+      %+  turn  base-tables
       |=  t=table-dat
       ^-  table-mary
       (extend:q.t p.t chals-rd1 return)
-                                                                    =.  tables  (weld-table-marys tables table-exts)
-                                                                    =/  [ext-marys=(list mary) width=@]  (ext-mary table-exts)
-                                                                    =/  ext=codeword-commitments  (compute-codeword-commitments ext-marys fri-domain-len width)
+
+    =^  [ext=codeword-commitments mega-ext=codeword-commitments all-tables=(list table-dat) challenges=(list belt)]  proof
+                                                                    =/  ext-tables  (weld-table-marys base-tables table-exts)
+                                                                    =/  ext=codeword-commitments
+                                                                      =/  [ext-marys=(list mary) width=@]  (ext-mary table-exts)
+                                                                      (compute-codeword-commitments ext-marys fri-domain-len width)
                                                                     =.  proof  (~(push proof-stream proof) [%m-root h.q.merk-heap.ext])
-                                                                    =/  chals-rd2  (make-chals proof num-chals-rd2:chal)
-                                                                    =/  challenges  (weld chals-rd1 chals-rd2)
+                                                                    =/  challenges  (weld chals-rd1 (make-chals proof num-chals-rd2:chal))
     ::
-    =/  table-mega-exts=(list table-mary)  (build-mega-extend tables challenges return)
+      =/  table-mega-exts=(list table-mary)  (build-mega-extend ext-tables challenges return)
+    ::
+                                                                    =/  all-tables  (weld-table-marys ext-tables table-mega-exts)
+                                                                    =/  mega-ext=codeword-commitments
+                                                                      =/  [mega-ext-marys=(list mary) width=@]  (mega-ext-mary table-mega-exts)
+                                                                      (compute-codeword-commitments mega-ext-marys fri-domain-len width)
+                                                                    [[ext mega-ext all-tables challenges] proof]
+
     =/  augmented-chals=bpoly  (augment-challenges:chal challenges s f)
-    ::
-                                                                    =.  tables  (weld-table-marys tables table-mega-exts)
-                                                                    =/  [mega-ext-marys=(list mary) width=@]  (mega-ext-mary table-mega-exts)
-                                                                    =/  mega-ext=codeword-commitments  (compute-codeword-commitments mega-ext-marys fri-domain-len width)
     ::
     ::  get terminal values for use in permutation/evaluation arguments
     =/  dyn-list=(list bpoly)
-      %+  turn  tables
-      |=  t=table-dat
-      (terminal:q.t p.t)
+      %+  turn  all-tables
+      |=(t=table-dat (terminal:q.t p.t))
+                                                                  =.  proof  (~(push proof-stream proof) terms+(weld-terminals dyn-list))
+                                                                  =^  [deep-codeword=fpoly commitments=(list codeword-commitments)]  proof
+                                                                    %-  big-chunk
+                                                                    :*  proof
+                                                                        base
+                                                                        ext
+                                                                        mega-ext
+                                                                        pre
+                                                                        all-tables
+                                                                        heights
+                                                                        augmented-chals
+                                                                        dyn-list
+                                                                        fri-domain-len
+                                                                    ==
+    =^  fri-indices  proof
+      =/  fri  ~(fri calc heights cd.pre)
+      (prove:fri deep-codeword proof)
+                                                                    =.  proof  (add-commitments proof fri-indices commitments)
     ::
-                                                                    =/  terminals=bpoly  (weld-terminals dyn-list)
-                                                                    =.  proof  (~(push proof-stream proof) terms+terminals)
-                                                                    =/  trace-polys  (make-trace-polys polys.base polys.ext polys.mega-ext)
-                                                                    =/  second-row-trace-polys=(list mary)  (make-second-row-trace-polys tables)
-                                                                    =/  tworow-trace-polys=(list mary)
-                                                                      %^    zip
-                                                                          trace-polys
-                                                                        second-row-trace-polys
-                                                                      |=  [t-poly=mary s-poly=mary]
-                                                                      (~(weld ave t-poly) s-poly)
-                                                                    =/  max-constraint-degree  (get-max-constraint-degree cd.pre)
-                                                                    =/  ntt-len  (bex (xeb (dec (get-max-constraint-degree cd.pre))))
-                                                                    =/  max-height=@  (bex (xeb (dec (roll heights max))))
-                                                                    =/  tworow-trace-polys-eval=(list bpoly)
-                                                                      %+  turn  tworow-trace-polys
-                                                                      |=  polys=mary
-                                                                      (precompute-ntts polys max-height ntt-len)
-                                                                    =/  [omicrons-bpoly=bpoly omicrons-fpoly=fpoly]  (make-omicrons tables)
-                                                                    =/  extra-composition-poly=bpoly
-                                                                      %-  make-composition-poly
-                                                                      :*  proof
-                                                                          omicrons-bpoly
-                                                                          heights
-                                                                          tworow-trace-polys-eval
-                                                                          constraint-map.pre
-                                                                          count-map.pre
-                                                                          augmented-chals
-                                                                          dyn-list
-                                                                          %.y
-                                                                      ==
-                                                                    =.  proof  (~(push proof-stream proof) [%poly extra-composition-poly])
-                                                                    =/  rng  ~(prover-fiat-shamir proof-stream proof)
-                                                                    =^  extra-comp-eval-point  rng  $:felt:rng
-                                                                    =/  extra-trace-evaluations=fpoly  (make-trace-evals tworow-trace-polys extra-comp-eval-point)
-                                                                    =.  proof  (~(push proof-stream proof) [%evals extra-trace-evaluations])
-                                                                    =.  proof  (~(push proof-stream proof) [%m-root h.q.merk-heap.mega-ext])
-                                                                    =/  composition-poly=bpoly
-                                                                      %-  make-composition-poly
-                                                                      :*  proof
-                                                                          omicrons-bpoly
-                                                                          heights
-                                                                          tworow-trace-polys-eval
-                                                                          constraint-map.pre
-                                                                          count-map.pre
-                                                                          augmented-chals
-                                                                          dyn-list
-                                                                          %.n
-                                                                      ==
-                                                                    =/  num-composition-pieces  (get-max-constraint-degree cd.pre)
-                                                                    =/  composition-pieces=(list bpoly)  (bp-decompose composition-poly num-composition-pieces)
-                                                                    =/  composition-codewords=mary  (make-composition-codewords composition-pieces fri-domain-len)
-                                                                    =/  composition-codeword-array=mary  (transpose-bpolys composition-codewords)
-                                                                    =/  composition-merk  (bp-build-merk-heap:merkle composition-codeword-array)
-                                                                    =.  proof  (~(push proof-stream proof) [%comp-m h.q.composition-merk num-composition-pieces])
-                                                                    =/  deep-challenge=felt  (make-deep-challenge proof fri-domain-len)
-                                                                    =/  trace-evaluations=fpoly  (make-trace-evals tworow-trace-polys deep-challenge)
-    ::~&  %evaluating-pieces-at-deep-challenge
-    =/  composition-pieces-fpoly  (turn composition-pieces bpoly-to-fpoly)
-    =/  composition-piece-evaluations=fpoly  (make-composition-piece-evals deep-challenge composition-pieces-fpoly)
-    ::
-                                                                    =.  proof  (~(push proof-stream proof) [%evals trace-evaluations])
-                                                                    =.  proof  (~(push proof-stream proof) [%evals composition-piece-evaluations])
-                                                                    =/  deep-weights=fpoly  (make-deep-weights proof tables max-constraint-degree)
-                                                                    =/  all-evals  (~(weld fop trace-evaluations) extra-trace-evaluations)
-                                                                    =/  deep-poly=fpoly
-                                                                      %-  compute-deep
-                                                                      :*  trace-polys
-                                                                          all-evals
-                                                                          composition-pieces-fpoly
-                                                                          composition-piece-evaluations
-                                                                          deep-weights
-                                                                          omicrons-fpoly
-                                                                          deep-challenge
-                                                                          extra-comp-eval-point
-                                                                      ==
-                                                                    =/  deep-codeword=fpoly  (coseword deep-poly (lift g) fri-domain-len)
-    =^  fri-indices  proof  (prove:fri:clc deep-codeword proof)
-                                                                    =/  composition-commitments  [~ composition-codeword-array composition-merk]
-                                                                    =.  proof  (add-commitments proof fri-indices ~[base ext mega-ext composition-commitments])
-    ::
-    ::~&  %finished-proof
     ?-  version
       %0  [%& %0 objects.proof ~ 0]
       %1  [%& %1 objects.proof ~ 0]
@@ -501,5 +438,102 @@
     %-  init-fpoly
     %+  turn  composition-pieces
     |=(=fpoly (fpeval fpoly c))
+  ::
+  ++  make-tworow-trace-polys
+    ~/  %make-tworow-trace-polys
+    |=  [trace-polys=(list mary) all-tables=(list table-dat)]
+    %^    zip
+        trace-polys
+      (make-second-row-trace-polys all-tables)
+    |=  [t-poly=mary s-poly=mary]
+    (~(weld ave t-poly) s-poly)
+  ::
+  ++  make-tworow-trace-polys-eval
+    ~/  %make-tworow-trace-polys-eval
+    |=  [tworow-trace-polys=(list mary) max-constraint-degree=@ max-height=@]
+    ^-  (list bpoly)
+    =/  ntt-len  (bex (xeb (dec max-constraint-degree)))
+    =/  ceil-height=@  (bex (xeb (dec max-height)))
+    %+  turn  tworow-trace-polys
+    |=  polys=mary
+    (precompute-ntts polys ceil-height ntt-len)
+  ::
+  ++  big-chunk
+    ~/  %big-chunk
+    |=  $:  =proof
+            base=codeword-commitments
+            ext=codeword-commitments
+            mega-ext=codeword-commitments
+            pre=preprocess-data
+            all-tables=(list table-dat)
+            heights=(list @)
+            augmented-chals=bpoly
+            dyn-list=(list bpoly)
+            fri-domain-len=@
+        ==
+    ^-  [[fpoly (list codeword-commitments)] _proof]
+    =/  trace-polys=(list mary)  (make-trace-polys polys.base polys.ext polys.mega-ext)
+    =/  tworow-trace-polys=(list mary)  (make-tworow-trace-polys trace-polys all-tables)
+    =/  max-constraint-degree  (get-max-constraint-degree cd.pre)
+    =/  tworow-trace-polys-eval=(list bpoly)  (make-tworow-trace-polys-eval tworow-trace-polys max-constraint-degree (roll heights max))
+    =/  [omicrons-bpoly=bpoly omicrons-fpoly=fpoly]  (make-omicrons all-tables)
+    =/  extra-composition-poly=bpoly
+      %-  make-composition-poly
+      :*  proof
+          omicrons-bpoly
+          heights
+          tworow-trace-polys-eval
+          constraint-map.pre
+          count-map.pre
+          augmented-chals
+          dyn-list
+          %.y
+      ==
+    =.  proof  (~(push proof-stream proof) [%poly extra-composition-poly])
+    =/  extra-comp-eval-point=felt
+        =/  rng  ~(prover-fiat-shamir proof-stream proof)
+        =^  f  rng  $:felt:rng
+        f
+    =/  extra-trace-evaluations=fpoly  (make-trace-evals tworow-trace-polys extra-comp-eval-point)
+    =.  proof  (~(push proof-stream proof) [%evals extra-trace-evaluations])
+    =.  proof  (~(push proof-stream proof) [%m-root h.q.merk-heap.mega-ext])
+    =/  composition-pieces=(list bpoly)
+      =/  composition-poly=bpoly
+        %-  make-composition-poly
+        :*  proof
+            omicrons-bpoly
+            heights
+            tworow-trace-polys-eval
+            constraint-map.pre
+            count-map.pre
+            augmented-chals
+            dyn-list
+            %.n
+        ==
+      (bp-decompose composition-poly max-constraint-degree)
+    =/  composition-codeword-array=mary  (transpose-bpolys (make-composition-codewords composition-pieces fri-domain-len))
+    =/  composition-merk  (bp-build-merk-heap:merkle composition-codeword-array)
+    =.  proof  (~(push proof-stream proof) [%comp-m h.q.composition-merk max-constraint-degree])
+    =/  deep-challenge=felt  (make-deep-challenge proof fri-domain-len)
+    =/  trace-evaluations=fpoly  (make-trace-evals tworow-trace-polys deep-challenge)
+    =/  composition-pieces-fpoly  (turn composition-pieces bpoly-to-fpoly)
+    =/  composition-piece-evaluations=fpoly  (make-composition-piece-evals deep-challenge composition-pieces-fpoly)
+    =.  proof  (~(push proof-stream proof) [%evals trace-evaluations])
+    =.  proof  (~(push proof-stream proof) [%evals composition-piece-evaluations])
+    =/  deep-codeword=fpoly
+      =/  deep-poly=fpoly
+        %-  compute-deep
+        :*  trace-polys
+            (~(weld fop trace-evaluations) extra-trace-evaluations)
+            composition-pieces-fpoly
+            composition-piece-evaluations
+            (make-deep-weights proof all-tables max-constraint-degree)
+            omicrons-fpoly
+            deep-challenge
+            extra-comp-eval-point
+        ==
+      (coseword deep-poly (lift g) fri-domain-len)
+    =/  commitments  ~[base ext mega-ext [~ composition-codeword-array composition-merk]]
+    [[deep-codeword commitments] proof]
   --
 --

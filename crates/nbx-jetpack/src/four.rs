@@ -30,7 +30,7 @@ fn digest_noun(stack: &mut NockStack, v: NounDigest) -> Noun {
     T(stack, &v)
 }
 
-fn digest(n: Noun) -> core::result::Result<NounDigest, JetErr> {
+pub fn digest(n: Noun) -> core::result::Result<NounDigest, JetErr> {
     Ok(n.uncell()?
         .map(|v| v.as_atom().unwrap().as_u64().unwrap())
         .map(Melt::from_u64))
