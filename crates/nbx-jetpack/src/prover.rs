@@ -1,9 +1,13 @@
+use core::panic;
+
 use nbx_tip5::base::{binv, bneg};
 use nbx_tip5::melt::Melt;
 use nockchain_math::belt::Belt;
 use nockchain_math::felt::Felt;
-use nockchain_math::handle::{finalize_poly, new_handle_mut_slice};
-use nockchain_math::mary::MarySlice;
+use nockchain_math::handle::{
+    finalize_mary, finalize_poly, new_handle_mut_mary, new_handle_mut_slice,
+};
+use nockchain_math::mary::{mary_weld, MarySlice};
 use nockchain_math::noun_ext::NounMathExt;
 use nockchain_math::poly::{BPolySlice, *};
 use nockchain_math::poly_ext::*;
@@ -12,13 +16,12 @@ use nockvm::jets::util::{slot, BAIL_FAIL};
 use nockvm::jets::Result;
 use nockvm::mem::NockStack;
 use nockvm::noun::{IndirectAtom, Noun, D, T};
-use nockvm_macros::tas;
 use noun_serde::NounEncode;
 use zkvm_jetpack::form::poly::Poly;
 use zkvm_jetpack::jets::bp_jets::init_bpoly_bridge;
 use zkvm_jetpack::jets::fp_jets::init_fpoly_bridge;
 use zkvm_jetpack::jets::mary_jets::{
-    change_step, snag_as_bpoly, snag_as_digest, snag_as_digest_jet, snag_one, snag_one_fields,
+    snag_as_bpoly, snag_as_digest, snag_as_digest_jet, snag_one, transpose_bpolys,
 };
 
 use super::substitute::SubstituteEngine;
@@ -26,7 +29,7 @@ use super::two::*;
 use crate::eight::{degree_processing, process_composition_constraints};
 use crate::engine::Engine;
 use crate::four::{absorb_proof_objects_impl, Proof, ProofData};
-use crate::one::weld_marys_step;
+use crate::one::{do_init_mary, weld_marys_step};
 use crate::seven::height_mary;
 use crate::snag_as_poly_mary;
 use crate::utils::xeb;
@@ -471,4 +474,53 @@ pub fn add_commitments(stack: &mut NockStack, sample: Noun) -> Result {
         }
     }
     Ok(proof.to_noun(stack))
+}
+
+pub fn weld_terminals(stack: &mut NockStack, dyn_list: Noun) -> Result {
+    let dyn_list = HoonList::try_from(dyn_list)?.map(|v| BPolySlice::try_from(v).unwrap());
+    let mut acc = vec![];
+    for p in dyn_list {
+        acc.extend_from_slice(&p.0);
+    }
+    let (ret, handle) = new_handle_mut_slice(stack, Some(acc.len()));
+    handle.copy_from_slice(&acc);
+    let ret = finalize_poly(stack, Some(acc.len()), ret);
+    Ok(ret)
+}
+
+pub fn make_second_row_trace_polys(stack: &mut NockStack, sample: Noun) -> Result {
+    let tables = HoonList::try_from(sample)?;
+    let mut res = Vec::with_capacity(tables.count());
+    for t in tables {
+        let mary_noun = t.as_cell()?.head().as_cell()?.tail();
+        let mary = MarySlice::try_from(mary_noun).map_err(|_| BAIL_FAIL)?;
+        let polys_noun = transpose_bpolys(stack, mary)?;
+        let len = MarySlice::try_from(polys_noun).map_err(|_| BAIL_FAIL)?.len as usize;
+        if len == 0 {
+            return Err(BAIL_FAIL);
+        }
+
+        let mut bpolys = Vec::with_capacity(len);
+        for i in 0..len {
+            let bp = snag_as_bpoly(stack, polys_noun, i)?;
+            let shift_sam = T(stack, &[bp, D(1)]);
+            let shifted = bp_shift_by_unity_sam(stack, shift_sam)?;
+            let iffted = bp_ifft(BPolyVec::try_from(shifted)?)?;
+            bpolys.push(iffted);
+        }
+
+        // zing-bpolys
+        let step = bpolys[0].0.len();
+        let (ret, mary) = new_handle_mut_mary(stack, step, len);
+        let mut offset = 0;
+        for bp in bpolys {
+            let dat = bp.0.iter().map(|b| b.0 as u64).collect::<Vec<u64>>();
+            mary.dat[offset..offset + step].copy_from_slice(&dat);
+            offset += step;
+        }
+        let bpolys = finalize_mary(stack, step, len, ret);
+
+        res.push(bpolys);
+    }
+    Ok(res.to_noun(stack))
 }

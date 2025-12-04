@@ -163,32 +163,8 @@
       |=  t=table-dat
       (terminal:q.t p.t)
     ::
-    ::  weld terminals from each table together
-    =/  terminals=bpoly
-      %+  roll  (range (lent tables))
-      |=  [i=@ acc=bpoly]
-      (~(weld bop acc) (snag i dyn-list))
-    ::  send terminals to verifier
+                                                                    =/  terminals=bpoly  (weld-terminals dyn-list)
                                                                     =.  proof  (~(push proof-stream proof) terms+terminals)
-    ::
-    ::
-    ::  The constraints take variables for a full row plus the following row. So to evaluate them
-    ::  the trace polys are not enough. We need to compose each trace poly with f(X)=g*X to create
-    ::  polys that will give the value of the following row. Then we weld these second-row polys
-    ::  to the original polys to get the double trace polys. These can then be used to compose with
-    ::  the constraints and evaluate at the DEEP challenge later on.
-    ::~&  %transposing-table
-    ::  TODO: we already transposed the tables when we interpolated the polynomials and we should
-    ::  just reuse that. But that requires changing the interface to the interpolation functions.
-    =/  marys=(list table-mary)
-      %+  turn  tables
-      |=(t=table-dat p.t)
-    =/  transposed-tables=(list mary)
-      %+  turn  marys
-      |=  =table-mary
-      (transpose-bpolys p.table-mary)
-    ::
-    ::~&  %composing-trace-polys
     ::  each mary is a list of a table's columns, interpolated to polys
     =/  trace-polys
       %+  turn  (zip-up polys.base (zip-up polys.ext polys.mega-ext))
@@ -196,44 +172,20 @@
       ^-  mary
       (~(weld ave bm) (~(weld ave em) mem))
     ::
-    =/  second-row-trace-polys=(list mary)
-      %+  turn  transposed-tables
-      |=  polys=mary
-      %-  zing-bpolys
-      %+  turn  (range len.array.polys)
-      |=  i=@
-      =/  bp=bpoly  (~(snag-as-bpoly ave polys) i)
-      (bp-ifft (bp-shift-by-unity bp 1))
-    ::
-    ::~&  %appending-first-and-second-row-trace-polys
-    ::
-    =/  tworow-trace-polys=(list mary)
-      %^    zip
-          trace-polys
-        second-row-trace-polys
-      |=  [t-poly=mary s-poly=mary]
-      (~(weld ave t-poly) s-poly)
-    ::
-    ::
-    ::  Compute trace and tworow-trace polynomials in eval form over a 4*d root of unity
-    ::  (where d is the lowest power of 2 greater than the max degree of the constraints)
-    ::~&  %extending-trace-polys
-    ::
-    ::  TODO: Save these variables in the preprocess step
-    =/  max-constraint-degree  (get-max-constraint-degree cd.pre)
-    =/  ntt-len
-      %-  bex  %-  xeb  %-  dec
-      (get-max-constraint-degree cd.pre)
-    =/  max-height=@
-      %-  bex  %-  xeb  %-  dec
-      (roll heights max)
-    =/  tworow-trace-polys-eval=(list bpoly)
-      %+  iturn  tworow-trace-polys
-      |=  [i=@ polys=mary]
-      (precompute-ntts polys max-height ntt-len)
-    ::
-    ::
-    ::  compute extra composition poly
+                                                                    =/  second-row-trace-polys=(list mary)  (make-second-row-trace-polys tables)
+                                                                    =/  tworow-trace-polys=(list mary)
+                                                                      %^    zip
+                                                                          trace-polys
+                                                                        second-row-trace-polys
+                                                                      |=  [t-poly=mary s-poly=mary]
+                                                                      (~(weld ave t-poly) s-poly)
+                                                                    =/  max-constraint-degree  (get-max-constraint-degree cd.pre)
+                                                                    =/  ntt-len  (bex (xeb (dec (get-max-constraint-degree cd.pre))))
+                                                                    =/  max-height=@  (bex (xeb (dec (roll heights max))))
+                                                                    =/  tworow-trace-polys-eval=(list bpoly)
+                                                                      %+  turn  tworow-trace-polys
+                                                                      |=  polys=mary
+                                                                      (precompute-ntts polys max-height ntt-len)
                                                                     =/  [omicrons-bpoly=bpoly omicrons-fpoly=fpoly]  (make-omicrons tables)
                                                                     =/  extra-composition-poly=bpoly
                                                                       %-  make-composition-poly
@@ -274,13 +226,9 @@
       %+  turn  composition-pieces
       |=  poly=bpoly
       (bp-coseword poly g fri-domain-len)
-    =/  composition-codeword-array=mary
-      (transpose-bpolys composition-codewords)
+                                                                    =/  composition-codeword-array=mary  (transpose-bpolys composition-codewords)
                                                                     =/  composition-merk  (bp-build-merk-heap:merkle composition-codeword-array)
                                                                     =.  proof  (~(push proof-stream proof) [%comp-m h.q.composition-merk num-composition-pieces])
-    ::
-    ::
-    ::
     ::
     ::  reseed the rng
     =.  rng  ~(prover-fiat-shamir proof-stream proof)
@@ -298,8 +246,6 @@
       $(deep-candidate felt)
     ::~&  %evaluating-trace-at-deep-challenge
     ::
-    ::  trace-evaluations: list of evaluations of interpolated column polys and
-    ::  shifted column polys at deep point, grouped in order by tables
                                                                     =/  trace-evaluations=fpoly  (make-trace-evals tworow-trace-polys deep-challenge)
     ::
     ::~&  %evaluating-pieces-at-deep-challenge
@@ -527,5 +473,26 @@
     =/  axis  (index-to-axis:merkle p.merk-heap idx)
     =/  opening  (build-merk-proof:merkle q.merk-heap axis)
     $(commitments t.commitments, proof (~(push proof-stream proof) m-pathbf+[(tail elem) path.opening]))
+  ::
+  ++  weld-terminals
+    ~/  %weld-terminals
+    |=  dyn-list=(list bpoly)
+    ^-  bpoly
+    %+  roll  dyn-list
+    |=  [p=bpoly acc=bpoly]
+    (~(weld bop acc) p)
+  ::
+  ++  make-second-row-trace-polys
+    ~/  %make-second-row-trace-polys
+    |=  tables=(list table-dat)
+    ^-  (list mary)
+    %+  turn  tables
+    |=  t=table-dat
+    %-  zing-bpolys
+    =/  polys  (transpose-bpolys p.p.t)
+    %+  turn  (range len.array.polys)
+    |=  i=@
+    =/  bp=bpoly  (~(snag-as-bpoly ave polys) i)
+    (bp-ifft (bp-shift-by-unity bp 1))
   --
 --
