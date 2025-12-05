@@ -262,6 +262,7 @@ sam_jet! {
     make_tworow_trace_polys_eval_jet => make_tworow_trace_polys_eval,
     make_tworow_trace_polys_jet => make_tworow_trace_polys 'log,
     big_chunk_jet => big_chunk 'log,
+    augment_challenges_jet => augment_challenges 'log,
 }
 
 const ENC_KEY: u32 = obfstr::random!(u32, "key");
@@ -1319,6 +1320,26 @@ pub const NBX_PROVER_JETS: &[HotEntry] = &[
         ],
         1,
         weld_exts_jet,
+    ),
+    (
+        &[
+            K_138,
+            jet_str!(b"one"),
+            jet_str!(b"two"),
+            jet_str!(b"tri"),
+            jet_str!(b"qua"),
+            jet_str!(b"pen"),
+            jet_str!(b"zeke"),
+            jet_str!(b"ext-field"),
+            jet_str!(b"misc-lib"),
+            jet_str!(b"proof-lib"),
+            jet_str!(b"utils"),
+            jet_str!(b"fri"),
+            jet_str!(b"chal"),
+            jet_str!(b"augment-challenges"),
+        ],
+        1,
+        augment_challenges_jet,
     ),
     (
         &[

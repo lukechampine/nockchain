@@ -140,7 +140,7 @@
       ^-  table-mary
       (extend:q.t p.t chals-rd1 return)
 
-    =^  [ext=codeword-commitments mega-ext=codeword-commitments all-tables=(list table-dat) challenges=(list belt)]  proof
+    =^  [ext=codeword-commitments mega-ext=codeword-commitments all-tables=(list table-dat) augmented-chals=bpoly]  proof
                                                                     =/  ext-tables  (weld-table-marys base-tables table-exts)
                                                                     =/  ext=codeword-commitments
                                                                       =/  [ext-marys=(list mary) width=@]  (ext-mary table-exts)
@@ -148,15 +148,15 @@
                                                                     =.  proof  (~(push proof-stream proof) [%m-root h.q.merk-heap.ext])
                                                                     =/  challenges  (weld chals-rd1 (make-chals proof num-chals-rd2:chal))
     ::
-      =/  table-mega-exts=(list table-mary)  (build-mega-extend ext-tables challenges return)
+                                  =/  table-mega-exts=(list table-mary)  (build-mega-extend ext-tables challenges return)
     ::
                                                                     =/  all-tables  (weld-table-marys ext-tables table-mega-exts)
                                                                     =/  mega-ext=codeword-commitments
                                                                       =/  [mega-ext-marys=(list mary) width=@]  (mega-ext-mary table-mega-exts)
                                                                       (compute-codeword-commitments mega-ext-marys fri-domain-len width)
-                                                                    [[ext mega-ext all-tables challenges] proof]
+                                                                    =/  augmented-chals=bpoly  (augment-challenges:chal challenges s f)
+                                                                    [[ext mega-ext all-tables augmented-chals] proof]
 
-    =/  augmented-chals=bpoly  (augment-challenges:chal challenges s f)
     ::
     ::  get terminal values for use in permutation/evaluation arguments
     =/  dyn-list=(list bpoly)

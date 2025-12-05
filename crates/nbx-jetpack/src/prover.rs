@@ -1,10 +1,8 @@
-use core::panic;
-
 use nbx_tip5::base::{binv, bneg};
 use nbx_tip5::melt::Melt;
 use nockchain_math::belt::{bpow, Belt};
 use nockchain_math::bpoly::bp_coseword;
-use nockchain_math::felt::{fpow, Felt};
+use nockchain_math::felt::{finv_, fpow, Felt};
 use nockchain_math::handle::{
     finalize_mary, finalize_poly, new_handle_mut_mary, new_handle_mut_slice,
 };
@@ -17,14 +15,12 @@ use nockvm::jets::util::{slot, BAIL_FAIL};
 use nockvm::jets::Result;
 use nockvm::mem::NockStack;
 use nockvm::noun::{IndirectAtom, Noun, D, NO, T, YES};
-use nockvm::trace;
 use noun_serde::NounEncode;
+use zkvm_jetpack::form::gen_trace::build_tree_data;
 use zkvm_jetpack::form::poly::Poly;
 use zkvm_jetpack::jets::bp_jets::init_bpoly_bridge;
 use zkvm_jetpack::jets::fp_jets::{coseword_sam, init_fpoly_bridge};
-use zkvm_jetpack::jets::mary_jets::{
-    mary_weld_jet, snag_as_bpoly, snag_as_digest, snag_as_digest_jet, snag_one, transpose_bpolys,
-};
+use zkvm_jetpack::jets::mary_jets::{snag_as_bpoly, snag_as_digest, snag_one, transpose_bpolys};
 
 use super::substitute::SubstituteEngine;
 use super::two::*;
@@ -33,10 +29,8 @@ use crate::eight::{
 };
 use crate::engine::Engine;
 use crate::four::{absorb_proof_objects_impl, digest, Proof, ProofData};
-use crate::hash::NounDigest;
-use crate::one::{bp_decompose, do_init_mary, weld_marys_step, G};
+use crate::one::{bp_decompose, weld_marys_step, G};
 use crate::seven::height_mary;
-use crate::snag_as_poly_mary;
 use crate::three::bp_build_merk_heap;
 use crate::utils::xeb;
 
@@ -945,4 +939,39 @@ pub fn big_chunk(stack: &mut NockStack, sample: Noun) -> Result {
     //     [[deep-codeword commitments] proof]
     let dcc = T(stack, &[deep_codeword, commitments]);
     Ok(T(stack, &[dcc, proof]))
+}
+
+pub fn augment_challenges(stack: &mut NockStack, sample: Noun) -> Result {
+    const NUM_CHALS: usize = 78; // (lent chal-names-basic)
+    let [raw_chals_noun, sf] = sample.uncell()?;
+    let [s, _f] = sf.uncell()?;
+
+    let raw_iter = HoonList::try_from(raw_chals_noun)?.take(NUM_CHALS);
+    let mut raw_chals = Vec::with_capacity(NUM_CHALS);
+    for chal in raw_iter {
+        raw_chals.push(chal.as_belt()?);
+    }
+    if raw_chals.len() != NUM_CHALS {
+        return Err(BAIL_FAIL);
+    }
+
+    let got_pelt = |index: usize| {
+        let offset = index * 3;
+        Felt([raw_chals[offset], raw_chals[offset + 1], raw_chals[offset + 2]])
+    };
+    let a = got_pelt(0);
+    let b = got_pelt(1);
+    let c = got_pelt(2);
+    let alf = got_pelt(13);
+
+    let inv_alf = finv_(&alf);
+    let tree_data = build_tree_data(s, &alf)?;
+    let input_ifp = a * tree_data.size + b * tree_data.dyck + c * tree_data.leaf;
+
+    let mut augmented = raw_chals;
+    augmented.extend_from_slice(&inv_alf.0);
+    augmented.extend_from_slice(&input_ifp.0);
+
+    let augmented_list = augmented.to_noun(stack);
+    init_bpoly_bridge(stack, augmented_list)
 }
