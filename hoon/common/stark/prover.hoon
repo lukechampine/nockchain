@@ -120,66 +120,14 @@
         ==
     ^-  prove-result
     =|  =proof  ::  the proof stream
-                                                                    =.  proof  (~(push proof-stream proof) [%puzzle header nonce pow-len prod])
-    ::
-    ::  build tables
+    =.  proof  (~(push proof-stream proof) [%puzzle header nonce pow-len prod])
     =/  base-tables=(list table-dat)  (build-table-dats return)
-                                                                    =/  heights  (table-heights base-tables)
-                                                                    =.  proof  (~(push proof-stream proof) [%heights heights])
-                                                                    =/  fri-domain-len=@  ~(fri-domain-len calc heights cd.pre)
-                                                                    =/  base=codeword-commitments
-                                                                      =/  [base-marys=(list mary) width=@]  (bas-mary base-tables)
-                                                                      (compute-codeword-commitments base-marys fri-domain-len width)
-                                                                    =.  proof  (~(push proof-stream proof) [%m-root h.q.merk-heap.base])
-                                                                    =/  chals-rd1=(list belt)  (make-chals proof num-chals-rd1:chal)
-    ::
-    ::  build extension columns
-    =/  table-exts=(list table-mary)
-      %+  turn  base-tables
-      |=  t=table-dat
-      ^-  table-mary
-      (extend:q.t p.t chals-rd1 return)
-
-    =^  [ext=codeword-commitments mega-ext=codeword-commitments all-tables=(list table-dat) augmented-chals=bpoly]  proof
-                                                                    =/  ext-tables  (weld-table-marys base-tables table-exts)
-                                                                    =/  ext=codeword-commitments
-                                                                      =/  [ext-marys=(list mary) width=@]  (ext-mary table-exts)
-                                                                      (compute-codeword-commitments ext-marys fri-domain-len width)
-                                                                    =.  proof  (~(push proof-stream proof) [%m-root h.q.merk-heap.ext])
-                                                                    =/  challenges  (weld chals-rd1 (make-chals proof num-chals-rd2:chal))
-    ::
-                                  =/  table-mega-exts=(list table-mary)  (build-mega-extend ext-tables challenges return)
-    ::
-                                                                    =/  all-tables  (weld-table-marys ext-tables table-mega-exts)
-                                                                    =/  mega-ext=codeword-commitments
-                                                                      =/  [mega-ext-marys=(list mary) width=@]  (mega-ext-mary table-mega-exts)
-                                                                      (compute-codeword-commitments mega-ext-marys fri-domain-len width)
-                                                                    =/  augmented-chals=bpoly  (augment-challenges:chal challenges s f)
-                                                                    [[ext mega-ext all-tables augmented-chals] proof]
-
-    ::
-    ::  get terminal values for use in permutation/evaluation arguments
-    =/  dyn-list=(list bpoly)
-      %+  turn  all-tables
-      |=(t=table-dat (terminal:q.t p.t))
-                                                                  =.  proof  (~(push proof-stream proof) terms+(weld-terminals dyn-list))
-                                                                  =^  [deep-codeword=fpoly commitments=(list codeword-commitments)]  proof
-                                                                    %-  big-chunk
-                                                                    :*  proof
-                                                                        base
-                                                                        ext
-                                                                        mega-ext
-                                                                        pre
-                                                                        all-tables
-                                                                        heights
-                                                                        augmented-chals
-                                                                        dyn-list
-                                                                        fri-domain-len
-                                                                    ==
+    =^  [heights=(list @) deep-codeword=fpoly commitments=(list codeword-commitments)]  proof
+      (giant-chunk proof pre base-tables return s f)
     =^  fri-indices  proof
       =/  fri  ~(fri calc heights cd.pre)
       (prove:fri deep-codeword proof)
-                                                                    =.  proof  (add-commitments proof fri-indices commitments)
+    =.  proof  (add-commitments proof fri-indices commitments)
     ::
     ?-  version
       %0  [%& %0 objects.proof ~ 0]
@@ -224,6 +172,13 @@
     (mega-extend:q.t p.t chals return)
   ::
   ::  interim jets
+  ::
+  ++  make-dyn-list
+    ~/  %make-dyn-list
+    |=  tables=(list table-dat)
+    ^-  (list bpoly)
+    %+  turn  tables
+    |=(t=table-dat (terminal:q.t p.t))
   ::
   ++  table-heights
     ~/  %table-heights
@@ -535,5 +490,89 @@
       (coseword deep-poly (lift g) fri-domain-len)
     =/  commitments  ~[base ext mega-ext [~ composition-codeword-array composition-merk]]
     [[deep-codeword commitments] proof]
+  ::
+  ++  medium-chunk
+    ~/  %medium-chunk
+    |=  $:  =proof
+            base-tables=(list table-dat)
+            table-exts=(list table-mary)
+            fri-domain-len=@
+            chals-rd1=(list belt)
+            num-chals-rd2=@
+            return=fock-return
+            s=*
+            f=*
+        ==
+    ^-  [[codeword-commitments codeword-commitments (list table-dat) bpoly] _proof]
+    =/  ext-tables  (weld-table-marys base-tables table-exts)
+    =/  ext=codeword-commitments
+      =/  [ext-marys=(list mary) width=@]  (ext-mary table-exts)
+      (compute-codeword-commitments ext-marys fri-domain-len width)
+    =.  proof  (~(push proof-stream proof) [%m-root h.q.merk-heap.ext])
+    =/  challenges  (weld chals-rd1 (make-chals proof num-chals-rd2))
+    =/  table-mega-exts=(list table-mary)  (build-mega-extend ext-tables challenges return)
+    =/  all-tables  (weld-table-marys ext-tables table-mega-exts)
+    =/  mega-ext=codeword-commitments
+      =/  [mega-ext-marys=(list mary) width=@]  (mega-ext-mary table-mega-exts)
+      (compute-codeword-commitments mega-ext-marys fri-domain-len width)
+    =/  augmented-chals=bpoly  (augment-challenges:chal challenges s f)
+    [[ext mega-ext all-tables augmented-chals] proof]
+  ::
+  ++  make-table-exts
+    ~/  %make-table-exts
+    |=  [tables=(list table-dat) chals-rd1=(list belt) return=fock-return]
+    ^-  (list table-mary)
+    %+  turn  tables
+    |=  t=table-dat
+    ^-  table-mary
+    (extend:q.t p.t chals-rd1 return)
+  ::
+  ++  giant-chunk
+    ~/  %giant-chunk
+    |=  $:  =proof
+            pre=preprocess-data
+            base-tables=(list table-dat)
+            return=fock-return
+            s=*
+            f=*
+        ==
+    ^-  [[(list @) fpoly (list codeword-commitments)] _proof]
+    =/  heights  (table-heights base-tables)
+    =.  proof  (~(push proof-stream proof) [%heights heights])
+    =/  fri-domain-len=@  ~(fri-domain-len calc heights cd.pre)
+    =/  base=codeword-commitments
+      =/  [base-marys=(list mary) width=@]  (bas-mary base-tables)
+      (compute-codeword-commitments base-marys fri-domain-len width)
+    =.  proof  (~(push proof-stream proof) [%m-root h.q.merk-heap.base])
+    =/  chals-rd1=(list belt)  (make-chals proof num-chals-rd1:chal)
+    =/  table-exts=(list table-mary)  (make-table-exts base-tables chals-rd1 return)
+    =^  [ext=codeword-commitments mega-ext=codeword-commitments all-tables=(list table-dat) augmented-chals=bpoly]  proof
+      %-  medium-chunk
+      :*  proof
+          base-tables
+          table-exts
+          fri-domain-len
+          chals-rd1
+          num-chals-rd2:chal
+          return
+          s
+          f
+      ==
+    =/  dyn-list=(list bpoly)  (make-dyn-list all-tables)
+    =.  proof  (~(push proof-stream proof) terms+(weld-terminals dyn-list))
+    =^  [deep-codeword=fpoly commitments=(list codeword-commitments)]  proof
+      %-  big-chunk
+      :*  proof
+          base
+          ext
+          mega-ext
+          pre
+          all-tables
+          heights
+          augmented-chals
+          dyn-list
+          fri-domain-len
+      ==
+    [[heights deep-codeword commitments] proof]
   --
 --

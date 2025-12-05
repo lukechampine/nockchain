@@ -11,6 +11,7 @@ use nockchain_math::noun_ext::NounMathExt;
 use nockchain_math::poly::{BPolySlice, *};
 use nockchain_math::poly_ext::*;
 use nockchain_math::structs::{HoonList, HoonMap, HoonMapIter};
+use nockvm::jets::list::util::weld;
 use nockvm::jets::util::{slot, BAIL_FAIL};
 use nockvm::jets::Result;
 use nockvm::mem::NockStack;
@@ -25,7 +26,8 @@ use zkvm_jetpack::jets::mary_jets::{snag_as_bpoly, snag_as_digest, snag_one, tra
 use super::substitute::SubstituteEngine;
 use super::two::*;
 use crate::eight::{
-    compute_deep, degree_processing, precompute_ntts, process_composition_constraints,
+    compute_codeword_commitments_sam, compute_deep, degree_processing, precompute_ntts,
+    process_composition_constraints,
 };
 use crate::engine::Engine;
 use crate::four::{absorb_proof_objects_impl, digest, Proof, ProofData};
@@ -73,7 +75,7 @@ fn collect_marys(
     Ok(T(stack, &[marys, D(width)]))
 }
 
-pub fn bas_marys(stack: &mut NockStack, tables: Noun) -> Result {
+pub fn bas_mary(stack: &mut NockStack, tables: Noun) -> Result {
     collect_marys(stack, tables, 2, 14)
 }
 
@@ -93,6 +95,28 @@ pub fn make_chals(stack: &mut NockStack, sample: Noun) -> Result {
     Ok(rng.belts(num_chals).to_noun(stack))
 }
 
+pub fn build_mega_extend_v2(stack: &mut NockStack, sample: Noun) -> Result {
+    let [tables, chals, ret] = sample.uncell()?;
+
+    let mega_extend_funcs = &[
+        zkvm_jetpack::jets::memory_table_jets_v2::memory_v2_mega_extend_sam,
+        zkvm_jetpack::jets::compute_table_jets_v2::compute_v2_mega_extend_sam,
+    ];
+
+    let tables = HoonList::try_from(tables)?;
+    assert_eq!(tables.count(), mega_extend_funcs.len());
+
+    let mut res = Vec::with_capacity(tables.count());
+    for (t, mega_extend) in tables.zip(mega_extend_funcs.iter()) {
+        let [table_mary, _, _] = t.uncell()?;
+
+        let sam = T(stack, &[table_mary, chals, ret]);
+        res.push(mega_extend(stack, sam)?);
+    }
+
+    Ok(res.to_noun(stack))
+}
+
 pub fn weld_exts(stack: &mut NockStack, sample: Noun) -> Result {
     let [l, _, r_mary] = sample.uncell()?;
     let [l_header, l_mary] = l.uncell()?;
@@ -105,7 +129,8 @@ pub fn weld_table_marys(stack: &mut NockStack, sample: Noun) -> Result {
     let [ts, ms] = sample.uncell()?;
     let ts = HoonList::try_from(ts)?;
     let ms = HoonList::try_from(ms)?;
-    let mut welded_tables = Vec::with_capacity(ts.count() + ms.count());
+
+    let mut welded_tables = Vec::with_capacity(ts.count());
     for (t, m) in ts.zip(ms) {
         let [l, q_r] = t.uncell()?;
         let [l_header, l_mary] = l.uncell()?;
@@ -116,6 +141,7 @@ pub fn weld_table_marys(stack: &mut NockStack, sample: Noun) -> Result {
 
         welded_tables.push(T(stack, &[welded_table_mary, q_r]));
     }
+
     Ok(welded_tables.to_noun(stack))
 }
 
@@ -720,7 +746,6 @@ pub fn big_chunk(stack: &mut NockStack, sample: Noun) -> Result {
     let max_constraint_degree = get_max_constraint_degree(stack, cd_pre)?;
 
     //     =/  tworow-trace-polys-eval=(list bpoly)  (make-tworow-trace-polys-eval tworow-trace-polys max-constraint-degree (roll heights max))
-
     let tworow_trace_polys_eval = {
         let max_height = HoonList::try_from(heights)?
             .map(|v| v.as_atom().unwrap().as_u64().unwrap())
@@ -937,12 +962,12 @@ pub fn big_chunk(stack: &mut NockStack, sample: Noun) -> Result {
     };
 
     //     [[deep-codeword commitments] proof]
-    let dcc = T(stack, &[deep_codeword, commitments]);
-    Ok(T(stack, &[dcc, proof]))
+    let head = T(stack, &[deep_codeword, commitments]);
+    Ok(T(stack, &[head, proof]))
 }
 
 pub fn augment_challenges(stack: &mut NockStack, sample: Noun) -> Result {
-    const NUM_CHALS: usize = 78; // (lent chal-names-basic)
+    const NUM_CHALS: usize = (14 + 12) * 3; // (lent chal-names-basic)
     let [raw_chals_noun, sf] = sample.uncell()?;
     let [s, _f] = sf.uncell()?;
 
@@ -974,4 +999,257 @@ pub fn augment_challenges(stack: &mut NockStack, sample: Noun) -> Result {
 
     let augmented_list = augmented.to_noun(stack);
     init_bpoly_bridge(stack, augmented_list)
+}
+
+pub fn medium_chunk(stack: &mut NockStack, sample: Noun) -> Result {
+    // |=  $:  =proof
+    //         base-tables=(list table-dat)
+    //         table-exts=(list table-mary)
+    //         fri-domain-len=@
+    //         chals-rd1=(list belt)
+    //         num-chals-rd2=@
+    //         return=fock-return
+    //         s=*
+    //         f=*
+    //     ==
+    let [proof, base_tables, table_exts, fri_domain_len, chals_rd1, num_chals_rd2, ret, s, f] =
+        sample.uncell()?;
+
+    // =/  ext-tables  (weld-table-marys base-tables table-exts)
+    let ext_tables = {
+        let sub_sam = T(stack, &[base_tables, table_exts]);
+        weld_table_marys(stack, sub_sam)?
+    };
+
+    // =/  ext=codeword-commitments
+    //   =/  [ext-marys=(list mary) width=@]  (ext-mary table-exts)
+    //   (compute-codeword-commitments ext-marys fri-domain-len width)
+    let ext = {
+        let [ext_marys, width] = ext_mary(stack, table_exts)?.uncell()?;
+        let sub_sam = T(stack, &[ext_marys, fri_domain_len, width]);
+        compute_codeword_commitments_sam(stack, sub_sam)?
+    };
+
+    // =.  proof  (~(push proof-stream proof) [%m-root h.q.merk-heap.ext])
+    let m_root = {
+        let [_, _, ext_merk] = ext.uncell()?;
+        let [_, ext_merk_heap] = ext_merk.uncell()?;
+        let [ext_merk_root, _] = ext_merk_heap.uncell()?;
+        ProofData::MRoot(digest(ext_merk_root)?)
+    };
+    let mut proof = Proof::try_from(proof)?;
+    proof.push(m_root);
+    let proof = proof.to_noun(stack);
+
+    // =/  challenges  (weld chals-rd1 (make-chals proof num-chals-rd2))
+    let challenges = {
+        let sub_sam = T(stack, &[proof, num_chals_rd2]);
+        let chals_rd2 = make_chals(stack, sub_sam)?;
+        weld(stack, chals_rd1, chals_rd2)?
+    };
+
+    // =/  table-mega-exts=(list table-mary)  (build-mega-extend ext-tables challenges return)
+    let table_mega_exts = {
+        let sub_sam = T(stack, &[ext_tables, challenges, ret]);
+        build_mega_extend_v2(stack, sub_sam)?
+    };
+
+    // =/  all-tables  (weld-table-marys ext-tables table-mega-exts)
+    let all_tables = {
+        let sub_sam = T(stack, &[ext_tables, table_mega_exts]);
+        weld_table_marys(stack, sub_sam)?
+    };
+
+    // =/  mega-ext=codeword-commitments
+    //   =/  [mega-ext-marys=(list mary) width=@]  (mega-ext-mary table-mega-exts)
+    //   (compute-codeword-commitments mega-ext-marys fri-domain-len width)
+    let mega_ext = {
+        let [mega_ext_marys, width] = mega_ext_mary(stack, table_mega_exts)?.uncell()?;
+        let sub_sam = T(stack, &[mega_ext_marys, fri_domain_len, width]);
+        compute_codeword_commitments_sam(stack, sub_sam)?
+    };
+
+    // =/  augmented-chals=bpoly  (augment-challenges:chal challenges s f)
+    let augmented_chals = {
+        let sub_sam = T(stack, &[challenges, s, f]);
+        augment_challenges(stack, sub_sam)?
+    };
+
+    // [[ext mega-ext all-tables augmented-chals] proof]
+    let head = T(stack, &[ext, mega_ext, all_tables, augmented_chals]);
+    Ok(T(stack, &[head, proof]))
+}
+
+pub fn make_table_exts_v2(stack: &mut NockStack, sample: Noun) -> Result {
+    let [tables, chals, ret] = sample.uncell()?;
+
+    let extend_funcs = &[
+        zkvm_jetpack::jets::memory_table_jets_v2::memory_v2_extend_sam,
+        zkvm_jetpack::jets::compute_table_jets_v2::compute_v2_extend_sam,
+    ];
+
+    let tables = HoonList::try_from(tables)?;
+    assert_eq!(tables.count(), extend_funcs.len());
+
+    let mut res = Vec::with_capacity(tables.count());
+    for (t, extend) in tables.zip(extend_funcs.iter()) {
+        let [table_mary, _, _] = t.uncell()?;
+
+        let sam = T(stack, &[table_mary, chals, ret]);
+        res.push(extend(stack, sam)?);
+    }
+
+    Ok(res.to_noun(stack))
+}
+
+pub fn make_dyn_list_v2(stack: &mut NockStack, tables: Noun) -> Result {
+    let terminal_funcs = &[
+        zkvm_jetpack::jets::memory_table_jets_v2::memory_v2_terminal_sam,
+        zkvm_jetpack::jets::compute_table_jets_v2::compute_v2_terminal_sam,
+    ];
+
+    let tables = HoonList::try_from(tables)?;
+    assert_eq!(tables.count(), terminal_funcs.len());
+
+    let mut res = Vec::with_capacity(tables.count());
+    for (t, terminal) in tables.zip(terminal_funcs.iter()) {
+        let [table_mary, _, _] = t.uncell()?;
+        res.push(terminal(stack, table_mary)?);
+    }
+
+    Ok(res.to_noun(stack))
+}
+
+pub fn giant_chunk_v2(stack: &mut NockStack, sample: Noun) -> Result {
+    // |=  $:  =proof
+    //         pre=preprocess-data
+    //         base-tables=(list table-dat)
+    //         return=fock-return
+    //         s=*
+    //         f=*
+    //     ==
+    let [proof, pre, base_tables, ret, s, f] = sample.uncell()?;
+
+    // =/  heights  (table-heights base-tables)
+    let heights = table_heights(stack, base_tables)?;
+
+    // =.  proof  (~(push proof-stream proof) [%heights heights])
+    let proof = {
+        let mut proof = Proof::try_from(proof)?;
+        proof.push(ProofData::Heights(heights.clone()));
+        proof.to_noun(stack)
+    };
+
+    // =/  fri-domain-len=@  ~(fri-domain-len calc heights cd.pre)
+    let fri_domain_len = {
+        let max_height = HoonList::try_from(heights.clone())?
+            .map(|v| v.as_atom().unwrap().as_u64().unwrap())
+            .max()
+            .unwrap();
+        let max_padded_height = 1 << xeb((max_height - 1) as usize);
+        let expand_factor = 1 << 6;
+        D(max_padded_height * expand_factor)
+    };
+
+    // =/  base=codeword-commitments
+    //   =/  [base-marys=(list mary) width=@]  (bas-mary base-tables)
+    //   (compute-codeword-commitments base-marys fri-domain-len width)
+    let base = {
+        let [base_marys, width] = bas_mary(stack, base_tables)?.uncell()?;
+        let sub_sam = T(stack, &[base_marys, fri_domain_len, width]);
+        compute_codeword_commitments_sam(stack, sub_sam)?
+    };
+
+    // =.  proof  (~(push proof-stream proof) [%m-root h.q.merk-heap.base])
+    let proof = {
+        let m_root = {
+            let [_, _, base_merk] = base.uncell()?;
+            let [_, base_merk_heap] = base_merk.uncell()?;
+            let [base_merk_root, _] = base_merk_heap.uncell()?;
+            ProofData::MRoot(digest(base_merk_root)?)
+        };
+        let mut proof = Proof::try_from(proof)?;
+        proof.push(m_root);
+        proof.to_noun(stack)
+    };
+
+    // =/  chals-rd1=(list belt)  (make-chals proof num-chals-rd1:chal)
+    let chals_rd1 = {
+        let num_chals_rd1 = D(14 * 3); // (lent chal-names-rd1)
+        let sub_sam = T(stack, &[proof, num_chals_rd1]);
+        make_chals(stack, sub_sam)?
+    };
+
+    // =/  table-exts=(list table-mary)  (make-table-exts base-tables chals-rd1 return)
+    let table_exts = {
+        let sub_sam = T(stack, &[base_tables, chals_rd1, ret]);
+        make_table_exts_v2(stack, sub_sam)?
+    };
+
+    // =^  [ext=codeword-commitments mega-ext=codeword-commitments all-tables=(list table-dat) augmented-chals=bpoly]  proof
+    //   %-  medium-chunk
+    //   :*  proof
+    //       base-tables
+    //       table-exts
+    //       fri-domain-len
+    //       chals-rd1
+    //       num-chals-rd2:chal
+    //       return
+    //       s
+    //       f
+    //   ==
+    let [ext, mega_ext, all_tables, augmented_chals, proof] = {
+        let num_chals_rd2 = D(12 * 3); // (lent chal-names-rd2)
+        let sub_sam = T(
+            stack,
+            &[
+                proof, base_tables, table_exts, fri_domain_len, chals_rd1, num_chals_rd2, ret, s, f,
+            ],
+        );
+        let [head, proof] = medium_chunk(stack, sub_sam)?.uncell()?;
+        let [ext, mega_ext, all_tables, augmented_chals] = head.uncell()?;
+        [ext, mega_ext, all_tables, augmented_chals, proof]
+    };
+
+    // =/  dyn-list=(list bpoly)  (make-dyn-list all-tables)
+    let dyn_list = make_dyn_list_v2(stack, all_tables)?;
+
+    // =.  proof  (~(push proof-stream proof) terms+(weld-terminals dyn-list))
+    let proof = {
+        let terminals = weld_terminals(stack, dyn_list.clone())?;
+        let terminals = BPolyVec::try_from(terminals)?;
+        let mut proof = Proof::try_from(proof)?;
+        proof.push(ProofData::Terms(terminals));
+        proof.to_noun(stack)
+    };
+
+    // =^  [deep-codeword=fpoly commitments=(list codeword-commitments)]  proof
+    //   %-  big-chunk
+    //   :*  proof
+    //       base
+    //       ext
+    //       mega-ext
+    //       pre
+    //       all-tables
+    //       heights
+    //       augmented-chals
+    //       dyn-list
+    //       fri-domain-len
+    //   ==
+    let [deep_codeword, commitments, proof] = {
+        let sub_sam = T(
+            stack,
+            &[
+                proof, base, ext, mega_ext, pre, all_tables, heights, augmented_chals, dyn_list,
+                fri_domain_len,
+            ],
+        );
+        let [head, proof] = big_chunk(stack, sub_sam)?.uncell()?;
+        let [deep_codeword, commitments] = head.uncell()?;
+        [deep_codeword, commitments, proof]
+    };
+
+    // [[heights deep-codeword commitments] proof]
+    let head = T(stack, &[heights, deep_codeword, commitments]);
+    Ok(T(stack, &[head, proof]))
 }
