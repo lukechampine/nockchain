@@ -14,11 +14,11 @@ use nockchain_math::structs::{HoonList, HoonMap, HoonMapIter};
 use nockvm::jets::util::{slot, BAIL_FAIL};
 use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
-use nockvm::noun::{IndirectAtom, Noun, D, NO, T, YES};
+use nockvm::noun::{IndirectAtom, Noun, D, T};
 use noun_serde::NounEncode;
 use zkvm_jetpack::form::gen_trace::build_tree_data;
 use zkvm_jetpack::form::poly::Poly;
-use zkvm_jetpack::jets::bp_jets::{init_bpoly, init_bpoly_bridge};
+use zkvm_jetpack::jets::bp_jets::init_bpoly_bridge;
 use zkvm_jetpack::jets::fp_jets::{coseword_sam, init_fpoly_bridge};
 use zkvm_jetpack::jets::mary_jets::{snag_as_bpoly, snag_as_digest, snag_one, transpose_bpolys};
 
@@ -30,7 +30,7 @@ use crate::eight::{
 };
 use crate::engine::Engine;
 use crate::four::{absorb_proof_objects_impl, digest, Proof, ProofData};
-use crate::one::{bp_decompose, weld_marys_step, G};
+use crate::one::{weld_marys_step, G};
 use crate::seven::height_mary;
 use crate::three::bp_build_merk_heap;
 use crate::utils::xeb;
@@ -97,7 +97,7 @@ fn make_composition_poly(
     challenges: BPolySlice,
     dyn_list: &Vec<BPolySlice>,
     is_extra: bool,
-) -> Result {
+) -> std::result::Result<BPolyVec, JetErr> {
     let weights_vec: Vec<Noun> = {
         let num_tables = heights.len();
         let mut num_constraints = 0usize;
@@ -292,20 +292,14 @@ fn make_composition_poly(
         padd_in_place(&mut acc.0, &row_result);
     }
 
-    let acc: BPolyVec = acc.into();
-
-    let (ret, handle) = new_handle_mut_slice(stack, Some(acc.len()));
-    handle.copy_from_slice(&acc.0);
-    let ret = finalize_poly(stack, Some(acc.len()), ret);
-
-    Ok(ret)
+    Ok(acc.into())
 }
 
 fn make_trace_evals(
     stack: &mut NockStack,
     tworow_trace_polys: Noun,
     eval_point: Felt,
-) -> std::result::Result<Noun, JetErr> {
+) -> std::result::Result<FPolyVec, JetErr> {
     let marys = HoonList::try_from(tworow_trace_polys)?;
     let mut polys = vec![];
     for mary in marys {
@@ -317,13 +311,7 @@ fn make_trace_evals(
             polys.push(bpeval_lift(b, eval_point));
         }
     }
-
-    let (res, res_poly): (IndirectAtom, &mut [Felt]) =
-        new_handle_mut_slice(stack, Some(polys.len()));
-    for (i, felt) in polys.iter().enumerate() {
-        res_poly[i] = *felt;
-    }
-    Ok(finalize_poly(stack, Some(res_poly.len()), res))
+    Ok(PolyVec(polys))
 }
 
 fn build_merk_proof(stack: &mut NockStack, m: Noun, axis: u64) -> Result {
@@ -377,6 +365,7 @@ pub fn giant_chunk_v2(stack: &mut NockStack, sample: Noun) -> Result {
     //     ==
     let [proof, pre, base_tables, ret, s, f] = sample.uncell()?;
     let base_tables = HoonList::try_from(base_tables)?.collect::<Vec<Noun>>();
+
     _ = f; // NOTE: unused!
 
     // =/  heights  (table-heights base-tables)
@@ -384,8 +373,7 @@ pub fn giant_chunk_v2(stack: &mut NockStack, sample: Noun) -> Result {
         let mut heights = Vec::with_capacity(base_tables.len());
         for t in &base_tables {
             // extract mary len without decoding everything
-            let mary = t.as_cell()?.head().as_cell()?.tail();
-            let mary_len = slot(mary, 6)?.as_atom()?.as_u64()?;
+            let mary_len = slot(*t, 0b10110)?.as_atom()?.as_u64()?;
             let height = if mary_len == 0 {
                 0
             } else {
@@ -403,7 +391,7 @@ pub fn giant_chunk_v2(stack: &mut NockStack, sample: Noun) -> Result {
     proof.push(ProofData::Heights(heights.to_noun(stack)));
 
     // =/  fri-domain-len=@  ~(fri-domain-len calc heights cd.pre)
-    let fri_domain_len: u64 = max_padded_height << 6;
+    let fri_domain_len = max_padded_height << 6;
 
     // =/  base=codeword-commitments
     //   =/  [base-marys=(list mary) width=@]  (bas-mary base-tables)
@@ -415,13 +403,7 @@ pub fn giant_chunk_v2(stack: &mut NockStack, sample: Noun) -> Result {
     };
 
     // =.  proof  (~(push proof-stream proof) [%m-root h.q.merk-heap.base])
-    let m_root = {
-        let [_, _, base_merk] = base.uncell()?;
-        let [_, base_merk_heap] = base_merk.uncell()?;
-        let [base_merk_root, _] = base_merk_heap.uncell()?;
-        ProofData::MRoot(digest(base_merk_root)?)
-    };
-    proof.push(m_root);
+    proof.push(ProofData::MRoot(digest(slot(base, 0b11110)?)?));
 
     // =/  chals-rd1=(list belt)  (make-chals proof num-chals-rd1:chal)
     let chals_rd1 = absorb_proof_objects_impl(&proof.objects, &proof.hashes).belts(14 * 3); // (lent chal-names-rd1))
@@ -471,13 +453,7 @@ pub fn giant_chunk_v2(stack: &mut NockStack, sample: Noun) -> Result {
     };
 
     // =.  proof  (~(push proof-stream proof) [%m-root h.q.merk-heap.ext])
-    let m_root = {
-        let [_, _, ext_merk] = ext.uncell()?;
-        let [_, ext_merk_heap] = ext_merk.uncell()?;
-        let [ext_merk_root, _] = ext_merk_heap.uncell()?;
-        ProofData::MRoot(digest(ext_merk_root)?)
-    };
-    proof.push(m_root);
+    proof.push(ProofData::MRoot(digest(slot(ext, 0b11110)?)?));
 
     // =/  challenges  (weld chals-rd1 (make-chals proof num-chals-rd2))
     let challenges = {
@@ -714,15 +690,12 @@ pub fn giant_chunk_v2(stack: &mut NockStack, sample: Noun) -> Result {
                 .max(transition)
                 .max(terminal);
         }
-
-        D(max_degree)
+        max_degree
     };
 
     //     =/  tworow-trace-polys-eval=(list bpoly)  (make-tworow-trace-polys-eval tworow-trace-polys max-constraint-degree (roll heights max))
     let tworow_trace_polys_eval = {
         let tworow_trace_polys = HoonList::try_from(tworow_trace_polys)?;
-        let max_constraint_degree = max_constraint_degree.as_atom()?.as_u64()?;
-
         if max_constraint_degree == 0 || max_height == 0 {
             return Err(BAIL_FAIL);
         }
@@ -770,15 +743,11 @@ pub fn giant_chunk_v2(stack: &mut NockStack, sample: Noun) -> Result {
     //           dyn-list
     //           %.y
     //       ==
-    let extra_composition_poly = {
-        make_composition_poly(
-            stack, &proof, omicrons_bpoly, &heights, &tworow_trace_polys_eval, constraint_map_pre,
-            count_map_pre, augmented_chals, &dyn_list, true,
-        )?
-    };
-
     //     =.  proof  (~(push proof-stream proof) [%poly extra-composition-poly])
-    proof.push(ProofData::Poly(BPolyVec::try_from(extra_composition_poly)?));
+    proof.push(ProofData::Poly(make_composition_poly(
+        stack, &proof, omicrons_bpoly, &heights, &tworow_trace_polys_eval, constraint_map_pre,
+        count_map_pre, augmented_chals, &dyn_list, true,
+    )?));
 
     //     =/  extra-comp-eval-point=felt
     //         =/  rng  ~(prover-fiat-shamir proof-stream proof)
@@ -791,9 +760,7 @@ pub fn giant_chunk_v2(stack: &mut NockStack, sample: Noun) -> Result {
         make_trace_evals(stack, tworow_trace_polys, extra_comp_eval_point)?;
 
     //     =.  proof  (~(push proof-stream proof) [%evals extra-trace-evaluations])
-    proof.push(ProofData::Evals(FPolyVec::try_from(
-        extra_trace_evaluations,
-    )?));
+    proof.push(ProofData::Evals(extra_trace_evaluations.clone()));
 
     //     =.  proof  (~(push proof-stream proof) [%m-root h.q.merk-heap.mega-ext])
     let m_root = {
@@ -823,27 +790,24 @@ pub fn giant_chunk_v2(stack: &mut NockStack, sample: Noun) -> Result {
             stack, &proof, omicrons_bpoly, &heights, &tworow_trace_polys_eval, constraint_map_pre,
             count_map_pre, augmented_chals, &dyn_list, false,
         )?;
-
-        let sub_sam = T(stack, &[composition_poly, max_constraint_degree]);
-        bp_decompose(stack, sub_sam)?
+        p_decompose(
+            PolySlice(composition_poly.data()),
+            max_constraint_degree as usize,
+        )
     };
 
     //     =/  composition-codeword-array=mary  (transpose-bpolys (make-composition-codewords composition-pieces fri-domain-len))
     let composition_codeword_array = {
-        let composition_pieces = HoonList::try_from(composition_pieces)?;
-
         let root = Belt(fri_domain_len as u64)
             .ordered_root()
             .map_err(|_| BAIL_FAIL)?;
 
         let step = fri_domain_len as usize;
-        let (ret, mary) = new_handle_mut_mary(stack, step, composition_pieces.count());
+        let (ret, mary) = new_handle_mut_mary(stack, step, composition_pieces.len());
         let mut offset = 0;
 
-        for piece in composition_pieces {
-            let piece = BPolySlice::try_from(piece).map_err(|_| BAIL_FAIL)?;
-
-            let codeword = bp_coseword(piece.0, &G, fri_domain_len as u32, &root);
+        for piece in &composition_pieces {
+            let codeword = bp_coseword(piece, &G, fri_domain_len as u32, &root);
             if codeword.len() != step {
                 return Err(BAIL_FAIL);
             }
@@ -852,7 +816,7 @@ pub fn giant_chunk_v2(stack: &mut NockStack, sample: Noun) -> Result {
             }
             offset += step;
         }
-        let codewords = finalize_mary(stack, step, composition_pieces.count(), ret);
+        let codewords = finalize_mary(stack, step, composition_pieces.len(), ret);
         let codewords = MarySlice::try_from(codewords).map_err(|_| BAIL_FAIL)?;
         transpose_bpolys(stack, codewords)?
     };
@@ -863,10 +827,7 @@ pub fn giant_chunk_v2(stack: &mut NockStack, sample: Noun) -> Result {
     //     =.  proof  (~(push proof-stream proof) [%comp-m h.q.composition-merk max-constraint-degree])
     let comp_m = {
         let [_, comp_heap] = composition_merk.uncell()?;
-        ProofData::CompM(
-            digest(comp_heap.as_cell()?.head())?,
-            max_constraint_degree.as_atom()?.as_u64()?,
-        )
+        ProofData::CompM(digest(comp_heap.as_cell()?.head())?, max_constraint_degree)
     };
     proof.push(comp_m);
 
@@ -890,10 +851,9 @@ pub fn giant_chunk_v2(stack: &mut NockStack, sample: Noun) -> Result {
 
     //     =/  composition-pieces-fpoly  (turn composition-pieces bpoly-to-fpoly)
     let composition_pieces_fpoly = {
-        let composition_pieces = HoonList::try_from(composition_pieces)?;
-        let mut fpolys = Vec::with_capacity(composition_pieces.count());
-        for piece in composition_pieces {
-            fpolys.push(bpoly_to_fpoly(BPolySlice::try_from(piece)?));
+        let mut fpolys = Vec::with_capacity(composition_pieces.len());
+        for piece in &composition_pieces {
+            fpolys.push(bpoly_to_fpoly(PolySlice(piece.data())));
         }
         fpolys.to_noun(stack)
     };
@@ -919,7 +879,7 @@ pub fn giant_chunk_v2(stack: &mut NockStack, sample: Noun) -> Result {
     };
 
     //     =.  proof  (~(push proof-stream proof) [%evals trace-evaluations])
-    proof.push(ProofData::Evals(FPolyVec::try_from(trace_evaluations)?));
+    proof.push(ProofData::Evals(trace_evaluations.clone()));
 
     //     =.  proof  (~(push proof-stream proof) [%evals composition-piece-evaluations])
     proof.push(ProofData::Evals(FPolyVec::try_from(
@@ -941,22 +901,14 @@ pub fn giant_chunk_v2(stack: &mut NockStack, sample: Noun) -> Result {
     //       (coseword deep-poly (lift g) fri-domain-len)
     let deep_codeword = {
         let evals = {
-            //  (~(weld fop trace-evaluations) extra-trace-evaluations)
-            let mary1 =
-                MarySlice::try_from(T(stack, &[D(3), trace_evaluations])).map_err(|_| BAIL_FAIL)?;
-            let mary2 = MarySlice::try_from(T(stack, &[D(3), extra_trace_evaluations]))
-                .map_err(|_| BAIL_FAIL)?;
-            let res_len = (mary1.len + mary2.len) as usize;
-            let (res, res_poly): (IndirectAtom, MarySliceMut) =
-                new_handle_mut_mary(stack, 3, res_len);
-            mary_weld(mary1, mary2, res_poly);
-            let mary = finalize_mary(stack, 3, res_len, res);
-            mary.as_cell()?.tail() // strip step
+            let mut evals =
+                Vec::with_capacity(trace_evaluations.len() + extra_trace_evaluations.len());
+            evals.extend_from_slice(trace_evaluations.data());
+            evals.extend_from_slice(extra_trace_evaluations.data());
+            PolyVec(evals)
         };
 
         let deep_weights = {
-            let max_constraint_degree = max_constraint_degree.as_atom()?.as_u64()?;
-
             let total_cols: u64 = all_tables
                 .into_iter()
                 .map(|t| {
@@ -974,6 +926,7 @@ pub fn giant_chunk_v2(stack: &mut NockStack, sample: Noun) -> Result {
         };
 
         let deep_poly = {
+            let evals = evals.to_noun(stack);
             let deep_challenge = deep_challenge.to_noun(stack);
             let eval_point = extra_comp_eval_point.to_noun(stack);
             let sub_sam = T(
