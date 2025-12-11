@@ -219,8 +219,7 @@ sam_jet! {
     precompute_ntts_jet => precompute_ntts,
     turn_coseword_jet => turn_coseword,
     pad_jet => pad,
-    prove_fri_door_jet => prove_fri_door 'raw 'jam 'create_jam_dir,
-    prove_commit_jet => prove_commit 'raw,// 'jam 'create_jam_dir,
+    prove_fri_door_jet => prove_fri_door 'raw 'log,
     //absorb_proof_objects_jet => absorb_proof_objects //'jam 'create_jam_dir,
     zby_key_jet => zby_key 'raw,
     tog_belts_jet => tog_belts 'raw,
@@ -794,48 +793,26 @@ pub const NBX_FIVE_JETS: &[HotEntry] = &[(
     pstack_push_all_jet,
 )];
 
-pub const NBX_SIX_JETS: &[HotEntry] = &[
-    /*(
-        &[
-            K_138,
-            jet_str!(b"one"),
-            jet_str!(b"two"),
-            jet_str!(b"tri"),
-            jet_str!(b"qua"),
-            jet_str!(b"pen"),
-            jet_str!(b"zeke"),
-            jet_str!(b"ext-field"),
-            jet_str!(b"misc-lib"),
-            jet_str!(b"proof-lib"),
-            jet_str!(b"utils"),
-            jet_str!(b"fri"),
-            jet_str!(b"fri-door"),
-            jet_str!(b"prove"),
-        ],
-        1,
-        prove_fri_door_jet,
-    ),*/
-    (
-        &[
-            K_138,
-            jet_str!(b"one"),
-            jet_str!(b"two"),
-            jet_str!(b"tri"),
-            jet_str!(b"qua"),
-            jet_str!(b"pen"),
-            jet_str!(b"zeke"),
-            jet_str!(b"ext-field"),
-            jet_str!(b"misc-lib"),
-            jet_str!(b"proof-lib"),
-            jet_str!(b"utils"),
-            jet_str!(b"fri"),
-            jet_str!(b"fri-door"),
-            jet_str!(b"prove-commit"),
-        ],
-        1,
-        prove_commit_jet,
-    ),
-];
+pub const NBX_SIX_JETS: &[HotEntry] = &[(
+    &[
+        K_138,
+        jet_str!(b"one"),
+        jet_str!(b"two"),
+        jet_str!(b"tri"),
+        jet_str!(b"qua"),
+        jet_str!(b"pen"),
+        jet_str!(b"zeke"),
+        jet_str!(b"ext-field"),
+        jet_str!(b"misc-lib"),
+        jet_str!(b"proof-lib"),
+        jet_str!(b"utils"),
+        jet_str!(b"fri"),
+        jet_str!(b"fri-door"),
+        jet_str!(b"prove"),
+    ],
+    1,
+    prove_fri_door_jet,
+)];
 
 pub const NBX_EIGHT_JETS: &[HotEntry] = &[
     (

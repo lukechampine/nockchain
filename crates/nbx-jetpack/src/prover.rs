@@ -32,7 +32,7 @@ use crate::engine::Engine;
 use crate::four::{absorb_proof_objects_impl, digest, Proof, ProofData};
 use crate::one::{weld_marys_step, G};
 use crate::seven::height_mary;
-use crate::three::bp_build_merk_heap;
+use crate::three::{bp_build_merk_heap, build_merk_proof};
 use crate::utils::xeb;
 
 fn collect_marys(
@@ -312,22 +312,6 @@ fn make_trace_evals(
         }
     }
     Ok(PolyVec(polys))
-}
-
-fn build_merk_proof(stack: &mut NockStack, m: Noun, axis: u64) -> Result {
-    if axis == 0 {
-        return Err(BAIL_FAIL);
-    }
-    fn rec(stack: &mut NockStack, merk_heap: Noun, axis: u64) -> Result {
-        if axis == 0 {
-            return Ok(D(0));
-        }
-        let sibling = if axis % 2 == 1 { axis + 1 } else { axis - 1 };
-        let sibling_digest = snag_as_digest(stack, merk_heap, sibling as usize)?;
-        let rest = rec(stack, merk_heap, (axis - 1) / 2)?;
-        Ok(T(stack, &[sibling_digest, rest]))
-    }
-    rec(stack, m, axis - 1)
 }
 
 pub fn add_commitments(stack: &mut NockStack, sample: Noun) -> Result {
