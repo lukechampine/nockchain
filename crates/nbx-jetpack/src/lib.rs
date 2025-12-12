@@ -237,8 +237,7 @@ sam_jet! {
     bp_shift_by_unity_jet => bp_shift_by_unity_sam,
     sort_jet => list_sort 'raw,
 
-    add_commitments_jet => add_commitments,
-    giant_chunk_jet => giant_chunk_v2 'log,
+    final_chunk_jet => final_chunk_v2 'log,
 }
 
 const ENC_KEY: u32 = obfstr::random!(u32, "key");
@@ -1076,60 +1075,32 @@ pub const NBX_HOON_JETS: &[HotEntry] = &[(
     sort_jet,
 )];
 
-pub const NBX_PROVER_JETS: &[HotEntry] = &[
-    (
-        &[
-            K_138,
-            jet_str!(b"one"),
-            jet_str!(b"two"),
-            jet_str!(b"tri"),
-            jet_str!(b"qua"),
-            jet_str!(b"pen"),
-            jet_str!(b"zeke"),
-            jet_str!(b"ext-field"),
-            jet_str!(b"misc-lib"),
-            jet_str!(b"proof-lib"),
-            jet_str!(b"utils"),
-            jet_str!(b"fri"),
-            jet_str!(b"table-lib"),
-            jet_str!(b"stark-core"),
-            jet_str!(b"fock-core"),
-            jet_str!(b"pow"),
-            jet_str!(b"stark-engine"),
-            jet_str!(b"stark-prover"),
-            jet_str!(b"prove-door"),
-            jet_str!(b"add-commitments"),
-        ],
-        1,
-        add_commitments_jet,
-    ),
-    (
-        &[
-            K_138,
-            jet_str!(b"one"),
-            jet_str!(b"two"),
-            jet_str!(b"tri"),
-            jet_str!(b"qua"),
-            jet_str!(b"pen"),
-            jet_str!(b"zeke"),
-            jet_str!(b"ext-field"),
-            jet_str!(b"misc-lib"),
-            jet_str!(b"proof-lib"),
-            jet_str!(b"utils"),
-            jet_str!(b"fri"),
-            jet_str!(b"table-lib"),
-            jet_str!(b"stark-core"),
-            jet_str!(b"fock-core"),
-            jet_str!(b"pow"),
-            jet_str!(b"stark-engine"),
-            jet_str!(b"stark-prover"),
-            jet_str!(b"prove-door"),
-            jet_str!(b"giant-chunk"),
-        ],
-        1,
-        giant_chunk_jet,
-    ),
-];
+pub const NBX_PROVER_JETS: &[HotEntry] = &[(
+    &[
+        K_138,
+        jet_str!(b"one"),
+        jet_str!(b"two"),
+        jet_str!(b"tri"),
+        jet_str!(b"qua"),
+        jet_str!(b"pen"),
+        jet_str!(b"zeke"),
+        jet_str!(b"ext-field"),
+        jet_str!(b"misc-lib"),
+        jet_str!(b"proof-lib"),
+        jet_str!(b"utils"),
+        jet_str!(b"fri"),
+        jet_str!(b"table-lib"),
+        jet_str!(b"stark-core"),
+        jet_str!(b"fock-core"),
+        jet_str!(b"pow"),
+        jet_str!(b"stark-engine"),
+        jet_str!(b"stark-prover"),
+        jet_str!(b"prove-door"),
+        jet_str!(b"final-chunk"),
+    ],
+    1,
+    final_chunk_jet,
+)];
 
 #[rustfmt::skip]
 pub fn nbx_jets() -> impl Iterator<Item = HotEntry> {

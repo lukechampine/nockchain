@@ -6,7 +6,7 @@ use nockchain_math::felt::{finv_, fpow, Felt};
 use nockchain_math::handle::{
     finalize_mary, finalize_poly, new_handle_mut_mary, new_handle_mut_slice,
 };
-use nockchain_math::mary::{mary_weld, MarySlice, MarySliceMut};
+use nockchain_math::mary::MarySlice;
 use nockchain_math::noun_ext::NounMathExt;
 use nockchain_math::poly::{BPolySlice, *};
 use nockchain_math::poly_ext::*;
@@ -20,7 +20,7 @@ use zkvm_jetpack::form::gen_trace::build_tree_data;
 use zkvm_jetpack::form::poly::Poly;
 use zkvm_jetpack::jets::bp_jets::init_bpoly_bridge;
 use zkvm_jetpack::jets::fp_jets::{coseword_sam, init_fpoly_bridge};
-use zkvm_jetpack::jets::mary_jets::{snag_as_bpoly, snag_as_digest, snag_one, transpose_bpolys};
+use zkvm_jetpack::jets::mary_jets::{snag_as_bpoly, snag_one, transpose_bpolys};
 
 use super::substitute::SubstituteEngine;
 use super::two::*;
@@ -32,6 +32,7 @@ use crate::engine::Engine;
 use crate::four::{absorb_proof_objects_impl, digest, Proof, ProofData};
 use crate::one::{weld_marys_step, G};
 use crate::seven::height_mary;
+use crate::six::{prove_commit_impl, prove_query_impl, FriInput};
 use crate::three::{bp_build_merk_heap, build_merk_proof};
 use crate::utils::xeb;
 
@@ -314,32 +315,8 @@ fn make_trace_evals(
     Ok(PolyVec(polys))
 }
 
-pub fn add_commitments(stack: &mut NockStack, sample: Noun) -> Result {
-    let [proof, fri_indices, commitments] = sample.uncell()?;
-    let mut proof = Proof::try_from(proof)?;
-    let fri_indices = HoonList::try_from(fri_indices)?;
-    let commitments = HoonList::try_from(commitments)?;
-    for idx in fri_indices {
-        let idx = idx.as_atom()?.as_u64()?;
-        for c in commitments {
-            let [_, codewords, merk] = c.uncell()?;
-            let [i, merk_heap] = merk.uncell()?;
-            let [_, m] = merk_heap.uncell()?;
-            let i = i.as_atom()?.as_u64()?;
-
-            let mary = MarySlice::try_from(codewords).map_err(|_| BAIL_FAIL)?;
-            let snagged = snag_one(stack, codewords, idx as usize)?;
-            let arr = T(stack, &[D(mary.step as u64), snagged]);
-            let axis = (1 << (i - 1)) + idx;
-            let path = build_merk_proof(stack, m, axis)?;
-            let proof_data = ProofData::MPathBf(T(stack, &[arr, path]).try_into()?);
-            proof.push(proof_data);
-        }
-    }
-    Ok(proof.to_noun(stack))
-}
-
-pub fn giant_chunk_v2(stack: &mut NockStack, sample: Noun) -> Result {
+pub fn final_chunk_v2(stack: &mut NockStack, sample: Noun) -> Result {
+    // ~/  %final-chunk
     // |=  $:  =proof
     //         pre=preprocess-data
     //         base-tables=(list table-dat)
@@ -347,6 +324,11 @@ pub fn giant_chunk_v2(stack: &mut NockStack, sample: Noun) -> Result {
     //         s=*
     //         f=*
     //     ==
+    // ^+  proof
+
+    // =^  [heights=(list @) deep-codeword=fpoly commitments=(list codeword-commitments)]  proof
+    //   (giant-chunk proof pre base-tables return s f)
+
     let [proof, pre, base_tables, ret, s, f] = sample.uncell()?;
     let base_tables = HoonList::try_from(base_tables)?.collect::<Vec<Noun>>();
 
@@ -934,9 +916,35 @@ pub fn giant_chunk_v2(stack: &mut NockStack, sample: Noun) -> Result {
         vec![base, ext, mega_ext, comp_commitment].to_noun(stack)
     };
 
-    // [[heights deep-codeword commitments] proof]
-    let heights = heights.to_noun(stack);
-    let head = T(stack, &[heights, deep_codeword, commitments]);
-    let proof = proof.to_noun(stack);
-    Ok(T(stack, &[head, proof]))
+    // =^  fri-indices  proof
+    //   =/  fri  ~(fri calc heights cd.pre)
+    //   (prove:fri deep-codeword proof)
+
+    let (fri_indices, mut proof) = {
+        let fri = FriInput::new(max_height);
+        let codeword = FPolySlice::try_from(deep_codeword)?;
+        let (codewords, proof) = prove_commit_impl(fri, codeword, proof)?;
+        prove_query_impl(stack, fri, codewords, proof)?
+    };
+
+    // (add-commitments proof fri-indices commitments)
+
+    let commitments = HoonList::try_from(commitments)?;
+    for idx in fri_indices {
+        for c in commitments {
+            let [_, codewords, merk] = c.uncell()?;
+            let [i, merk_heap] = merk.uncell()?;
+            let [_, m] = merk_heap.uncell()?;
+            let i = i.as_atom()?.as_u64()?;
+
+            let mary = MarySlice::try_from(codewords).map_err(|_| BAIL_FAIL)?;
+            let snagged = snag_one(stack, codewords, idx as usize)?;
+            let arr = T(stack, &[D(mary.step as u64), snagged]);
+            let axis = (1 << (i - 1)) + idx;
+            let path = build_merk_proof(stack, m, axis as u64)?;
+            let proof_data = ProofData::MPathBf(T(stack, &[arr, path]).try_into()?);
+            proof.push(proof_data);
+        }
+    }
+    Ok(proof.to_noun(stack))
 }

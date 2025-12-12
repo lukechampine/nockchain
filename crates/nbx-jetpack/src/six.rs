@@ -30,7 +30,7 @@ use crate::four::ProofPath;
 //     folding-deg=@
 // ==
 #[derive(Clone, Copy)]
-struct FriInput {
+pub struct FriInput {
     offset: Belt,
     omega: Belt,
     init_domain_len: u64,
@@ -40,6 +40,19 @@ struct FriInput {
 }
 
 impl FriInput {
+    pub fn new(max_height: u64) -> Self {
+        let expansion_fac = 1 << 6;
+        let init_domain_len = max_height.next_power_of_two() * expansion_fac;
+        Self {
+            offset: Belt(7),
+            omega: Belt(init_domain_len).ordered_root().unwrap(),
+            init_domain_len,
+            expansion_fac,
+            num_spot_checks: 50 / 6,
+            folding_deg: 8,
+        }
+    }
+
     const fn num_rounds(self) -> u64 {
         // ^-  @
         // =/  len  init-domain-len
@@ -115,7 +128,7 @@ pub struct CodewordData {
     merk: Option<(usize, MerkHeap)>,
 }
 
-fn prove_query_impl(
+pub fn prove_query_impl(
     stack: &mut NockStack,
     fri: FriInput,
     codewords: Vec<CodewordData>,
@@ -150,7 +163,7 @@ fn prove_query_impl(
     Ok((fri_indices, stream))
 }
 
-fn prove_commit_impl(
+pub fn prove_commit_impl(
     fri: FriInput,
     codeword: FPolySlice,
     mut stream: Proof,

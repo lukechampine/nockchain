@@ -122,12 +122,7 @@
     =|  =proof  ::  the proof stream
     =.  proof  (~(push proof-stream proof) [%puzzle header nonce pow-len prod])
     =/  base-tables=(list table-dat)  (build-table-dats return)
-    =^  [heights=(list @) deep-codeword=fpoly commitments=(list codeword-commitments)]  proof
-      (giant-chunk proof pre base-tables return s f)
-    =^  fri-indices  proof
-      =/  fri  ~(fri calc heights cd.pre)
-      (prove:fri deep-codeword proof)
-    =.  proof  (add-commitments proof fri-indices commitments)
+    =.  proof  (final-chunk proof pre base-tables return s f)
     ::
     ?-  version
       %0  [%& %0 objects.proof ~ 0]
@@ -574,5 +569,22 @@
           fri-domain-len
       ==
     [[heights deep-codeword commitments] proof]
+  ::
+  ++  final-chunk
+    ~/  %final-chunk
+    |=  $:  =proof
+            pre=preprocess-data
+            base-tables=(list table-dat)
+            return=fock-return
+            s=*
+            f=*
+        ==
+    ^+  proof
+    =^  [heights=(list @) deep-codeword=fpoly commitments=(list codeword-commitments)]  proof
+      (giant-chunk proof pre base-tables return s f)
+    =^  fri-indices  proof
+      =/  fri  ~(fri calc heights cd.pre)
+      (prove:fri deep-codeword proof)
+    (add-commitments proof fri-indices commitments)
   --
 --
