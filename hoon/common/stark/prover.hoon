@@ -107,7 +107,6 @@
   ::
   :: generate-proof is the main body of the prover.
   ++  generate-proof
-    :: Disabled jet hint for now, under development.
     ~/  %generate-proof
     |=  $:  version=proof-version
             header=noun-digest:tip5

@@ -388,6 +388,15 @@ pub struct Proof {
 }
 
 impl Proof {
+    pub fn new() -> Self {
+        Self {
+            version: 2,
+            objects: Vec::new(),
+            hashes: Vec::new(),
+            read_index: 0,
+        }
+    }
+
     pub fn push(&mut self, obj: ProofData) {
         // ~/  %push
         // |=  dat=proof-data

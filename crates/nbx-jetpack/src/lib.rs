@@ -237,7 +237,7 @@ sam_jet! {
     bp_shift_by_unity_jet => bp_shift_by_unity_sam,
     sort_jet => list_sort 'raw,
 
-    final_chunk_jet => final_chunk_v2 'log,
+    generate_proof_jet => generate_proof 'raw 'log,
 }
 
 const ENC_KEY: u32 = obfstr::random!(u32, "key");
@@ -1096,10 +1096,10 @@ pub const NBX_PROVER_JETS: &[HotEntry] = &[(
         jet_str!(b"stark-engine"),
         jet_str!(b"stark-prover"),
         jet_str!(b"prove-door"),
-        jet_str!(b"final-chunk"),
+        jet_str!(b"generate-proof"),
     ],
     1,
-    final_chunk_jet,
+    generate_proof_jet,
 )];
 
 #[rustfmt::skip]

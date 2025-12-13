@@ -11,10 +11,11 @@ use nockchain_math::noun_ext::NounMathExt;
 use nockchain_math::poly::{BPolySlice, *};
 use nockchain_math::poly_ext::*;
 use nockchain_math::structs::{HoonList, HoonMap, HoonMapIter};
+use nockvm::interpreter::Context;
 use nockvm::jets::util::{slot, BAIL_FAIL};
 use nockvm::jets::{JetErr, Result};
 use nockvm::mem::NockStack;
-use nockvm::noun::{IndirectAtom, Noun, D, T};
+use nockvm::noun::{IndirectAtom, Noun, D, T, YES};
 use noun_serde::NounEncode;
 use zkvm_jetpack::form::gen_trace::build_tree_data;
 use zkvm_jetpack::form::poly::Poly;
@@ -315,24 +316,55 @@ fn make_trace_evals(
     Ok(PolyVec(polys))
 }
 
-pub fn final_chunk_v2(stack: &mut NockStack, sample: Noun) -> Result {
-    // ~/  %final-chunk
-    // |=  $:  =proof
-    //         pre=preprocess-data
-    //         base-tables=(list table-dat)
-    //         return=fock-return
+pub fn generate_proof(context: &mut Context, subject: Noun) -> Result {
+    // |=  $:  version=proof-version
+    //         header=noun-digest:tip5
+    //         nonce=noun-digest:tip5
+    //         pow-len=@
     //         s=*
     //         f=*
+    //         prod=*
+    //         return=fock-return
     //     ==
-    // ^+  proof
+    let stack = &mut context.stack;
 
-    // =^  [heights=(list @) deep-codeword=fpoly commitments=(list codeword-commitments)]  proof
-    //   (giant-chunk proof pre base-tables return s f)
+    let sample = slot(subject, 6)?;
+    let pre = slot(slot(slot(subject, 7)?, 6)?, 63)?;
 
-    let [proof, pre, base_tables, ret, s, f] = sample.uncell()?;
-    let base_tables = HoonList::try_from(base_tables)?.collect::<Vec<Noun>>();
-
+    let [version, header, nonce, pow_len, s, f, prod, ret] = sample.uncell()?;
     _ = f; // NOTE: unused!
+
+    // jet only compatible with version 2
+    if version.as_atom()?.as_u64()? != 2 {
+        return Err(JetErr::Punt);
+    }
+
+    // =|  =proof  ::  the proof stream
+    // =.  proof  (~(push proof-stream proof) [%puzzle header nonce pow-len prod])
+    let mut proof = Proof::new();
+    proof.push(ProofData::Puzzle {
+        commitment: digest(header)?,
+        nonce: digest(nonce)?,
+        len: pow_len.as_atom()?.as_u64()?,
+        p: prod,
+    });
+
+    // =/  base-tables=(list table-dat)  (build-table-dats return)
+    let build_funcs = &[crate::prover_memory::build_v2, crate::prover_compute::build];
+    let pad_funcs = &[crate::prover_memory::pad, crate::prover_compute::pad];
+
+    let base_tables = {
+        let mut mem_mary = build_funcs[0](stack, ret)?;
+        let mut cpu_mary = build_funcs[1](stack, ret)?;
+        mem_mary = pad_funcs[0](stack, mem_mary)?;
+        cpu_mary = pad_funcs[1](stack, cpu_mary)?;
+
+        // TODO: for now we create the proper structure around these
+        let mem_table = T(stack, &[mem_mary, D(0), D(0)]);
+        let cpu_table = T(stack, &[cpu_mary, D(0), D(0)]);
+
+        vec![mem_table, cpu_table]
+    };
 
     // =/  heights  (table-heights base-tables)
     let heights = {
@@ -349,11 +381,11 @@ pub fn final_chunk_v2(stack: &mut NockStack, sample: Noun) -> Result {
         }
         heights
     };
+
     let max_height = *heights.iter().max().unwrap();
     let max_padded_height = max_height.next_power_of_two();
 
     // =.  proof  (~(push proof-stream proof) [%heights heights])
-    let mut proof = Proof::try_from(proof)?;
     proof.push(ProofData::Heights(heights.to_noun(stack)));
 
     // =/  fri-domain-len=@  ~(fri-domain-len calc heights cd.pre)
@@ -946,5 +978,8 @@ pub fn final_chunk_v2(stack: &mut NockStack, sample: Noun) -> Result {
             proof.push(proof_data);
         }
     }
-    Ok(proof.to_noun(stack))
+
+    let proof_noun = proof.to_noun(stack);
+    let [_, objects, _] = proof_noun.uncell()?;
+    Ok(T(stack, &[YES, D(2), objects, D(0), D(0)]))
 }
